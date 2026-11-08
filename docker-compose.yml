@@ -1,0 +1,130 @@
+# Local development stack: api, worker, beat, web, postgres, redis, storage (S3), mailpit.
+# Start it with "make dev" (which first derives .compose.env from your .env). Do not run "docker compose up"
+# directly: the Postgres credentials and container URLs come from .compose.env.
+#
+# All ports are published on 127.0.0.1 only, so nothing is reachable from other machines on your network.
+
+name: analyst-platform
+
+x-backend: &backend
+  build: ./backend
+  env_file: .env # your keys and settings
+  environment: # containers reach each other by service name, not localhost
+    DATABASE_URL: ${CONTAINER_DATABASE_URL}
+    REDIS_URL: ${CONTAINER_REDIS_URL}
+    S3_ENDPOINT: http://storage:9000
+    SMTP_HOST: mailpit
+  volumes:
+    - ./backend:/app
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    storage-init:
+      condition: service_completed_successfully
+    mailpit:
+      condition: service_started
+
+services:
+  api:
+    <<: *backend
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  worker:
+    <<: *backend
+    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=INFO
+
+  beat:
+    <<: *backend
+    command: celery -A app.tasks.celery_app:celery_app beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    environment:
+      VITE_API_BASE_URL: ${API_BASE_URL}
+    volumes:
+      - ./frontend:/app
+      - web_node_modules:/app/node_modules # keep Linux dependencies apart from your Mac's node_modules
+    command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "127.0.0.1:5173:5173"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5173/"] # IPv4: "localhost" is ::1 in alpine
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  storage: # S3-compatible object storage (RustFS; MinIO no longer publishes free images, see docs/DECISIONS.md)
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY}
+    volumes:
+      - storagedata:/data
+    ports:
+      - "127.0.0.1:9000:9000" # S3 API
+      - "127.0.0.1:9001:9001" # web console
+
+  storage-init: # one-shot: waits for storage, then creates the bucket named in S3_BUCKET
+    build: ./backend
+    env_file: .env
+    environment:
+      S3_ENDPOINT: http://storage:9000
+    restart: "no"
+    depends_on:
+      - storage
+    command: python -m app.storage
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "127.0.0.1:1025:1025" # SMTP
+      - "127.0.0.1:8025:8025" # inbox in the browser
+
+volumes:
+  pgdata:
+  redisdata:
+  storagedata:
+  web_node_modules:

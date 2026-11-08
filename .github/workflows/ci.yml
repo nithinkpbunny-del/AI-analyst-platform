@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (lint, types, tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.13.7"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Ruff (lint)
+        run: uv run ruff check --config pyproject.toml . ../eval
+      - name: Ruff (format)
+        run: uv run ruff format --check --config pyproject.toml . ../eval
+      - name: Mypy
+        run: uv run mypy
+      - name: Pytest (no real LLM, no external services)
+        run: uv run pytest
+
+  frontend:
+    name: Frontend (lint, types, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  compose-config:
+    name: docker-compose file is valid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file with placeholder variables
+        run: |
+          cp .env.example .env
+          python3 scripts/compose_env.py
+          docker compose --env-file .env --env-file .compose.env config --quiet
