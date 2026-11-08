@@ -1,0 +1,118 @@
+@import 'tailwindcss';
+@import '../../../design/generated/tokens.css';
+@import '../../../design/generated/tailwind-theme.css';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@layer base {
+  html {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 100%;
+    line-height: var(--leading-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--paper);
+  }
+
+  /* Indic scripts need more vertical room for matras and conjuncts. */
+  :lang(hi),
+  :lang(mr),
+  :lang(bn),
+  :lang(gu),
+  :lang(kn),
+  :lang(ml),
+  :lang(ta),
+  :lang(te) {
+    line-height: var(--leading-indic);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    line-height: var(--leading-heading);
+    letter-spacing: var(--tracking-display);
+    font-weight: 650;
+    margin: 0;
+  }
+
+  /* Numbers line up in columns wherever data appears. */
+  table,
+  .tabular,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--neel);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--neel-soft);
+    color: var(--ink);
+  }
+
+  a {
+    color: var(--neel);
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one orchestrated moment (BUILD_SPEC 11a.6): the haldi mark sweeps in left-to-right. */
+@keyframes haldi-sweep {
+  from {
+    transform: skewX(-8deg) scaleX(0);
+  }
+  to {
+    transform: skewX(-8deg) scaleX(1);
+  }
+}
+
+@keyframes lead-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlay-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

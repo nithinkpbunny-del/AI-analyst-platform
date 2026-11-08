@@ -6,7 +6,7 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules'] },
+  { ignores: ['dist', 'node_modules', 'storybook-static', 'playwright-report', 'test-results'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended, prettier],
     files: ['**/*.{ts,tsx}'],
@@ -22,5 +22,16 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
+  },
+  {
+    // Storybook config, stories and tests are not hot-reloaded app modules.
+    files: [
+      '.storybook/**',
+      'src/**/*.stories.tsx',
+      'src/**/*.test.tsx',
+      'src/test-utils.tsx',
+      'e2e/**',
+    ],
+    rules: { 'react-refresh/only-export-components': 'off' },
   },
 )

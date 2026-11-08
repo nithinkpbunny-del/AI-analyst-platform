@@ -48,9 +48,33 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
+      - run: npm run tokens:check
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run size
+      - run: npm run build-storybook
+
+  e2e:
+    name: Visual snapshots, accessibility, layout (Playwright)
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npx playwright test
+        env:
+          HOME: /root
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
 
   compose-config:
     name: docker-compose file is valid

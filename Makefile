@@ -7,7 +7,8 @@ RUFF_ARGS := --config pyproject.toml . ../eval
 
 .DEFAULT_GOAL := help
 .PHONY: help dev up down logs ps env test test-backend test-frontend lint lint-backend lint-frontend \
-        typecheck typecheck-backend typecheck-frontend format check migrate fixtures seed-demo eval
+        typecheck typecheck-backend typecheck-frontend format check migrate fixtures seed-demo eval \
+        tokens storybook storybook-build e2e e2e-update size
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "} {printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
@@ -56,7 +57,7 @@ lint-backend:
 	$(BACKEND) uv run ruff check $(RUFF_ARGS) && uv run ruff format --check $(RUFF_ARGS)
 
 lint-frontend:
-	cd frontend && npm run lint && npm run format:check
+	cd frontend && npm run lint && npm run format:check && npm run tokens:check
 
 typecheck: typecheck-backend typecheck-frontend ## Type checks (mypy, tsc)
 
@@ -70,7 +71,32 @@ format: ## Auto-format backend and frontend code
 	$(BACKEND) uv run ruff format $(RUFF_ARGS) && uv run ruff check --fix $(RUFF_ARGS)
 	cd frontend && npm run format
 
-check: lint typecheck test ## Everything CI runs: lint, types, tests
+check: lint typecheck test size ## Lint, types, unit tests, bundle size (run `make e2e` too for visual checks)
+
+# --- Design system ------------------------------------------------------------------------------------------------
+PLAYWRIGHT_IMAGE := mcr.microsoft.com/playwright:v1.65.0-noble
+PLAYWRIGHT_RUN := docker run --rm --ipc=host -e CI=$(CI) \
+	-v $(CURDIR)/frontend:/work -v $(CURDIR)/design:/design -v analyst_e2e_node_modules:/work/node_modules \
+	-w /work $(PLAYWRIGHT_IMAGE) sh -c
+
+tokens: ## Regenerate design/generated/ from design/tokens.json
+	node design/build.mjs
+
+storybook: ## Component workshop at http://localhost:6006
+	cd frontend && npm run storybook
+
+storybook-build: ## Build the static Storybook (frontend/storybook-static)
+	cd frontend && npm run build-storybook
+
+size: ## Check the app shell stays under 200 KB of gzipped JavaScript
+	cd frontend && npm run build && npm run size
+
+e2e: ## Visual snapshots + accessibility + layout checks (Playwright in Docker, same as CI)
+	$(PLAYWRIGHT_RUN) "npm ci --no-audit --no-fund && npx playwright test"
+
+e2e-update: ## Re-record visual snapshots after an intended design change (then review the PNGs)
+	$(PLAYWRIGHT_RUN) "npm ci --no-audit --no-fund && npx playwright test --update-snapshots"
+
 
 # --- Demo data and evaluation -------------------------------------------------------------------------------------
 fixtures: ## Generate the UrbanCart demo sources and ANSWER_KEY.md into eval/fixtures/

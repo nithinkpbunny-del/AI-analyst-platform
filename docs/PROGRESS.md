@@ -1,13 +1,13 @@
 # Progress
 
-**Next milestone: M1b: Design system + app shell** (start when the human says "continue").
-**Unfinished work:** none for M1.
+**Next milestone: M2: Auth core** (start when the human says "continue").
+**Unfinished work:** none for M1b.
 
 ## Milestone checklist (BUILD_SPEC §14)
 
 ### Phase 1: MVP
 - [x] M1: Foundation
-- [ ] M1b: Design system + app shell
+- [x] M1b: Design system + app shell
 - [ ] M2: Auth core
 - [ ] M3: 2FA, Google sign-in, devices
 - [ ] M4: Orgs, roles, invites, RLS
@@ -63,7 +63,43 @@ clean, build OK.
 **Known gaps / notes**
 - The route-test rule (401/403/404-cross-tenant) doesn't apply yet: the only routes are public health checks.
   It starts with M2/M4.
-- No Playwright, Storybook or design tokens yet (M1b).
+- Playwright, Storybook and design tokens were not part of M1 (added in M1b).
 - Starlette prints a deprecation warning about `httpx` in the test client; harmless for now.
 - Deviations and interpretations are recorded in `docs/DECISIONS.md` (D1 RustFS instead of MinIO, D6 fixture
   calibration).
+
+---
+
+## M1b: Design system + app shell (done)
+
+**Built**
+- `design/tokens.json` is the single source. `make tokens` generates the CSS variables (light/dark; follows the
+  device or a forced choice) and the Tailwind v4 theme, which removes Tailwind's defaults so only tokens can be used.
+- Self-hosted fonts: Bricolage Grotesque (display) and Noto Sans with Devanagari, Bengali, Gujarati, Kannada,
+  Malayalam, Tamil and Telugu. Indic text gets line-height 1.7.
+- Signature components: Highlight (haldi sweep, one per view), AnswerSheet, SourceMark (provenance popover),
+  QualityBanner, ProgressSteps, KpiTile (+ Sparkline), ScenarioCard (slider, range whisker, assumptions,
+  confidence), ConnectionCard, EmptyState. Primitives: Button, Popover, Slider, Sheet. Formatters: `formatINR`
+  (₹8,450 / ₹12.4 L / ₹1.24 Cr), `formatPct`, `formatNumber`, `formatRelativeTime`.
+- Storybook 10 (`make storybook`): every component in Light, Dark and Phone, plus a Foundations/Tokens page
+  (colours, type scale, all Indic scripts, radii) and the app shell. Accessibility addon included.
+- App shell: desktop sidebar (collapsible, remembered), tablet icon rail, phone bottom tabs (Today, Ask, Dashboard,
+  More sheet) with a floating Ask button. Skip link, 2 px focus ring, i18next wired (English strings in
+  `src/locales/en.ts`), TanStack Query, theme setting. Placeholder screens for all 11 nav items, each with a
+  one-sentence empty state and one action. Settings shows the theme choice and system status.
+- Checks: contrast test over every colour pair in both themes; generated-files-up-to-date check; 46 Playwright
+  baselines (11 screens × light/dark × desktop/mobile, plus the "More" sheet); axe WCAG 2.2 AA scan of every
+  screen in all 4 projects; layout checks at 375/768/1280/1536 px (no horizontal scroll, rail/sidebar/tabs, 44 px
+  touch targets); shell JS budget check (111.5 KB of 200 KB gzipped). CI runs all of it, including Playwright
+  in its Docker image.
+
+**Test status:** backend 82 passed (unchanged). Frontend: vitest 129 passed; eslint, prettier, tsc and
+tokens:check clean; build and Storybook build OK. Playwright 99 passed (29 skipped by design: phone-only and
+desktop-only checks).
+
+**Known gaps / notes**
+- During development one Playwright run had a single failure that I could not reproduce afterwards (396
+  repeated runs passed). If CI ever shows a flaky snapshot, look at the "More" sheet screenshot first.
+- Remaining shadcn primitives (Toast, Dialog, Tabs, Table, Select, DatePicker) are added with their first screen
+  (DECISIONS D11). The command palette and the `/` shortcut arrive with Ask (M8).
+- The role is fixed to Owner until auth (M2).

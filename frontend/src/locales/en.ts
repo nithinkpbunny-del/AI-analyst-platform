@@ -1,0 +1,106 @@
+// English UI strings. Hindi, Kannada and the other languages are added in Phase 2 (M15); keep every visible
+// string here so translation is a data change, not a code change.
+const en = {
+  app: { name: 'Analyst', skipToContent: 'Skip to content' },
+  nav: {
+    main: 'Main',
+    admin: 'Manage',
+    today: 'Today',
+    ask: 'Ask',
+    dashboard: 'Dashboard',
+    whatIf: 'What-if',
+    goals: 'Goals',
+    briefings: 'Briefings',
+    tasks: 'Tasks',
+    connections: 'Connections',
+    team: 'Team',
+    activity: 'Activity',
+    settings: 'Settings',
+    more: 'More',
+    collapse: 'Collapse sidebar',
+    expand: 'Expand sidebar',
+    askFab: 'Ask a question',
+  },
+  pages: {
+    today: {
+      title: 'Today',
+      intro: 'Your morning briefing, alerts and goal progress will appear here.',
+      empty: 'Connect your first data source to start asking questions.',
+      action: 'Connect data',
+    },
+    ask: {
+      title: 'Ask',
+      intro: 'Ask about your business in any Indian language or English.',
+      empty: 'Connect a data source first, then ask your first question here.',
+      action: 'Connect data',
+    },
+    dashboard: {
+      title: 'Dashboard',
+      intro: 'Answers you pin stay here as live tiles.',
+      empty: 'Pin an answer from Ask to keep it on your dashboard.',
+      action: 'Ask a question',
+    },
+    whatIf: {
+      title: 'What-if',
+      intro: 'Try a decision before you make it, using your own history.',
+      empty: 'Describe a change, such as "10% off Fashion in October", to see its likely effect.',
+      action: 'Ask a question',
+    },
+    goals: {
+      title: 'Goals',
+      intro: 'Set targets and get an early warning when you are falling short.',
+      empty: 'Set your first target to track progress every day.',
+      action: 'Ask a question',
+    },
+    briefings: {
+      title: 'Briefings',
+      intro: 'Choose when your morning briefing arrives and in which language.',
+      empty: 'Your first briefing arrives the morning after you connect data.',
+      action: 'Connect data',
+    },
+    tasks: {
+      title: 'Tasks',
+      intro: 'Long analyses run in the background and email you the report.',
+      empty: 'Ask for a detailed analysis and it will run here while you work.',
+      action: 'Ask a question',
+    },
+    connections: {
+      title: 'Connections',
+      intro: 'Your data sources. The platform only reads; it never changes your data.',
+      empty: 'Connect your first data source to start asking questions.',
+      action: 'Connect data',
+    },
+    team: {
+      title: 'Team',
+      intro: 'Invite people and choose what each person can see.',
+      empty: 'Invite a colleague as an Analyst or a Viewer.',
+      action: 'Send invite',
+    },
+    activity: {
+      title: 'Activity',
+      intro: 'Every sign-in, change and question in your workspace.',
+      empty: 'Activity appears here as soon as people start using the workspace.',
+      action: 'Ask a question',
+    },
+    settings: {
+      title: 'Settings',
+      intro: 'Organisation profile, AI plan, appearance and privacy.',
+    },
+  },
+  settings: {
+    appearance: 'Appearance',
+    theme: 'Theme',
+    themeSystem: 'Match my device',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    systemStatus: 'System status',
+    checking: 'Checking the API…',
+    unreachable: 'The API is not reachable. Start it with make dev.',
+    connected: 'API connected: version {{version}}, {{env}} environment.',
+    ready: 'Ready',
+    notReady: 'Not ready',
+  },
+  comingSoon: 'Coming in a later milestone',
+} as const
+
+export default en

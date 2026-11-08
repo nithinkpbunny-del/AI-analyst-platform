@@ -26,9 +26,12 @@ make dev                  # builds and starts everything, waits until healthy
 make check       # lint + type checks + all tests (what CI runs)
 make test        # backend (pytest) and frontend (vitest) tests
 make fixtures    # generate the UrbanCart demo data and eval/fixtures/ANSWER_KEY.md
+make storybook   # component workshop at http://localhost:6006
+make e2e         # visual snapshots + accessibility + layout checks (Playwright in Docker)
+make tokens      # regenerate design/generated/ after editing design/tokens.json
 make help        # every command
 ```
 
 ## Layout
-`backend/` FastAPI + Celery · `frontend/` React + Vite · `eval/` demo-data generator and answer key ·
+`backend/` FastAPI + Celery · `frontend/` React + Vite · `design/` design tokens · `eval/` demo-data generator and answer key ·
 `scripts/` helpers · `docs/` architecture, design, decisions, progress.
