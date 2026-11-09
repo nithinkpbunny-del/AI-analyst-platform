@@ -1,5 +1,6 @@
 """SQLAlchemy models (BUILD_SPEC section 5). Importing this package registers every table on ``Base.metadata``."""
 
+from app.models.ai import LlmKey, Secret, UsageEvent
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken, Session, UserToken
 from app.models.consent import Consent
@@ -13,13 +14,16 @@ __all__ = [
     "Consent",
     "Invitation",
     "KnownDevice",
+    "LlmKey",
     "LoginChallenge",
     "Membership",
     "Organization",
     "RefreshToken",
+    "Secret",
     "Session",
     "TwoFactor",
     "TwoFactorCode",
+    "UsageEvent",
     "User",
     "UserToken",
 ]

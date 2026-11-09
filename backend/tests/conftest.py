@@ -62,6 +62,8 @@ from app.auth import passwords  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import make_engine, make_session_factory  # noqa: E402
 from app.email.sender import MemoryEmailSender  # noqa: E402
+from app.llm.fake import FakeLLMFactory  # noqa: E402
+from app.llm.models import CATALOG  # noqa: E402
 from app.main import create_app  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -162,12 +164,21 @@ def fake_redis() -> fakeredis.FakeRedis:
 
 
 @pytest.fixture
+def llm_factory() -> Iterator[FakeLLMFactory]:
+    """Every AI provider the app talks to in tests (no real LLM calls, BUILD_SPEC 7.9)."""
+    CATALOG.clear()
+    yield FakeLLMFactory()
+    CATALOG.clear()
+
+
+@pytest.fixture
 def client(
     settings: Settings,
     session_factory: sessionmaker[Session],
     fake_redis: fakeredis.FakeRedis,
     outbox: MemoryEmailSender,
     clock: FakeClock,
+    llm_factory: FakeLLMFactory,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings,
@@ -176,6 +187,7 @@ def client(
         redis_client=fake_redis,
         email_sender=outbox,
         clock=clock,
+        llm_factory=llm_factory,
     )
     with TestClient(app, base_url="http://localhost:8000") as test_client:
         yield test_client

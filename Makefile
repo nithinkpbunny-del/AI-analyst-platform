@@ -8,7 +8,7 @@ RUFF_ARGS := --config pyproject.toml . ../eval
 .DEFAULT_GOAL := help
 .PHONY: help dev up down logs ps env test test-backend test-frontend lint lint-backend lint-frontend \
         typecheck typecheck-backend typecheck-frontend format check migrate fixtures seed-demo eval \
-        tokens storybook storybook-build e2e e2e-update size
+        tokens storybook storybook-build e2e e2e-update size llm-check
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "} {printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
@@ -103,6 +103,9 @@ fixtures: ## Generate the UrbanCart demo sources and ANSWER_KEY.md into eval/fix
 	$(BACKEND) uv run python ../eval/generate_fixtures.py
 
 seed-demo: fixtures ## Alias for fixtures (later milestones also load them into a demo workspace)
+
+llm-check: ## One real tool-calling round trip with the AI key in .env (opt-in; uses a few hundred tokens)
+	$(BACKEND) uv run python -m app.llm.check $(if $(PROVIDER),--provider $(PROVIDER),)
 
 eval: ## Golden-question evaluation against a real model (arrives in milestone M10)
 	@echo "The evaluation harness is built in milestone M10. Nothing to run yet."

@@ -452,3 +452,130 @@ a missing one.
   missing id, 422 and success, plus a check that no data from another workspace appears.
 - `tests/tenancy.py` creates people in several workspaces and gives them access tokens directly. That makes the
   matrix fast and independent of the sign-in screens, which have their own tests.
+
+## Scope change (decided by the human before M5)
+
+### D41. Multilingual support is deferred until after the core build
+- **Deferred:** multilingual answers (R11 and §7.6, originally in M8) and UI translations (originally in M15).
+  M5 to M10 do not build language detection, answers in the user's language, or translated UI strings.
+- **Until then:** the agent and briefings answer in English. The Hindi/Kannada golden questions (§7.6, §12.2)
+  are left out of the eval until the feature returns.
+- **Kept ready for later:** every piece of user-visible text in the web app goes in
+  `frontend/src/locales/en.ts` (i18next is already wired), so translation is a matter of adding locale files.
+  The existing `users.preferred_language` field and the Indic fonts from M1b stay as they are.
+- The Phase 1 eval gate (≥ 85%) is measured over the English questions only.
+
+## M5: Secrets, LLM layer, plans, usage
+
+### D42. What the Managed limit counts, and who sees usage (decided by the human)
+- The monthly limit (`organizations.monthly_question_limit`, default `MANAGED_MONTHLY_QUESTION_LIMIT` = 500)
+  counts **runs**, not LLM calls. A run is one question or one long task, however many calls it makes. Every call
+  of a run shares a `usage_events.run_id`, a column added to the BUILD_SPEC 5 table for this.
+- Only `question` and `task` runs **made with the platform's key** count. Briefings and connection checks are
+  recorded (tokens and cost) but never count. Runs on a workspace's own key never count, even if the workspace
+  switches back to Managed later that month.
+- The month is the calendar month **in the workspace's time zone**: an Indian workspace's November starts at
+  18:30 UTC on 31 October.
+- The limit is checked before a question starts (`keys.resolve`, then `usage.ensure_within_limit`). Two questions
+  started at the same moment can both pass, so a workspace may go over by one or two. That is accepted rather
+  than holding a lock across an LLM call.
+- **Owners only** see usage (`org.manage`): it sits with the plan settings. Others see only which plan is in use.
+
+### D43. Envelope encryption and the `secrets` table
+- `app/security/crypto.py` now has a `KeyWrapper` interface with two implementations:
+  - `MasterKeyWrapper`: AES-256-GCM under an HKDF key from `MASTER_KEY`. Used in development and tests.
+  - `KmsKeyWrapper`: AWS KMS `Encrypt`/`Decrypt`. Used when `KMS_KEY_ID` is set.
+- Every value gets its own data key. `secrets` stores `ciphertext`, `wrapped_dek` and `key_version` separately,
+  as BUILD_SPEC 5 lists them. `key_version` is 1 for the master key and 100 for KMS (KMS keeps its own versions
+  inside the blob), so an envelope never opens with the wrong wrapper.
+- The encryption context is `secret:{org_id}:{secret_id}:{purpose}`, and it is also the KMS encryption context.
+  A row copied into another workspace, or read for another purpose, fails to decrypt. Decryption failures fail
+  closed.
+- Workspace requests may `SELECT`, `INSERT` and `DELETE` secrets, never `UPDATE`: replacing a key writes a new
+  secret and deletes the old one. `usage_events` is `SELECT`/`INSERT` only, so usage history cannot be changed
+  from a workspace request.
+- `llm_keys.secret_ref` uses `ON DELETE NO ACTION`, not `RESTRICT`. The check runs at the end of the statement,
+  so deleting a workspace (M10) can cascade into both tables in any order. A test deletes a workspace and checks
+  that nothing is left behind.
+- TOTP secrets (M3) keep the single-blob `seal`/`unseal` format. It is now built on the same envelope code, and
+  the format is unchanged.
+
+### D44. The provider layer
+- One message model for every provider: `UserMessage`, `AssistantMessage` and `ToolResultsMessage`. An
+  `AssistantMessage` keeps the provider's original content in `raw`, which is replayed unchanged to the same
+  provider: Gemini `Content` with thought signatures (pitfall 3), and Claude content blocks including thinking.
+  Turns written by the *other* provider (after a workspace changes keys) are rewritten as plain text
+  (`portable_history`), because native tool-call structures cannot cross providers.
+- **Retries.** google-genai does not retry by default, so the Gemini adapter retries 429/500/502/503 after 5, 15
+  and 30 seconds, using the API's `retryDelay` when given (capped at 60 s). It never retries an exhausted daily
+  quota or an invalid key. Claude uses the SDK's own retries (`max_retries=3`, honours `retry-after`), and
+  nothing is added on top, so they do not multiply.
+- **Time limits** (found in the live check: one "Test AI connection" took over 6½ minutes while Google was
+  overloaded).
+  - Each request has `LLM_REQUEST_TIMEOUT_SECONDS` (default 60). google-genai also sends it to Google as the
+    server deadline.
+  - A request that used its whole time (a 504, or a timeout on our side) is not retried on the same model; the
+    next model is tried instead.
+  - Each `generate` call has `LLM_CALL_BUDGET_SECONDS` (default 150) for all its retries and fallbacks. No new
+    attempt starts after it, so the worst case is about the budget plus one request (about 3½ minutes).
+- **Models** are listed from the key and cached per key for an hour, keyed by a hash of the key (pitfall 6).
+  - The configured model (`GEMINI_DEFAULT_MODEL`, `CLAUDE_DEFAULT_MODEL`) is used when the key lists it.
+  - Otherwise the newest stable model of the preferred family is used: Gemini Flash, then Pro, then Flash-Lite;
+    Claude Opus, then Sonnet, then Haiku. Embedding, image, audio, TTS and live variants are skipped.
+- **Model fallback** (found while testing against the real API): Google keeps listing `gemini-2.5-flash` for new
+  keys but answers 404 "no longer available to new users". At the same time `gemini-3.8-flash` was overloaded
+  (503 "high demand") while older Flash models answered. So the clients try up to two other models:
+  - a refused model (404) is skipped for that key for an hour;
+  - a model that stays overloaded after the retries is skipped for 5 minutes;
+  - a model whose **per-model** daily quota is used up (Gemini free tier: 20 requests a day for
+    `gemini-3.8-flash`) is skipped until Google says it resets. A project-wide quota still stops with
+    "quota", because another model would not help;
+  - if every model fails, the last real error is reported.
+- **Claude refusal fallbacks.** For the models that support them (`claude-fable-5-1`, `claude-opus-5-5`,
+  `claude-opus-5`, `claude-sonnet-5-5`), requests use the beta `server-side-fallback-2026-07-01` with
+  `fallbacks="default"`. If a model declines for a safety reason, the API re-runs the request on a suitable model
+  in the same call. Usage is recorded against the model that answered.
+- The default Claude model is `claude-opus-5-5`, the current Opus. Its thinking cannot be turned off, and the
+  thinking counts towards `LLM_MAX_OUTPUT_TOKENS` (3,000). M8 may need a larger budget for Claude.
+
+### D45. Plans and the workspace's own key (decided by the human: switch freely)
+- Owners switch between Managed AI and their own key whenever they like (`PUT /org/ai/plan`). Switching to their
+  own key needs a saved key. Removing the key switches the workspace back to Managed AI.
+- One key per workspace (`llm_keys.org_id` is unique), for Gemini or Claude. Before it is stored, the key is
+  checked by listing the provider's models: no tokens are used. A key the provider rejects is not stored (422 on
+  the field). A provider that cannot be reached gives 502, and the key is not stored.
+- Key checks are limited to 10 per hour per workspace. Otherwise an Owner account could use the platform to test
+  stolen API keys in bulk.
+- Saving a key does not switch the plan by itself. The web app's "Save key and switch" makes both calls, so the
+  activity log has `llm.key_set` and `org.plan_changed`.
+- If the server has no platform key, `GET /org/ai` says `managed.available: false` and the screen suggests adding
+  an own key. The managed provider is the server's `LLM_DEFAULT_PROVIDER`, not a per-workspace setting.
+
+### D46. "Test AI connection" (decided by the human: Owners only)
+- `POST /org/ai/check` sends one tiny request with the key in use and returns the reply, model and tokens. It is
+  limited to 10 per hour per workspace.
+- It is recorded as usage of kind `check`. It does not count as a question and still works when the monthly
+  limit is used up, so an Owner can always test a key.
+- `make llm-check` is the command-line version: a real tool-call round trip using the key in `.env`. It writes
+  nothing to the database and never prints the key.
+
+### D47. Cost estimates
+- Costs come from a price table (`app/llm/pricing.py`, USD per million tokens, standard paid tier, short prompts).
+  The longest matching model prefix wins.
+- Sources, checked 2026-11-09: Google's pricing page (aistudio.google.com/docs/pricing) and Anthropic's model
+  list. Prices have **effective dates**, because Google has announced rises: `gemini-3.6-flash` and
+  `gemini-3.8-flash` double on 1 Jan 2027, and `gemini-4-argon` doubles on 1 Dec 2026. Each call is priced at
+  the rate of its own day, so old months keep their old prices.
+- Models not on the price list (e.g. `gemini-3.5-flash`, `gemini-3.7-flash`) get `est_cost_usd = NULL`, shown
+  as "not known for N calls", rather than a guessed price.
+- Costs are shown in US dollars because providers bill in dollars. Free-tier keys cost nothing, but the estimate
+  uses paid-tier prices.
+
+### D48. Error text and other details
+- The API keeps returning plain-English messages. The web app shows its own text from `locales/en.ts` for every
+  AI error code (`ai_invalid_key`, `ai_quota`, `ai_rate_limited`, `ai_model_not_found`, `ai_unavailable`,
+  `ai_other`, `ai_key_missing`, `ai_key_unreadable`, `ai_not_configured`, `too_many_checks`), so that later
+  translation covers them (D41). The server's message is the fallback.
+- The log redactor now also recognises Google's newer `AQ.`-style API keys, not only `AIza…` keys.
+- The two SDKs install `httpx2`, and Starlette's `TestClient` now uses it. Its stricter cookie types needed small
+  fixes in three test helpers. The "httpx is deprecated" warning noted in M1 is gone.

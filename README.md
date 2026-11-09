@@ -29,6 +29,7 @@ make fixtures    # generate the UrbanCart demo data and eval/fixtures/ANSWER_KEY
 make storybook   # component workshop at http://localhost:6006
 make e2e         # visual snapshots + accessibility + layout checks (Playwright in Docker)
 make tokens      # regenerate design/generated/ after editing design/tokens.json
+make llm-check   # one real tool-calling round trip with the AI key in .env (opt-in, a few hundred tokens)
 make help        # every command
 ```
 Backend tests start a throwaway Postgres 16 with testcontainers, so Docker must be running (or set

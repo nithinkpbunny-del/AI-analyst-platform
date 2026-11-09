@@ -24,6 +24,8 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Vendor keys: Google (AIza...), Anthropic/OpenAI style (sk-...), Razorpay (rzp_live_/rzp_test_),
     # Shopify (shpat_/shpss_), AWS access key ids.
     (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"), REDACTED),
+    # Google's newer API key format: "AQ." followed by a long token.
+    (re.compile(r"\bAQ\.[0-9A-Za-z_.-]{20,}"), REDACTED),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"), REDACTED),
     (re.compile(r"\brzp_(?:live|test)_[A-Za-z0-9]{8,}\b"), REDACTED),
     (re.compile(r"\bshp(?:at|ss|ca|pa)_[A-Za-z0-9]{16,}\b"), REDACTED),

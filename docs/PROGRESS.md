@@ -1,9 +1,14 @@
 # Progress
 
-**Next milestone: M5: Secrets, LLM layer, plans, usage** (start when the human says "continue").
-**Unfinished work:** none for M4. Carry into M5: every new tenant table needs RLS + the `tenant_isolation` policy
-and grants for `app_tenant` in its migration (the schema test in `tests/security/test_rls.py` enforces it), and
-every new route must be classified in `tests/api/test_route_matrix.py`.
+**Next milestone: M6: Connections framework + Excel/CSV + Google Sheets** (start when the human says "continue").
+**Unfinished work:** none for M5. Carry into M6 and later:
+- Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants in its migration. The
+  schema test in `tests/security/test_rls.py` enforces it.
+- Every new route must be classified in `tests/api/test_route_matrix.py`.
+- Connection credentials go through `app.security.secrets.SecretStore` (purpose per connector).
+- Every LLM call goes through `keys.resolve(...)` and `usage.MeteredLLM` (D42).
+**Deferred:** multilingual answers (originally in M8) and UI translations (M15). Keep all user-visible text in
+`frontend/src/locales/en.ts` (DECISIONS D41).
 
 ## Milestone checklist (BUILD_SPEC §14)
 
@@ -13,10 +18,10 @@ every new route must be classified in `tests/api/test_route_matrix.py`.
 - [x] M2: Auth core
 - [x] M3: 2FA, Google sign-in, devices
 - [x] M4: Orgs, roles, invites, RLS
-- [ ] M5: Secrets, LLM layer, plans, usage
+- [x] M5: Secrets, LLM layer, plans, usage
 - [ ] M6: Connections framework + Excel/CSV + Google Sheets
 - [ ] M7: Zero setup: profiler + business dictionary
-- [ ] M8: Agent core + Ask UI
+- [ ] M8: Agent core + Ask UI (multilingual answers deferred, D41)
 - [ ] M9: What-if simulator
 - [ ] M10: Briefings, long tasks, exports, sharing, eval
 - [ ] M10b: Public website (then Phase 1 review, stop)
@@ -26,7 +31,7 @@ every new route must be classified in `tests/api/test_route_matrix.py`.
 - [ ] M12: Shopify connector
 - [ ] M13: Zoho Books connector
 - [ ] M14: PostgreSQL/MySQL connector
-- [ ] M15: Goals, pinned dashboard, UI translations (then Phase 2 review, stop)
+- [ ] M15: Goals, pinned dashboard, UI translations (translations deferred, D41) (then Phase 2 review, stop)
 
 ### Phase 3
 - [ ] M16: Tally bridge
@@ -293,3 +298,115 @@ change their role or remove them; then look at Activity.
 - Production needs the `app_tenant` role and the connecting role's membership in it (D34, M19 deploy guide).
 - The full-page screenshots show the sidebar ending at the first screen height on long pages. It is sticky, so in
   a real browser it stays in view. This has been the case since M1b.
+
+
+---
+
+## M5: Secrets, LLM layer, plans, usage (done)
+
+**Built**
+- **Database** (migration `0005`, reversible): `secrets`, `llm_keys` and `usage_events`. Each has RLS, the
+  `tenant_isolation` policy and least-privilege grants: secrets are never updated in place, and usage history is
+  insert-only for workspace requests.
+- **Envelope encryption** (`app/security/crypto.py`, `app/security/secrets.py`): a fresh AES-256-GCM data key per
+  secret, wrapped by `MASTER_KEY` (development) or AWS KMS (`KMS_KEY_ID`, production), behind one `KeyWrapper`
+  interface. Each secret is bound to its workspace, row and purpose. Secrets are write-only: no API returns
+  them.
+- **LLM layer** (`app/llm/`):
+  - One interface, `generate(system, messages, tools, max_tokens)`, with normalised text, tool calls, stop
+    reason and usage.
+  - The **Gemini** adapter follows all six pitfalls of BUILD_SPEC 7.2: `v1beta`, one long-lived client, replay
+    of the original parts with thought signatures, `parameters_json_schema` with automatic calling off,
+    generated ids for calls without one, and models listed from the key. It retries 429/503 after 5/15/30 s
+    (honouring `retryDelay`), but not an exhausted daily quota, an invalid key or a 504.
+  - The **Claude** adapter: native tool use, `max_retries=3`, replay of the original blocks, and server-side
+    refusal fallbacks on the models that support them.
+  - **Model fallback:** a model the key lists but the provider refuses (404) or that stays overloaded is skipped,
+    and the next best model is used.
+  - Errors map to plain kinds: invalid key, quota, rate limited, model not found, unavailable, other.
+  - **Fake LLM** (`FakeLLM`, `FakeLLMFactory`): every test uses it; no test calls a provider.
+- **Plans and keys** (`app/llm/keys.py`):
+  - Managed AI uses the platform key from `.env` after checking the monthly limit.
+  - BYOK decrypts the workspace's own Gemini or Claude key.
+  - A key is checked with the provider (a model list, no tokens) before it is saved.
+- **Usage** (`app/llm/usage.py`): one `usage_events` row per LLM call, with tokens, estimated cost
+  (`app/llm/pricing.py`), provider, model and key source. `MeteredLLM` records automatically. The Managed limit
+  counts question and long-task runs on the platform key in the workspace's calendar month (D42).
+  `ensure_within_limit` is ready for M8 to call before each question.
+- **API** (Owners, `org.manage`):
+  - `GET /org/ai`: the plan and the key's last 4 characters.
+  - `PUT /org/ai/plan`: switch between Managed and the workspace's own key.
+  - `PUT` and `DELETE /org/ai/key`: save or remove the workspace's key.
+  - `POST /org/ai/check`: test the connection, 10 per hour.
+  - `GET /org/usage?month=YYYY-MM`: totals, per person and the last 6 months.
+- **Activity log:** `org.plan_changed`, `llm.key_set` and `llm.key_removed`. They contain the provider and the
+  last 4 characters, never the key.
+- **Web app** (Settings):
+  - **AI plan:** choose Managed AI or your own key; add, replace or remove the key (password field, show/hide,
+    checked before saving, shown as "••••x7Qa"); the privacy notice for each plan; "Test AI connection".
+  - **AI usage:** month picker; a meter of questions used against the limit (caution colour at 80%, loss colour
+    at 100%); questions, briefings, tokens and estimated cost; a per-person ledger; the last six months.
+  - Analysts and Viewers see only which plan is in use. The activity log describes the new entries.
+  - All text is in `locales/en.ts` (D41). Storybook has stories for the new sections.
+- **`make llm-check`**: one real tool-calling round trip with the key in `.env`. It is opt-in, writes nothing and
+  never prints the key. Setup guide: `docs/SETUP_AI.md`.
+- The log redactor recognises Google's newer `AQ.`-style keys.
+- Design decisions D42–D48 in `docs/DECISIONS.md`.
+
+**Test status:**
+- **Backend:** 770 passed (578 in M4); ruff and mypy (strict) clean. Covered:
+  - The Gemini and Claude adapters against stubs that return the SDKs' real types and raise their real errors:
+    every pitfall of BUILD_SPEC 7.2, retries and their delays, the 504 rule, model fallback and error kinds.
+  - Envelopes: tampering, wrong key, wrong context, KMS against a stand-in client.
+  - The secret store in Postgres; usage counting and the time-zone month; the limit; key resolution.
+  - The AI and usage routes (route matrix and behaviour); rate limits.
+  - RLS on the new tables; append-only usage; no key in any response, log or activity entry.
+  - Deleting a workspace cascades cleanly; the migration round trip.
+- **Frontend:** vitest 233 passed; eslint, prettier, tsc and tokens:check clean. Build OK (shell 150.5 KB of
+  200 KB gzipped). Storybook builds.
+- **Playwright:** 237 passed (31 skipped by design). The four Settings baselines (light/dark × desktop/phone)
+  were re-recorded and reviewed, and axe finds no problems on Settings with the new sections.
+- **Real provider:** `make llm-check` against Gemini with the `.env` key: a two-call tool round trip with thought
+  signatures replayed, answered correctly (`gemini-3.5-flash`). The automatic fallback was also seen live:
+  `gemini-2.5-flash` was refused (404) and `gemini-3.8-flash` was overloaded (503).
+- **Live check against `make dev`:** 12 of 12 passed:
+  - sign-up, Mailpit, email two-step set-up;
+  - `GET /org/ai`, and usage at 0 of 500;
+  - real Google rejected a made-up key (422), and switching without a key was refused;
+  - "Test AI connection" answered "OK" from `gemini-3.6-flash` after the automatic fallback past a refused
+    model and two models whose daily quota was used up;
+  - the check was recorded as usage but not as a question;
+  - the pasted key appears in neither the activity log nor the API container's logs.
+
+**How to try it:** see the testing steps given at the end of M5. In short:
+1. `make dev`.
+2. Sign in as an Owner and open **Settings → AI plan**.
+3. Press **Test AI connection**: Gemini answers with your `.env` key.
+4. Try saving a made-up key: Google rejects it and nothing is stored.
+5. Look at **AI usage** and the **Activity** screen.
+
+**Known gaps / notes**
+- No questions exist yet, so the monthly limit is not met in practice until the Ask screen (M8). It is enforced
+  by `keys.resolve(...)` and fully tested.
+- **Gemini models on your key (seen 2026-11-09):**
+  - `gemini-2.5-flash` (your `GEMINI_DEFAULT_MODEL`) is still listed but refused: "no longer available to new
+    users". The app falls back automatically, but each new API process first wastes one call on it. Clear
+    `GEMINI_DEFAULT_MODEL` in `.env`, or set it to a model that answers.
+  - `gemini-3.8-flash` was overloaded ("high demand"), and other new Flash models were slow, during the checks.
+  - The free tier allows only **20 requests a day per model** for `gemini-3.8-flash`. The testing for this
+    milestone used them up; Google resets them about 14 hours after these checks, at midnight US Pacific time.
+    Until then the app uses the next Flash model automatically (D44).
+- Prices are from Google's and Anthropic's lists as of 2026-11-09, with the price rises they have announced
+  (D47). `gemini-3.5-flash` and `gemini-3.7-flash` are not on Google's price list, so their cost shows "not
+  known". Check `app/llm/pricing.py` when providers change prices.
+- `LLM_MAX_OUTPUT_TOKENS` (3,000) includes thinking tokens for thinking models (Claude Opus 5.5, newer Gemini).
+  M8 should check that this is enough for an answer.
+- The connection check keeps its database transaction open while the provider answers. That is fine for one
+  tiny call, but the M8 agent loop should not hold a transaction across LLM calls.
+- Model fallback switches models between calls. If that happens in the middle of an M8 tool loop, the new model
+  receives the old model's signed Gemini parts, which it may reject. The M8 agent loop should restart the
+  question on the new model in that case. A single AI call now waits at most about 3½ minutes
+  (`LLM_CALL_BUDGET_SECONDS` plus one request, D44). The M8 Ask screen needs its own latency budget and
+  progress messages.
+- `KmsKeyWrapper` is tested against a stand-in KMS client only; check it against real KMS in M19.
+- Plan changes have no billing rules yet (M18).

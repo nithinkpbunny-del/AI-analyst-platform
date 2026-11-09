@@ -8,6 +8,7 @@ as later milestones add routes.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -20,7 +21,10 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.auth.permissions import ROLE_PERMISSIONS, Permission
 from app.config import Settings
+from app.llm import keys, usage
+from app.llm.base import Usage
 from app.models import AuditLog, Invitation, Membership
+from app.security.secrets import SecretStore, key_wrapper
 from tests.conftest import FakeClock
 from tests.tenancy import World, add_member, build_world, token_for
 
@@ -151,6 +155,28 @@ CASES: dict[tuple[str, str], Case] = {
     ("GET", "/audit"): Case(
         "GET", "/audit", P.AUDIT_VIEW_OWN, 200, invalid_query="?limit=0", check_leak=True
     ),
+    ("GET", "/org/ai"): Case("GET", "/org/ai", P.ORG_MANAGE, 200, check_leak=True),
+    ("PUT", "/org/ai/plan"): Case(
+        "PUT",
+        "/org/ai/plan",
+        P.ORG_MANAGE,
+        200,
+        body={"plan": "managed"},
+        invalid_body={"plan": "free"},
+    ),
+    ("PUT", "/org/ai/key"): Case(
+        "PUT",
+        "/org/ai/key",
+        P.ORG_MANAGE,
+        200,
+        body={"provider": "gemini", "api_key": "AIzaSyMatrixTestKey000000000000000000"},
+        invalid_body={"provider": "openai", "api_key": "short"},
+    ),
+    ("DELETE", "/org/ai/key"): Case("DELETE", "/org/ai/key", P.ORG_MANAGE, 204),
+    ("POST", "/org/ai/check"): Case("POST", "/org/ai/check", P.ORG_MANAGE, 200),
+    ("GET", "/org/usage"): Case(
+        "GET", "/org/usage", P.ORG_MANAGE, 200, invalid_query="?month=2026-13", check_leak=True
+    ),
     ("GET", "/audit/export.csv"): Case(
         "GET",
         "/audit/export.csv",
@@ -196,6 +222,28 @@ def ids(db: DbSession, settings: Settings, clock: FakeClock) -> Fixtures:
         db.add(AuditLog(org_id=org.id, user_id=None, action="test.event", details={}, at=clock.now))
         db.flush()
         invitations[org.id] = str(invitation.id)
+    # Org A has its own AI key and usage, so the leak checks have something to find.
+    store = SecretStore(key_wrapper(settings))
+    keys.store_key(
+        db,
+        org_id=world.org_a.id,
+        provider="claude",
+        api_key="sk-ant-urbancart-secret-key-0000000000",
+        user_id=world.owner_a.id,
+        secrets=store,
+    )
+    usage.record(
+        db,
+        org_id=world.org_a.id,
+        user_id=world.owner_a.id,
+        run_id=uuid.uuid4(),
+        kind="question",
+        provider="gemini",
+        model="gemini-2.5-flash",
+        usage=Usage(1000, 100),
+        key_source="managed",
+        at=clock.now,
+    )
     db.commit()
 
     def membership(user_id: Any) -> str:
@@ -319,6 +367,8 @@ def test_nothing_from_another_workspace_appears(
         str(ids.world.org_a.id),
         ids.member_a,
         ids.invitation_a,
+        "sk-ant-urbancart",
+        "Asha Rao",
     ):
         assert marker not in text
 

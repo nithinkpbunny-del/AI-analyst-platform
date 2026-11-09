@@ -19,6 +19,15 @@ export function describeEntry(t: TFunction, entry: AuditEntry): string {
     role: roleWord(t, details.role),
     from: roleWord(t, details.from),
     to: roleWord(t, details.to),
+    plan:
+      typeof details.to === 'string'
+        ? t(`ai.plans.${details.to}`, { defaultValue: details.to })
+        : '',
+    provider:
+      typeof details.provider === 'string'
+        ? t(`ai.providers.${details.provider}`, { defaultValue: details.provider })
+        : '',
+    last4: typeof details.last4 === 'string' ? details.last4 : '',
   })
   const reason = details.reason
   if (entry.action === 'auth.login.failure' && typeof reason === 'string') {

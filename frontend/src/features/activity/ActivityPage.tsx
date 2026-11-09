@@ -13,7 +13,7 @@ import { useCan } from '../../lib/permissions'
 import { downloadAuditCsv, teamApi, type AuditEntry, type AuditFilters } from '../../lib/teamApi'
 import { asKey, describeEntry } from './describe'
 
-const GROUPS = ['auth.login', 'auth.2fa', 'auth.session', 'team', 'org', 'audit'] as const
+const GROUPS = ['auth.login', 'auth.2fa', 'auth.session', 'team', 'org', 'llm', 'audit'] as const
 
 function Filters({
   filters,

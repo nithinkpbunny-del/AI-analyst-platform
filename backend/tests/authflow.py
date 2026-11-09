@@ -129,7 +129,7 @@ def registered_user(
 
 
 def refresh(client: TestClient, csrf: str | None = None) -> Any:
-    token = csrf if csrf is not None else client.cookies.get(CSRF_COOKIE, "")
+    token = csrf if csrf is not None else client.cookies.get(CSRF_COOKIE) or ""
     return client.post("/auth/refresh", headers={"X-CSRF-Token": token})
 
 

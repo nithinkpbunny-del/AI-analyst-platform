@@ -6,9 +6,11 @@ import { Button } from '../../components/ui/button'
 import { useAuth, useSession } from '../../lib/authContext'
 import { cn } from '../../lib/cn'
 import { useTheme, type ThemePreference } from '../../lib/theme'
+import { AiPlanSection } from './AiPlanSection'
 import { DevicesSection } from './DevicesSection'
 import { SecuritySection } from './SecuritySection'
 import { SystemStatus } from './SystemStatus'
+import { UsageSection } from './UsageSection'
 import { WorkspaceSection } from './WorkspaceSection'
 
 const options: { value: ThemePreference; key: string }[] = [
@@ -64,6 +66,8 @@ export function SettingsPage() {
         <WorkspaceSection />
         <SecuritySection />
         <DevicesSection />
+        <AiPlanSection />
+        <UsageSection />
         <section className="rounded-panel border border-line bg-surface p-4 tablet:p-6">
           <h2 className="text-h4">{t('settings.appearance')}</h2>
           <fieldset className="m-0 mt-4 border-0 p-0">

@@ -15,14 +15,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import __version__
-from app.api import audit, auth, google, health, invitations, org, team, two_factor
+from app.api import ai, audit, auth, google, health, invitations, org, team, two_factor
 from app.api.errors import install_error_handlers
 from app.auth.google_oidc import AuthlibGoogleProvider, GoogleProvider, StandInGoogleProvider
 from app.auth.service import Clock
 from app.config import Settings, get_settings
 from app.db.session import make_engine, make_session_factory
 from app.email.sender import EmailSender, SmtpEmailSender
+from app.llm.base import LLMFactory
+from app.llm.keys import default_factory
 from app.logging_config import configure_logging, request_id_var
+from app.security.secrets import SecretStore, key_wrapper
 
 logger = logging.getLogger("app.request")
 
@@ -59,11 +62,14 @@ def create_app(
     email_sender: EmailSender | None = None,
     clock: Clock | None = None,
     google_provider: GoogleProvider | None = None,
+    llm_factory: LLMFactory | None = None,
+    secret_store: SecretStore | None = None,
 ) -> FastAPI:
     """Build the app. Every dependency is injectable so tests never touch real services.
 
     Defaults: engine and Redis client from settings (both connect lazily, on first use), SMTP for email,
-    the system clock, and ``default_google_provider``.
+    the system clock, ``default_google_provider``, the real LLM providers and secrets sealed with ``MASTER_KEY``
+    (or KMS when ``KMS_KEY_ID`` is set).
     """
     settings = settings or get_settings()
     configure_logging(settings)
@@ -89,6 +95,8 @@ def create_app(
     app.state.google_provider = google_provider or default_google_provider(
         settings, app.state.redis
     )
+    app.state.llm_factory = llm_factory or default_factory(settings)
+    app.state.secret_store = secret_store or SecretStore(key_wrapper(settings))
     install_error_handlers(app)
 
     # The SPA runs on another origin in development; credentials are needed for the refresh cookie.
@@ -133,6 +141,7 @@ def create_app(
     app.include_router(invitations.router)
     app.include_router(team.router)
     app.include_router(org.router)
+    app.include_router(ai.router)
     app.include_router(audit.router)
     return app
 

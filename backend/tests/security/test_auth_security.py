@@ -42,7 +42,7 @@ class TestRefreshTokenReuse:
     ) -> None:
         registered_user(client, outbox)
         stolen = refresh_cookie(client)
-        csrf = client.cookies.get(CSRF_COOKIE, "")
+        csrf = client.cookies.get(CSRF_COOKIE) or ""
 
         # The real user refreshes: token rotates.
         legit = refresh(client)

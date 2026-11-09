@@ -586,7 +586,7 @@ class TestLogout:
         self, client: TestClient, db: DbSession, outbox: MemoryEmailSender
     ) -> None:
         body = registered_user(client, outbox)
-        csrf = client.cookies.get(CSRF_COOKIE, "")
+        csrf = client.cookies.get(CSRF_COOKIE) or ""
         response = client.post("/auth/logout", headers={"X-CSRF-Token": csrf})
         assert response.status_code == 204
         assert client.cookies.get(REFRESH_COOKIE) is None

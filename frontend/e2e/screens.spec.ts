@@ -30,6 +30,8 @@ for (const screen of screens) {
       if (screen === 'settings') {
         await expect(page.getByText(/API connected/)).toBeVisible()
         await expect(page.getByText('Safari on iPhone')).toBeVisible()
+        await expect(page.getByText('142 of 500 questions used')).toBeVisible()
+        await expect(page.getByRole('radio', { name: /Managed AI/ })).toBeChecked()
       }
       if (screen === 'team') {
         await expect(page.getByText('meera@urbancart.in')).toBeVisible()
