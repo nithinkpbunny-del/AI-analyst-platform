@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { ChallengeResponse, LoginResponse, SessionInfo } from './authApi'
+import type { ChallengeResponse, LoginResponse, SessionInfo, SwitchedResponse } from './authApi'
 
 export type AuthState =
   | { status: 'loading' }
@@ -21,6 +21,10 @@ export interface AuthContextValue {
   signOut: () => Promise<void>
   /** Re-read the session (e.g. after turning on 2FA in Settings). */
   reload: () => Promise<void>
+  /** Work in another workspace the person belongs to. */
+  switchWorkspace: (organizationId: string) => Promise<void>
+  /** Take a session that moved workspace (switching, or accepting an invitation while signed in). */
+  acceptSwitched: (response: SwitchedResponse) => void
   /** Clear the "you were signed out because…" note once it has been shown. */
   clearReason: () => void
 }
@@ -51,6 +55,8 @@ export function staticAuthValue(
     acceptLogin: () => {},
     signOut: async () => {},
     reload: async () => {},
+    switchWorkspace: async () => {},
+    acceptSwitched: () => {},
     clearReason: () => {},
   }
 }

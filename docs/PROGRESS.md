@@ -1,8 +1,9 @@
 # Progress
 
-**Next milestone: M4: Orgs, roles, invites, RLS** (start when the human says "continue").
-**Unfinished work:** none for M3. Carry into M4: `require()` must refuse owner permissions while
-`AuthContext.two_factor_enabled` is false (DECISIONS D25).
+**Next milestone: M5: Secrets, LLM layer, plans, usage** (start when the human says "continue").
+**Unfinished work:** none for M4. Carry into M5: every new tenant table needs RLS + the `tenant_isolation` policy
+and grants for `app_tenant` in its migration (the schema test in `tests/security/test_rls.py` enforces it), and
+every new route must be classified in `tests/api/test_route_matrix.py`.
 
 ## Milestone checklist (BUILD_SPEC §14)
 
@@ -11,7 +12,7 @@
 - [x] M1b: Design system + app shell
 - [x] M2: Auth core
 - [x] M3: 2FA, Google sign-in, devices
-- [ ] M4: Orgs, roles, invites, RLS
+- [x] M4: Orgs, roles, invites, RLS
 - [ ] M5: Secrets, LLM layer, plans, usage
 - [ ] M6: Connections framework + Excel/CSV + Google Sheets
 - [ ] M7: Zero setup: profiler + business dictionary
@@ -218,3 +219,77 @@ window to get the "New sign-in" email).
   browsers.
 - Workspace switching (choosing which organisation to sign in to) is still the M2 behaviour: first membership.
 
+
+---
+
+## M4: Orgs, roles, invites, RLS (done)
+
+**Built**
+- **Permission matrix (BUILD_SPEC 6.2) and `require()`** (`app/auth/permissions.py`): 16 permissions for 3
+  roles, stored as data. Routes use `requires(Permission.X)` and never compare roles themselves. An Owner without
+  two-step verification may do nothing until it is on (D25). Viewers may export only items shared with them.
+  `/auth/me` and every sign-in answer include `permissions`, and the web app shows its menu from them.
+- **Row-Level Security** (migration `0004`, reversible): the restricted `app_tenant` role, plus RLS and a
+  `tenant_isolation` policy on `organizations`, `memberships`, `invitations`, `sessions`, `consents`, `audit_log`
+  and `login_challenges`. Workspace requests run every transaction as `app_tenant` with `app.org_id` set
+  (`SET LOCAL`). With nothing set, no rows are visible. A trigger keeps at least one active Owner per workspace.
+- **Team API** (`/team/*`, Owners): list members (role, 2FA, joined), change role (emails the person), remove
+  (signs them out of that workspace at once and emails them), invite by email as Analyst or Viewer (7-day
+  single-use link, 30 per hour per workspace), list, resend (new link; the old one stops working) and cancel
+  invitations. You cannot change your own role or remove yourself.
+- **Accepting invitations** (`/invitations/*`): preview; new person (name + password + consent, then signed in);
+  existing account with its password (normal lockouts and second step); or one click when already signed in as
+  that address (the session moves to the new workspace). Wrong account: 403 with an explanation.
+- **Workspaces:** `POST /auth/switch-organization` moves the session to another workspace you belong to. Old
+  tokens refresh into the new workspace. `GET/PATCH /org` reads or changes the workspace name and time zone
+  (Owners change them).
+- **Activity log API** (`/audit`, `/audit/export.csv`): Owners see everything in the workspace, Analysts their
+  own entries, Viewers nothing (403). Filters: person, kind, dates in the workspace's time zone. Keyset pages. CSV
+  export with formula-injection protection; every export is logged.
+- **Activity-log entries:** `team.invite_sent|resent|revoked|accepted`, `team.role_changed`,
+  `team.member_removed`, `org.settings_changed`, `auth.workspace_switched`, `audit.exported`.
+- **Emails:** invitation, "Your role changed" (says when an Owner must turn on 2FA), "Your access was removed".
+- **Web app:**
+  - **Team** screen: people as a ledger table with a role picker and Remove (with a confirmation dialog); an
+    invite form with what each role can do; and open invitations with "Send again" and "Cancel invitation".
+  - **Activity** screen: filters, plain-language entries, "Show older activity", Export CSV. Analysts get a note
+    that they see their own activity.
+  - **Accept invitation** page for each case.
+  - **Workspace switcher** in the sidebar, rail and phone header. The last workspace is remembered for the next
+    sign-in.
+  - **Settings → Workspace**: editable for Owners, read-only for others.
+  - Menu: Activity is shown to Analysts as well, Settings to everyone (D37).
+  - New primitives: Dialog/ConfirmDialog, Select, `danger` button. Storybook stories for them, the Team and
+    Activity screens and the switcher.
+- Design decisions D34–D40 in `docs/DECISIONS.md`.
+
+**Test status:**
+- **Backend:** 578 passed; ruff and mypy (strict) clean. Covered:
+  - RLS isolation per table, refused cross-workspace writes, fail-closed without a workspace, no leaks through
+    the connection pool, the tenant role's limits, the keep-an-Owner trigger, and a schema check that every
+    `org_id` table has the policy.
+  - The permission matrix cell by cell.
+  - A route matrix over **every** API route: 401, 403 per role, 403 for an Owner without 2FA, 404 for another
+    workspace's ids, 404 for missing ids, 422, success, and no data leaking between workspaces.
+  - Team, invitation, activity-log and workspace flows; security tests for invitations and removal; the
+    migration round trip.
+- **Frontend:** vitest 216 passed; eslint, prettier, tsc and tokens:check clean. Build OK (shell 145.5 KB of
+  200 KB gzipped). Storybook builds.
+- **Playwright:** 237 passed (31 skipped by design). New baselines: Team, Activity, Settings, accept-invite, the
+  remove dialog, an Analyst's activity and the open workspace switcher, all with axe checks.
+- **Live check against `make dev`:** 19 of 19 passed (invite, accept, roles, removal, cross-workspace 404, CSV).
+
+**How to try it:** see the testing steps given at the end of M4. In short: `make dev`; sign in as an Owner; open
+Team and invite someone; open the email in Mailpit (http://localhost:8025) in a private window and accept it;
+change their role or remove them; then look at Activity.
+
+**Known gaps / notes**
+- Per-connection grants (R15 "Owner can restrict which connections each user can see") arrive with connections in
+  M6. The grants editor and the `connection_grants` table come then.
+- Sharing (needed for "Viewers export shared items only") is M10. The rule is already in `require()`.
+- A new invitee cannot use "Continue with Google" on the invitation page. They set a password, and Google links
+  automatically later (D36).
+- Org deletion and data export (DPDP) are M10. "Leave workspace" for non-Owners is not built (not in the spec).
+- Production needs the `app_tenant` role and the connecting role's membership in it (D34, M19 deploy guide).
+- The full-page screenshots show the sidebar ending at the first screen height on long pages. It is sticky, so in
+  a real browser it stays in view. This has been the case since M1b.

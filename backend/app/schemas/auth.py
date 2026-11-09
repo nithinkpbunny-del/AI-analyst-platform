@@ -109,6 +109,9 @@ class Me(BaseModel):
     session_expires_at: str
     idle_timeout_minutes: int
     two_factor: TwoFactorOut
+    # What the caller may do in this workspace (BUILD_SPEC 6.2, ``app.auth.permissions``). The web app shows and
+    # hides features with it; the API still checks every request.
+    permissions: list[str]
 
 
 class SessionOut(Me):
@@ -240,3 +243,17 @@ class SessionList(BaseModel):
 class Revoked(BaseModel):
     status: Literal["ok"] = "ok"
     sessions_revoked: int
+
+
+# ------------------------------------------------------------------------------------------ workspaces (M4)
+class SwitchOrganizationRequest(_Strict):
+    organization_id: uuid.UUID
+
+
+class SwitchedOut(Me):
+    """The session now works in another workspace. The refresh cookie is unchanged."""
+
+    status: Literal["signed_in"] = "signed_in"
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"  # noqa: S105
+    expires_in: int

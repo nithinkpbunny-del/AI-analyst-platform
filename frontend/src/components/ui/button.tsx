@@ -11,6 +11,8 @@ const buttonVariants = cva(
         primary: 'bg-neel text-on-neel hover:opacity-90',
         secondary: 'border border-line-strong bg-surface text-ink hover:bg-neel-soft',
         ghost: 'text-ink hover:bg-neel-soft',
+        // Hard-to-undo actions in a confirmation dialog (remove someone, cancel an invitation).
+        danger: 'bg-loss text-surface hover:opacity-90',
         link: 'text-neel underline-offset-4 hover:underline',
       },
       size: {

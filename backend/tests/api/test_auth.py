@@ -2,8 +2,8 @@
 reset, consent and activity-log entries (BUILD_SPEC 6.1, R15, M2 acceptance criteria).
 
 Route-test rule (BUILD_SPEC 0.6): these routes are public except ``/auth/me``, refresh and logout, so they get
-success, validation-error and 401 cases. There are no role-restricted or tenant-owned resources here, so 403
-(wrong role) and 404 (cross-tenant) start with the first such routes in M4.
+success, validation-error and 401 cases. Role (403) and cross-tenant (404) cases for workspace routes are in
+``tests/api/test_route_matrix.py`` (M4).
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from tests.authflow import (
     verify,
 )
 from tests.conftest import FakeClock
+from tests.tenancy import add_second_owner
 
 EMAIL = "asha@urbancart.in"
 
@@ -312,7 +313,10 @@ class TestLogin:
         self, client: TestClient, db: DbSession, outbox: MemoryEmailSender
     ) -> None:
         registered_user(client, outbox)
-        db.scalars(select(Membership)).one().status = "removed"
+        add_second_owner(db)  # a workspace always keeps one active Owner
+        db.scalars(
+            select(Membership).join(User).where(User.email == EMAIL)
+        ).one().status = "removed"
         db.commit()
         response = client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD})
         assert response.status_code == 403
@@ -461,7 +465,8 @@ class TestMe:
         self, client: TestClient, db: DbSession, outbox: MemoryEmailSender
     ) -> None:
         body = registered_user(client, outbox)
-        db.scalars(select(Membership)).one().role = "viewer"
+        add_second_owner(db)
+        db.scalars(select(Membership).join(User).where(User.email == EMAIL)).one().role = "viewer"
         db.commit()
         me = client.get("/auth/me", headers=bearer(body["access_token"])).json()
         assert me["role"] == "viewer"
@@ -470,7 +475,10 @@ class TestMe:
         self, client: TestClient, db: DbSession, outbox: MemoryEmailSender
     ) -> None:
         body = registered_user(client, outbox)
-        db.scalars(select(Membership)).one().status = "removed"
+        add_second_owner(db)
+        db.scalars(
+            select(Membership).join(User).where(User.email == EMAIL)
+        ).one().status = "removed"
         db.commit()
         response = client.get("/auth/me", headers=bearer(body["access_token"]))
         assert response.status_code == 401

@@ -540,7 +540,7 @@ class TestChangesWhileSignedIn:
         user = add_member(db)
         body = login_start(client, ANALYST)  # still an Analyst: signed in without 2FA
         membership = db.scalars(select(Membership).where(Membership.user_id == user.id)).one()
-        membership.role = "owner"  # M4 will do this through the Team screen
+        membership.role = "owner"  # as the Team screen does (tests/api/test_team.py)
         db.commit()
         headers = bearer(body["access_token"])
         me = client.get("/auth/me", headers=headers).json()

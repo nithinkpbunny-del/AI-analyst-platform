@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ApiError, setAccessToken, setRefreshHandler } from './api'
 import {
@@ -10,6 +11,7 @@ import {
   type LoginResponse,
   type SessionInfo,
   type SessionResponse,
+  type SwitchedResponse,
 } from './authApi'
 
 // The API helpers live in ./authApi; this file holds React state only (keeps fast refresh working).
@@ -20,6 +22,7 @@ import {
   type AuthState,
   type PendingChallenge,
 } from './authContext'
+import { rememberWorkspace } from './workspace'
 
 function toSessionInfo(response: SessionInfo): SessionInfo {
   return {
@@ -30,23 +33,39 @@ function toSessionInfo(response: SessionInfo): SessionInfo {
     session_expires_at: response.session_expires_at,
     idle_timeout_minutes: response.idle_timeout_minutes,
     two_factor: response.two_factor,
+    permissions: response.permissions,
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: 'loading' })
   const [challenge, setChallenge] = useState<PendingChallenge | null>(null)
+  const queryClient = useQueryClient()
+  const currentOrg = useRef<string | null>(null)
 
-  const accept = useCallback((response: SessionResponse) => {
-    setAccessToken(response.access_token)
-    setChallenge(null)
-    setState({ status: 'signedIn', session: toSessionInfo(response) })
-  }, [])
+  const accept = useCallback(
+    (response: SessionResponse | SwitchedResponse) => {
+      setAccessToken(response.access_token)
+      setChallenge(null)
+      const orgId = response.organization.id
+      // Another workspace (switched here or in another tab): nothing cached may show the old one's data.
+      if (currentOrg.current && currentOrg.current !== orgId) queryClient.clear()
+      currentOrg.current = orgId
+      rememberWorkspace(orgId)
+      setState({ status: 'signedIn', session: toSessionInfo(response) })
+    },
+    [queryClient],
+  )
 
-  const end = useCallback((reason: string | null) => {
-    setAccessToken(null)
-    setState({ status: 'signedOut', reason })
-  }, [])
+  const end = useCallback(
+    (reason: string | null) => {
+      setAccessToken(null)
+      currentOrg.current = null
+      queryClient.clear()
+      setState({ status: 'signedOut', reason })
+    },
+    [queryClient],
+  )
 
   const acceptLogin = useCallback(
     (response: LoginResponse, next = '/today') => {
@@ -82,6 +101,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const info = await authApi.me()
     setState({ status: 'signedIn', session: toSessionInfo(info) })
   }, [])
+
+  const switchWorkspace = useCallback(
+    async (organizationId: string) => {
+      accept(await authApi.switchOrganization(organizationId))
+    },
+    [accept],
+  )
 
   const signOut = useCallback(async () => {
     try {
@@ -142,8 +168,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [idleMinutes, signOut, end])
 
   const value = useMemo(
-    () => ({ state, challenge, acceptLogin, signOut, reload, clearReason }),
-    [state, challenge, acceptLogin, signOut, reload, clearReason],
+    () => ({
+      state,
+      challenge,
+      acceptLogin,
+      signOut,
+      reload,
+      switchWorkspace,
+      acceptSwitched: accept,
+      clearReason,
+    }),
+    [state, challenge, acceptLogin, signOut, reload, switchWorkspace, accept, clearReason],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

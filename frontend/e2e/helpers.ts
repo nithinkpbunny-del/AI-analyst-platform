@@ -1,4 +1,6 @@
 import type { Page } from '@playwright/test'
+import { ROLE_PERMISSIONS } from '../src/lib/permissions'
+import { demoAudit, demoInvitations, demoMembers, demoPreview } from '../src/testing/teamFixtures'
 
 export const screens = [
   'today',
@@ -50,6 +52,7 @@ const session = {
   session_expires_at: '2026-11-09T18:30:00+00:00',
   idle_timeout_minutes: 30,
   two_factor: { enabled: true, method: 'totp', required: true, recovery_codes_remaining: 10 },
+  permissions: ROLE_PERMISSIONS.owner,
   access_token: 'e2e-access-token',
   token_type: 'bearer',
   expires_in: 600,
@@ -60,7 +63,24 @@ const session = {
 export const sessionWithout2fa = {
   ...session,
   two_factor: { enabled: false, method: null, required: true, recovery_codes_remaining: 0 },
+  permissions: [],
 }
+
+/** An Analyst of UrbanCart who is also a Viewer at a second shop (workspace switcher, own activity). */
+export const analystSession = {
+  ...session,
+  user: { ...session.user, id: 'u2', email: 'ravi@urbancart.in', name: 'Ravi Kumar' },
+  role: 'analyst',
+  permissions: ROLE_PERMISSIONS.analyst,
+  memberships: [
+    { organization_id: 'o1', organization_name: 'UrbanCart', role: 'analyst' },
+    { organization_id: 'o2', organization_name: 'Chaiwala Foods', role: 'viewer' },
+  ],
+  two_factor: { enabled: false, method: null, required: false, recovery_codes_remaining: 0 },
+}
+
+export const invitationToken = 'e2einvitationtoken12345'
+export const invitationPreview = demoPreview
 
 export const codeChallenge = {
   status: 'two_factor_required',
@@ -94,10 +114,18 @@ const devices = {
 }
 
 /** Answer API calls with fixed data so screenshots never depend on a running backend. */
+interface MockOptions {
+  signedIn?: boolean
+  refresh?: object
+  /** The /audit answer (default: the whole workspace's demo entries). */
+  audit?: object
+}
+
 export async function mockApi(
   page: Page,
-  { signedIn = true, refresh = session }: { signedIn?: boolean; refresh?: object } = {},
+  { signedIn = true, refresh = session, audit }: MockOptions = {},
 ) {
+  const auditReply = audit ?? { entries: demoAudit, next_cursor: null, scope: 'workspace' }
   await page.route(`${API}/auth/csrf`, (route) =>
     route.fulfill({ json: { csrf_token: 'e2e-csrf' } }),
   )
@@ -119,6 +147,15 @@ export async function mockApi(
     route.fulfill({ json: { google: true, google_stand_in: false } }),
   )
   await page.route(`${API}/auth/sessions`, (route) => route.fulfill({ json: devices }))
+  await page.route(`${API}/team/members`, (route) =>
+    route.fulfill({ json: { members: demoMembers } }),
+  )
+  await page.route(`${API}/team/invitations`, (route) =>
+    route.fulfill({ json: { invitations: demoInvitations } }),
+  )
+  await page.route(`${API}/audit?*`, (route) => route.fulfill({ json: auditReply }))
+  await page.route(`${API}/audit`, (route) => route.fulfill({ json: auditReply }))
+  await page.route(`${API}/invitations/preview`, (route) => route.fulfill({ json: demoPreview }))
   await page.route('http://localhost:8000/health', (route) =>
     route.fulfill({
       json: { status: 'ok', service: 'analyst-api', version: '0.1.0', env: 'development' },
@@ -131,11 +168,7 @@ export async function mockApi(
   )
 }
 
-export async function open(
-  page: Page,
-  path: string,
-  options: { signedIn?: boolean; refresh?: object } = {},
-) {
+export async function open(page: Page, path: string, options: MockOptions = {}) {
   await mockApi(page, options)
   await page.goto(path)
   await page.locator('h1').first().waitFor()

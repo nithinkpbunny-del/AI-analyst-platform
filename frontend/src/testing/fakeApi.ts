@@ -3,20 +3,21 @@ import { demoSession } from '../lib/demoSession'
 import type { SessionResponse } from '../lib/authApi'
 
 type Reply =
-  { status: number; body?: unknown } | ((init: RequestInit) => { status: number; body?: unknown })
+  | { status: number; body?: unknown }
+  | ((init: RequestInit, url: URL) => { status: number; body?: unknown })
 
 /**
  * A fake API for component tests: map "METHOD /path" to a reply. Unknown routes answer 404. Every call is
  * recorded so tests can check what was sent.
  */
 export function fakeApi(routes: Record<string, Reply>) {
-  const calls: { key: string; init: RequestInit }[] = []
+  const calls: { key: string; init: RequestInit; url: string }[] = []
   const fetchMock = vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new URL(String(input))
     const key = `${init.method ?? 'GET'} ${url.pathname}`
-    calls.push({ key, init })
+    calls.push({ key, init, url: url.href })
     const route = routes[key]
-    const reply = typeof route === 'function' ? route(init) : route
+    const reply = typeof route === 'function' ? route(init, url) : route
     const { status, body } = reply ?? {
       status: 404,
       body: { error: { code: 'not_found', message: 'Not found.' } },

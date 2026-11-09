@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import __version__
-from app.api import auth, google, health, two_factor
+from app.api import audit, auth, google, health, invitations, org, team, two_factor
 from app.api.errors import install_error_handlers
 from app.auth.google_oidc import AuthlibGoogleProvider, GoogleProvider, StandInGoogleProvider
 from app.auth.service import Clock
@@ -98,7 +98,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-CSRF-Token"],
-        expose_headers=["X-Request-ID"],
+        expose_headers=["X-Request-ID", "Content-Disposition", "X-Rows-Truncated"],
     )
 
     @app.middleware("http")
@@ -130,6 +130,10 @@ def create_app(
     app.include_router(auth.router)
     app.include_router(two_factor.router)
     app.include_router(google.router)
+    app.include_router(invitations.router)
+    app.include_router(team.router)
+    app.include_router(org.router)
+    app.include_router(audit.router)
     return app
 
 

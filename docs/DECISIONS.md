@@ -335,3 +335,120 @@ a missing one.
   own tests that move the fake clock.
 - `tests/unit/test_devices.py` is named `test_device_ids.py` because pytest needs unique basenames
   (`tests/api/test_devices.py` exists).
+
+## M4: Orgs, roles, invites, RLS
+
+### D34. How Row-Level Security is applied
+- Migration `0004` creates a cluster role **`app_tenant`** (no login, not a superuser, no BYPASSRLS, owns
+  nothing). Every tenant-owned table (all tables with `org_id`, plus `organizations` by `id`) gets RLS and a
+  `tenant_isolation` policy: `org_id = NULLIF(current_setting('app.org_id', true), '')::uuid`, for reading
+  (`USING`) and writing (`WITH CHECK`). With no `app.org_id` the comparison is NULL and matches nothing: it
+  **fails closed**.
+- A workspace request is scoped by `scope_to_org(db, org_id)` (`app/db/tenant.py`). From then on **every**
+  transaction of that session starts with `SET LOCAL ROLE app_tenant` and `set_config('app.org_id', …, true)`
+  (an `after_begin` hook). Services commit more than once per request, so setting it once would not be enough.
+  Both are `LOCAL`, so they end with the transaction and never leak to the next user of a pooled connection.
+- Sign-in, invitation acceptance and your own sessions are about a **person**, who may belong to several
+  workspaces. They run as the connecting role, which owns the tables. RLS is enabled but not *forced*, so the
+  owner is not filtered. This is deliberate: those code paths always filter by user id or token hash.
+- `app_tenant` gets only what workspace routes need: e.g. it can insert into `audit_log` but not update or delete
+  it, cannot delete memberships, cannot read `login_challenges`, and can only read `users` (global, no `org_id`).
+- The spec's "repository layer also filters by `org_id`" is kept: every workspace query has an explicit
+  `org_id` condition too.
+- `tests/security/test_rls.py` checks that **every table with an `org_id` column** has RLS and the policy, so a
+  future table without it fails the build.
+- Production (M19): the migration grants `app_tenant` to `CURRENT_USER`, and creating a role needs `CREATEROLE`.
+  If the production database user cannot do that, a DBA creates the role once, and the migration skips creating
+  it when it already exists.
+
+### D35. Team rules
+- **At least one active Owner per workspace.** The service locks the organisation row before any member change
+  (so two Owners cannot demote each other at the same moment) and refuses with `409 last_owner`. A database
+  trigger (`memberships_keep_an_owner`) is the backstop. Some older tests changed the only Owner directly, so
+  they now add a second Owner first.
+- **Nobody changes their own role or removes themselves** on the Team screen (`409`). That stops an Owner from
+  locking themselves out by accident. "Leave workspace" can come later if wanted.
+- **Invitations are for Analysts or Viewers** (R15). To add another Owner, invite them, then change their role.
+- **Removal** marks the membership `removed`, ends that person's sessions *in this workspace only* (and their
+  refresh tokens), and emails them. Their access in other workspaces is untouched. Inviting them again later
+  re-activates the same membership with the invitation's role.
+- **Role changes** email the person. Someone made Owner without 2FA keeps their session, but `require()`
+  refuses everything and `/auth/me` lists no permissions until they turn 2FA on. The web app already sends such
+  a person to `/setup-two-factor` (D25).
+- **One open invitation per address and workspace** (a partial unique index). Inviting again, or "Send again",
+  creates a new link, and the old one stops working at once. Links last 7 days (spec), and only their SHA-256 is
+  stored.
+- **30 invitation emails per hour per workspace**, so a stolen Owner session cannot be used to spam people.
+- Activity-log entries for team events include the other person's email, so an Owner can read the log without
+  looking up ids. Only that workspace's Owners can see it.
+
+### D36. Accepting an invitation
+- Link: `/accept-invite#token=…`. The token is in the fragment (D17) and kept in page memory only.
+- **New person:** name, password and consent. The link proves they own the address, so the email counts as
+  confirmed. They are signed in at once (Analysts and Viewers need no second step). Their consent is recorded for
+  that workspace.
+- **Existing account, signed out:** they type their password on the invitation page. It runs the same checks as
+  sign-in (lockouts, failure log, same error text), then the usual second step, and the session opens in the new
+  workspace. This also covers someone removed from every workspace, who could not sign in normally.
+- **Already signed in as the invited address:** one click, and the session moves to the new workspace. Signed in
+  as someone else: the page says whose invitation it is and offers "Sign out". The API answers `403 wrong_account`.
+- A link alone never opens an existing account: whoever intercepts the email still needs the password or a
+  session.
+- **Google:** a new invitee sets a password. "Continue with Google" later links automatically, because the
+  address is confirmed (M3 linking rules). An existing Google-only account is told to sign in with Google and
+  then open the link again. Carrying the invitation through Google's redirect would have meant keeping the token
+  in browser storage, which D17/D25 avoid.
+
+### D37. Permissions in the API and the web app
+- `app/auth/permissions.py` holds BUILD_SPEC 6.2 as data (16 permissions × 3 roles). The only checks are
+  `require()` and `allowed()`. Routes use the `requires(Permission.X)` dependency, which checks first and then
+  scopes the database session (D34). `tests/unit/test_permissions.py` compares every cell with the spec table.
+- **Owners without 2FA may do nothing** in a workspace (403 `two_factor_required`), which covers D25's "owner
+  permissions" and more. Analysts and Viewers without 2FA keep their permissions (2FA is optional for them).
+- **Viewers may export only items shared with them.** `require(…, EXPORT, resource)` asks the item
+  (`is_shared_with(user_id)`). Sharing arrives in M10.
+- `/auth/me` (and every sign-in answer) includes `permissions`, so the web app does not keep its own copy of the
+  matrix. The menu shows items by permission. Two changes from the 11a.4 menu: **Activity** is shown to
+  Analysts as well (6.2 gives them their own entries), and **Settings** to everyone (account, security,
+  appearance). Connections and Team stay Owner-only.
+- `GET /org` (the workspace profile) needs `shared.view` (everyone). `PATCH /org` needs `org.manage`. In M4 the
+  profile is the name and time zone. Plan, key and usage come in M5, impact thresholds and privacy actions later.
+
+### D38. Switching workspace
+- `POST /auth/switch-organization` moves the **current session** to another workspace the person belongs to.
+  It answers 404 for one they are not in, exactly like a missing one. It returns a new access token; the refresh
+  cookie stays the same, so the next refresh also opens the new workspace.
+- An access token for the old workspace now answers `401 token_expired` (not `invalid_token`). Other tabs refresh
+  silently and follow. The web app clears its query cache whenever the workspace changes, so nothing from the
+  old one can show.
+- The last workspace's id (not secret) is kept in `localStorage` and sent as `organization_id` at the next sign-in.
+  The API ignores it if the person is no longer a member there.
+- The switcher sits under the brand in the sidebar (just the initial on the tablet rail) and in the phone header.
+  With one workspace it is a plain label.
+
+### D39. Activity log screen
+- Owners see the whole workspace and Analysts only their own entries. Asking for someone else's entries returns an
+  empty list rather than an error. Viewers get 403. Entries without a workspace (failed sign-in with an unknown
+  email) are never shown.
+- Filters: person, kind (a prefix that matches whole segments: `auth.login` matches `auth.login.failure`, not
+  `auth.loginx`), and from/to dates in the **workspace's time zone**. Pages use a keyset cursor on
+  (`at`, `id`), 50 per page.
+- CSV export uses the same filters and scope. It holds at most 20,000 rows (`X-Rows-Truncated` says when rows were
+  left out) and is built in memory: FastAPI closes the database session before a streamed response finishes.
+  The file has a UTF-8 BOM for Excel. Cells that start with `= + - @` are prefixed with `'` (CSV injection). Every
+  export is itself logged (`audit.exported`).
+- The web app describes each action in plain words ("Changed ravi@… from Viewer to Analyst"), and shows the raw
+  name for actions it does not know yet. i18n keys use `_` because `.` means nesting in i18next.
+
+### D40. UI and test details
+- **Select is a styled native `<select>`** rather than a custom shadcn list. It is accessible as it stands, and
+  phones show their own picker. **Dialog** (Radix) is added for confirmations, with a `danger` button variant
+  (white on `loss`, contrast tested).
+- Button names include their visible text (WCAG 2.5.3): "Send again to dev@…", "Cancel invitation to dev@…". The
+  workspace switcher's name is its visible text plus ", switch workspace".
+- `tests/api/test_route_matrix.py` lists **every route in the API**. A new route fails the build until it is
+  marked public, person-scoped (tested in its own file) or a workspace route. Workspace routes are then tested
+  automatically for 401, 403 per role, 403 for an Owner without 2FA, 404 with another workspace's id, 404 for a
+  missing id, 422 and success, plus a check that no data from another workspace appears.
+- `tests/tenancy.py` creates people in several workspaces and gives them access tokens directly. That makes the
+  matrix fast and independent of the sign-in screens, which have their own tests.

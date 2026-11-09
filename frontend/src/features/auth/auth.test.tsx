@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { setAccessToken } from '../../lib/api'
+import { ROLE_PERMISSIONS } from '../../lib/permissions'
 import { renderApp } from '../../test-utils'
 import {
   apiError,
@@ -60,12 +61,18 @@ describe('guard', () => {
   it('shows the Viewer only what a Viewer may open', async () => {
     fakeApi({
       ...csrfRoute,
-      'POST /auth/refresh': { status: 200, body: sessionResponse({ role: 'viewer' }) },
+      'POST /auth/refresh': {
+        status: 200,
+        body: sessionResponse({ role: 'viewer', permissions: ROLE_PERMISSIONS.viewer }),
+      },
     })
     renderSignedOut('/today')
     const nav = await screen.findByTestId('side-nav')
-    expect(within(nav).queryByRole('link', { name: 'Team' })).not.toBeInTheDocument()
+    for (const name of ['Team', 'Connections', 'Activity']) {
+      expect(within(nav).queryByRole('link', { name })).not.toBeInTheDocument()
+    }
     expect(within(nav).getByRole('link', { name: 'Ask' })).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'Settings' })).toBeInTheDocument()
   })
 })
 

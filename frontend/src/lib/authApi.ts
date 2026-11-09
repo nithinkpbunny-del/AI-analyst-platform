@@ -28,6 +28,8 @@ export interface SessionInfo {
   session_expires_at: string
   idle_timeout_minutes: number
   two_factor: TwoFactorInfo
+  /** What this person may do in this workspace (BUILD_SPEC 6.2). The API still checks every request. */
+  permissions: string[]
 }
 
 export interface SessionResponse extends SessionInfo {
@@ -49,6 +51,14 @@ export interface ChallengeResponse {
 }
 
 export type LoginResponse = SessionResponse | ChallengeResponse
+
+/** The session moved to another workspace: a new access token; the refresh cookie is unchanged. */
+export interface SwitchedResponse extends SessionInfo {
+  status: 'signed_in'
+  access_token: string
+  token_type: 'bearer'
+  expires_in: number
+}
 
 export interface SetupInfo {
   method: TwoFactorMethod
@@ -102,8 +112,11 @@ export const authApi = {
     request<Done>('/auth/verify-email', { method: 'POST', body: { token } }),
   resendVerification: (email: string) =>
     request<Accepted>('/auth/resend-verification', { method: 'POST', body: { email } }),
-  login: (email: string, password: string) =>
-    request<LoginResponse>('/auth/login', { method: 'POST', body: { email, password } }),
+  login: (email: string, password: string, organization_id?: string | null) =>
+    request<LoginResponse>('/auth/login', {
+      method: 'POST',
+      body: { email, password, ...(organization_id ? { organization_id } : {}) },
+    }),
   loginVerify: (challenge_token: string, code: string) =>
     request<SessionResponse>('/auth/login/verify', {
       method: 'POST',
@@ -154,6 +167,11 @@ export const authApi = {
   resetPassword: (token: string, password: string) =>
     request<Done>('/auth/reset-password', { method: 'POST', body: { token, password } }),
   me: () => authedRequest<SessionInfo>('/auth/me'),
+  switchOrganization: (organization_id: string) =>
+    authedRequest<SwitchedResponse>('/auth/switch-organization', {
+      method: 'POST',
+      body: { organization_id },
+    }),
   // Signed-in security settings.
   setup: (method: TwoFactorMethod, code?: string) =>
     authedRequest<SetupInfo>('/auth/2fa/setup', { method: 'POST', body: { method, code } }),

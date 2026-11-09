@@ -7,6 +7,7 @@ import { Field } from '../../components/ui/input'
 import { ApiError } from '../../lib/api'
 import { useAuth } from '../../lib/authContext'
 import { authApi } from '../../lib/authApi'
+import { rememberedWorkspace } from '../../lib/workspace'
 import { AuthPage } from './AuthLayout'
 import { GoogleButton } from './GoogleSignIn'
 import { looksLikeEmail } from './linkToken'
@@ -51,7 +52,7 @@ export function SignInPage() {
     if (Object.keys(errors).length) return
     setBusy(true)
     try {
-      finish(await authApi.login(email.trim(), password), next)
+      finish(await authApi.login(email.trim(), password, rememberedWorkspace()), next)
     } catch (error) {
       if (error instanceof ApiError) {
         setProblem({ code: error.code, message: error.message })

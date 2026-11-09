@@ -1,0 +1,7 @@
+Hi,
+
+{{ inviter_name }} invited you to {{ org_name }} on Analyst as {{ role_article }} {{ role_label }}. {{ role_summary }}
+
+Accept the invitation: {{ link }}
+
+The link works for {{ days }} days and only for {{ email }}. If you did not expect this invitation, you can ignore this email.

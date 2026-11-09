@@ -28,6 +28,7 @@ const pairs: [string, string, number][] = [
   ['caution', 'surface', TEXT],
   ['gain', 'gain-soft', TEXT], // status pills
   ['loss', 'loss-soft', TEXT],
+  ['surface', 'loss', TEXT], // danger buttons (remove someone)
   ['caution', 'caution-soft', TEXT],
   ['ink', 'caution-soft', TEXT], // quality banner
   ['line-strong', 'surface', UI], // input and control borders

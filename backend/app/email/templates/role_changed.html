@@ -1,0 +1,9 @@
+{% extends "_layout.html" %}
+{% block body %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">Your role in {{ org_name }} changed</h1>
+<p style="margin:0 0 12px;">Hi {{ name }}, {{ changed_by }} made you {{ role_article }} {{ role_label }} in {{ org_name }}. {{ role_summary }}</p>
+{% if needs_two_factor %}
+<p style="margin:0;">Owners must use two-step verification. You will be asked to turn it on the next time you open Analyst.</p>
+{% endif %}
+{% with url=link, label="Open Analyst" %}{% include "_button.html" %}{% endwith %}
+{% endblock %}

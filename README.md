@@ -40,6 +40,9 @@ Open http://localhost:5173, choose **Create an account**, then open the confirma
 (scan the QR code) or codes by email (they arrive in Mailpit). Save the recovery codes it shows.
 "Continue with Google" uses a local stand-in page until you add real Google credentials (`docs/SETUP_GOOGLE.md`).
 
+To try roles, open **Team** as an Owner and invite someone (any address works locally: the invitation lands in
+Mailpit). Open the link in a private window to accept it as that person.
+
 ## Layout
 `backend/` FastAPI + Celery · `frontend/` React + Vite · `design/` design tokens · `eval/` demo-data generator and answer key ·
 `scripts/` helpers · `docs/` architecture, design, decisions, progress.

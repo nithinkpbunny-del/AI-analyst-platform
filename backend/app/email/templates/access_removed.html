@@ -1,0 +1,5 @@
+{% extends "_layout.html" %}
+{% block body %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">You no longer have access to {{ org_name }}</h1>
+<p style="margin:0;">Hi {{ name }}, {{ removed_by }} removed you from {{ org_name }} on Analyst. You were signed out of it on every device. If you think this is a mistake, ask an Owner of {{ org_name }} to invite you again.</p>
+{% endblock %}

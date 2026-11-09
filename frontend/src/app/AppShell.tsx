@@ -2,10 +2,10 @@ import { LogOut, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen } from '
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
+import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher'
 import { Sheet, SheetContent, SheetTrigger } from '../components/ui/sheet'
-import { useAuth } from '../lib/authContext'
+import { useAuth, useSession } from '../lib/authContext'
 import { cn } from '../lib/cn'
-import { useRole } from '../lib/role'
 import { brandIcon as BrandIcon, mainNav, mobileTabs, visibleAdminNav, type NavItem } from './nav'
 
 const COLLAPSE_KEY = 'analyst.sidebarCollapsed'
@@ -53,7 +53,7 @@ function SideLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
 /** Desktop: collapsible sidebar. Tablet: icon rail. Hidden on phones (bottom tabs instead). */
 function SideNav() {
   const { t } = useTranslation()
-  const role = useRole()
+  const { permissions } = useSession()
   const signOut = useSignOut()
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const toggle = () => {
@@ -66,7 +66,7 @@ function SideNav() {
       return !value
     })
   }
-  const admin = visibleAdminNav(role)
+  const admin = visibleAdminNav(permissions)
 
   return (
     <nav
@@ -90,6 +90,14 @@ function SideNav() {
           {t('app.name')}
         </span>
       </div>
+      {/* Tablet rail: the initial only. Desktop: the name, unless the sidebar is collapsed. */}
+      <WorkspaceSwitcher compact className="desktop:hidden" />
+      {collapsed ? (
+        <WorkspaceSwitcher compact className="hidden desktop:flex" />
+      ) : (
+        <WorkspaceSwitcher className="hidden desktop:flex" />
+      )}
+      <hr className="mt-2 mb-3 border-line" />
       {mainNav.map((item) => (
         <SideLink key={item.key} item={item} collapsed={collapsed} />
       ))}
@@ -136,14 +144,14 @@ function SideNav() {
 /** Phones: bottom tab bar (Today, Ask, Dashboard, More) and a floating Ask button. */
 function MobileNav() {
   const { t } = useTranslation()
-  const role = useRole()
+  const { permissions } = useSession()
   const location = useLocation()
   const signOut = useSignOut()
   const [moreOpen, setMoreOpen] = useState(false)
   const tabs = mainNav.filter((item) => mobileTabs.includes(item.key))
   const rest = [
     ...mainNav.filter((item) => !mobileTabs.includes(item.key)),
-    ...visibleAdminNav(role),
+    ...visibleAdminNav(permissions),
   ]
   const moreActive = rest.some((item) => location.pathname.startsWith(item.path))
   const tabClass = (active: boolean) =>
@@ -238,8 +246,9 @@ export function AppShell() {
       <SideNav />
       <div className="min-w-0 flex-1">
         <header className="flex min-h-14 items-center gap-2 border-b border-line bg-surface px-4 tablet:hidden">
-          <BrandIcon className="size-5 text-neel" aria-hidden strokeWidth={1.75} />
+          <BrandIcon className="size-5 shrink-0 text-neel" aria-hidden strokeWidth={1.75} />
           <span className="font-display text-h4 font-semibold">{t('app.name')}</span>
+          <WorkspaceSwitcher className="ml-auto w-auto max-w-[60%]" />
         </header>
         <main
           id="main"

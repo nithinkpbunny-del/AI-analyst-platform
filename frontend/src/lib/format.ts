@@ -57,3 +57,32 @@ export function formatRelativeTime(from: Date | string, now: Date = new Date()):
   if (days < 7) return `${days} days ago`
   return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`
 }
+
+/** "9 Nov 2026" in the given time zone (default: the device's). */
+export function formatDate(value: Date | string, timeZone?: string): string {
+  const date = typeof value === 'string' ? new Date(value) : value
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone,
+  }).format(date)
+}
+
+/** "9 Nov 2026, 2:30 pm" in the given time zone (default: the device's). */
+export function formatDateTime(value: Date | string, timeZone?: string): string {
+  const date = typeof value === 'string' ? new Date(value) : value
+  const parts = new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone,
+  }).formatToParts(date)
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? ''
+  const period = get('dayPeriod').toLowerCase()
+  return `${get('day')} ${get('month')} ${get('year')}, ${get('hour')}:${get('minute')} ${period}`
+}

@@ -3,6 +3,7 @@
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken, Session, UserToken
 from app.models.consent import Consent
+from app.models.invitation import Invitation
 from app.models.org import Membership, Organization
 from app.models.two_factor import KnownDevice, LoginChallenge, TwoFactor, TwoFactorCode
 from app.models.user import User
@@ -10,6 +11,7 @@ from app.models.user import User
 __all__ = [
     "AuditLog",
     "Consent",
+    "Invitation",
     "KnownDevice",
     "LoginChallenge",
     "Membership",

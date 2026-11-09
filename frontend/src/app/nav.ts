@@ -13,7 +13,7 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react'
-import type { Role } from '../lib/role'
+import type { Permission } from '../lib/permissions'
 
 export interface NavItem {
   path: string
@@ -31,7 +31,8 @@ export interface NavItem {
     | 'activity'
     | 'settings'
   icon: LucideIcon
-  ownerOnly?: boolean
+  /** Shown only to people with this permission (BUILD_SPEC 6.2). */
+  permission?: Permission
 }
 
 // Order follows BUILD_SPEC 11a.4.
@@ -46,17 +47,19 @@ export const mainNav: NavItem[] = [
 ]
 
 export const adminNav: NavItem[] = [
-  { path: '/connections', key: 'connections', icon: Plug, ownerOnly: true },
-  { path: '/team', key: 'team', icon: Users, ownerOnly: true },
-  { path: '/activity', key: 'activity', icon: Activity, ownerOnly: true },
-  { path: '/settings', key: 'settings', icon: Settings, ownerOnly: true },
+  { path: '/connections', key: 'connections', icon: Plug, permission: 'connections.manage' },
+  { path: '/team', key: 'team', icon: Users, permission: 'members.manage' },
+  // Analysts see their own entries (BUILD_SPEC 6.2), so Activity is not Owner-only.
+  { path: '/activity', key: 'activity', icon: Activity, permission: 'audit.view_own' },
+  // Everyone has their own account and security settings.
+  { path: '/settings', key: 'settings', icon: Settings },
 ]
 
 /** Phone bottom tabs: Today, Ask, Dashboard, then "More" for everything else. */
 export const mobileTabs: NavItem['key'][] = ['today', 'ask', 'dashboard']
 
-export function visibleAdminNav(role: Role): NavItem[] {
-  return adminNav.filter((item) => !item.ownerOnly || role === 'owner')
+export function visibleAdminNav(permissions: readonly string[]): NavItem[] {
+  return adminNav.filter((item) => !item.permission || permissions.includes(item.permission))
 }
 
 export const brandIcon = Gauge

@@ -2,8 +2,10 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import {
+  analystSession,
   authScreens,
   codeChallenge,
+  invitationToken,
   open,
   recoveryCodes,
   screens,
@@ -28,6 +30,13 @@ for (const screen of screens) {
       if (screen === 'settings') {
         await expect(page.getByText(/API connected/)).toBeVisible()
         await expect(page.getByText('Safari on iPhone')).toBeVisible()
+      }
+      if (screen === 'team') {
+        await expect(page.getByText('meera@urbancart.in')).toBeVisible()
+        await expect(page.getByText('Lata Menon')).toBeVisible()
+      }
+      if (screen === 'activity') {
+        await expect(page.getByText('Turned on two-step verification')).toBeVisible()
       }
       await expect(page).toHaveScreenshot(`${screen}.png`, { fullPage: true })
     })
@@ -133,4 +142,71 @@ test('an Owner without two-step verification is sent to set it up', async ({ pag
   await open(page, '/today', { refresh: sessionWithout2fa })
   await expect(page).toHaveURL(/\/setup-two-factor$/)
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Turn on two-step verification')
+})
+
+// M4: invitations, the team's remove dialog, an Analyst's view and the workspace switcher.
+const teamScreens = {
+  'accept-invite': (page: Page) =>
+    open(page, `/accept-invite#token=${invitationToken}`, { signedIn: false }),
+  'team-remove-dialog': async (page: Page) => {
+    await open(page, '/team')
+    await page.getByRole('button', { name: 'Remove Ravi Kumar' }).click()
+    await page.getByRole('dialog', { name: 'Remove Ravi Kumar?' }).waitFor()
+  },
+  'activity-analyst': async (page: Page) => {
+    await open(page, '/activity', {
+      refresh: analystSession,
+      audit: {
+        entries: [
+          {
+            id: 'a4',
+            at: '2026-10-29T13:05:00+00:00',
+            action: 'auth.login.success',
+            user_id: 'u2',
+            user_name: 'Ravi Kumar',
+            user_email: 'ravi@urbancart.in',
+            target_type: 'session',
+            target_id: 's9',
+            ip: '198.51.100.7',
+            browser: 'Safari on iPhone',
+            details: {},
+          },
+        ],
+        next_cursor: null,
+        scope: 'own',
+      },
+    })
+    await page.getByText('You see your own activity.', { exact: false }).waitFor()
+  },
+  'workspace-switcher': async (page: Page) => {
+    await open(page, '/today', { refresh: analystSession })
+    await page
+      .getByRole('button', { name: /switch workspace/ })
+      .filter({ visible: true })
+      .first()
+      .click()
+    await page.getByRole('list', { name: 'Your workspaces' }).waitFor()
+  },
+}
+
+for (const [name, reach] of Object.entries(teamScreens)) {
+  test.describe(name, () => {
+    test('looks right', async ({ page }) => {
+      await reach(page)
+      await expect(page).toHaveScreenshot(`${name}.png`, { fullPage: true })
+    })
+
+    test('has no accessibility violations', async ({ page }) => {
+      await reach(page)
+      await noAxeViolations(page)
+    })
+  })
+}
+
+test('Analysts do not get the Team screen in their menu', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('desktop'), 'desktop sidebar')
+  await open(page, '/today', { refresh: analystSession })
+  const nav = page.getByTestId('side-nav')
+  await expect(nav.getByRole('link', { name: 'Activity' })).toBeVisible()
+  await expect(nav.getByRole('link', { name: 'Team' })).toHaveCount(0)
 })

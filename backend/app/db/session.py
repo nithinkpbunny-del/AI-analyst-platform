@@ -1,4 +1,4 @@
-"""Engine and session factory. Tenant scoping (``SET LOCAL app.org_id``) is added with the RLS milestone (M4)."""
+"""Engine and session factory. Tenant scoping (``SET LOCAL app.org_id`` + RLS) lives in ``app.db.tenant``."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from contextlib import contextmanager
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
+
+import app.db.tenant  # noqa: F401  (registers the tenant-scoping hook on every Session)
 
 
 def make_engine(database_url: str, *, connect_timeout_seconds: int = 5) -> Engine:

@@ -25,6 +25,9 @@ SUBJECTS = {
     "two_factor_code": "Your sign-in code",
     "new_sign_in": "New sign-in to your account",
     "two_factor_changed": "Your two-step verification changed",
+    "invitation": "You are invited to join a workspace on Analyst",
+    "role_changed": "Your role changed",
+    "access_removed": "Your access to a workspace was removed",
 }
 
 

@@ -10,10 +10,10 @@ agent fetches the **latest** data, computes answers with exact code, and replies
 |---|---|
 | Live data (P1) | Fetch when a question is asked; reuse a snapshot only within `CACHE_TTL_SECONDS`. |
 | Read-only (P2) | Several independent layers: read-only OAuth scopes, GET-only HTTP wrapper, SELECT-only SQL guard, read-only DB sessions, DuckDB with no external access, stored copies of files. |
-| Tenant isolation (P3) | Every tenant table has `org_id`; Postgres Row-Level Security reads `app.org_id` set per request; the repository layer filters again; cross-tenant access answers **404**. |
+| Tenant isolation (P3) | Every tenant table has `org_id`; workspace requests run each transaction as the restricted `app_tenant` role with `app.org_id` set (`SET LOCAL`), so Postgres Row-Level Security hides other workspaces; the repository layer filters again; cross-tenant access answers **404** (DECISIONS D34). |
 | LLM reasons, code computes (P4) | Numbers come from SQL/pandas/statsmodels tools. A post-check verifies each number in an answer against a tool result. |
 | Trust (P5) | Each tool result has a `result_id` with source, query, fetch time and row count; data-quality warnings travel with the answer. |
-| Least privilege (P6) | One `require(user, org, permission, resource)` function; the agent runs with the asking user's `AccessContext`. |
+| Least privilege (P6) | One `require(auth, permission, resource)` function (`app/auth/permissions.py`, the 6.2 matrix as data), applied by the `requires()` route dependency; the agent runs with the asking user's `AccessContext`. |
 
 ## Stack
 

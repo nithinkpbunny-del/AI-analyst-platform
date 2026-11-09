@@ -1,4 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router'
+import { ActivityPage } from '../features/activity/ActivityPage'
+import { AcceptInvitePage } from '../features/auth/AcceptInvitePage'
 import { AuthLayout } from '../features/auth/AuthLayout'
 import {
   CheckEmailPage,
@@ -13,12 +15,14 @@ import { SignUpPage } from '../features/auth/SignUpPage'
 import { LoginSetupPage, RequiredSetupPage, TwoFactorPage } from '../features/auth/TwoFactorPages'
 import { PlaceholderPage } from '../features/placeholder/PlaceholderPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
+import { TeamPage } from '../features/team/TeamPage'
 import { AppShell } from './AppShell'
 import { adminNav, mainNav } from './nav'
 import { RedirectIfSignedIn, RequireAuth } from './RequireAuth'
 
 export function AppRoutes() {
-  const placeholders = [...mainNav, ...adminNav].filter((item) => item.key !== 'settings')
+  const built = new Set(['settings', 'team', 'activity'])
+  const placeholders = [...mainNav, ...adminNav].filter((item) => !built.has(item.key))
   return (
     <Routes>
       <Route element={<AuthLayout />}>
@@ -37,6 +41,7 @@ export function AppRoutes() {
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/accept-invite" element={<AcceptInvitePage />} />
       </Route>
       <Route element={<RequireAuth />}>
         <Route element={<AuthLayout />}>
@@ -48,6 +53,8 @@ export function AppRoutes() {
             <Route key={item.key} path={item.path} element={<PlaceholderPage item={item} />} />
           ))}
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/team" element={<TeamPage />} />
+          <Route path="/activity" element={<ActivityPage />} />
           <Route path="*" element={<Navigate to="/today" replace />} />
         </Route>
       </Route>

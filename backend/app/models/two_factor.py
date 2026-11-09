@@ -101,7 +101,7 @@ class LoginChallenge(IdMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     org_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
     )
     kind: Mapped[str] = mapped_column(String(24), nullable=False)
     auth_method: Mapped[str] = mapped_column(String(16), nullable=False)

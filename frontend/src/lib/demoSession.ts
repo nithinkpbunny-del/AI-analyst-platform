@@ -1,4 +1,5 @@
 import type { SessionInfo } from './authApi'
+import { ROLE_PERMISSIONS } from './permissions'
 
 /** A signed-in Owner of the UrbanCart demo shop, for Storybook, component tests and screenshots. */
 export const demoSession: SessionInfo = {
@@ -28,4 +29,5 @@ export const demoSession: SessionInfo = {
   session_expires_at: '2026-11-09T18:30:00+00:00',
   idle_timeout_minutes: 30,
   two_factor: { enabled: true, method: 'totp', required: true, recovery_codes_remaining: 10 },
+  permissions: ROLE_PERMISSIONS.owner,
 }

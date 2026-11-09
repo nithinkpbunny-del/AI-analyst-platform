@@ -28,7 +28,14 @@ from app.auth.deps import (
     require_csrf,
 )
 from app.auth.devices import DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE
-from app.auth.service import AuthService, IssuedSession, LoginOutcome, PendingSignIn
+from app.auth.permissions import permissions_for
+from app.auth.service import (
+    AuthService,
+    IssuedSession,
+    LoginOutcome,
+    PendingSignIn,
+    SwitchedSession,
+)
 from app.auth.tokens import new_opaque_token
 from app.auth.two_factor import SetupStarted
 from app.config import Settings
@@ -53,6 +60,8 @@ from app.schemas.auth import (
     SetupDoneOut,
     SetupOut,
     SignupRequest,
+    SwitchedOut,
+    SwitchOrganizationRequest,
     TokenRequest,
     TwoFactorOut,
     UserOut,
@@ -144,6 +153,7 @@ def _me(
 ) -> dict[str, Any]:
     two_factor = service.factors.summary(user.id)
     return {
+        "permissions": permissions_for(role, two_factor_enabled=two_factor.enabled),
         "user": UserOut(
             id=user.id,
             email=user.email,
@@ -500,3 +510,38 @@ def secure_account(body: TokenRequest, service: AuthServiceDep) -> Done:
     return Done(
         message="Every device is signed out. Choose a new password now to keep your account safe."
     )
+
+
+def switched_out(request: Request, service: AuthService, switched: SwitchedSession) -> SwitchedOut:
+    now = request.app.state.clock()
+    return SwitchedOut(
+        **_me(
+            request,
+            service,
+            user=switched.user,
+            organization=switched.organization,
+            role=switched.role,
+            session_expires_at=switched.session.expires_at,
+            memberships=switched.memberships,
+        ),
+        access_token=switched.access_token,
+        expires_in=max(0, int((switched.access_expires_at - now).total_seconds())),
+    )
+
+
+@router.post(
+    "/switch-organization",
+    response_model=SwitchedOut,
+    responses={**_ERRORS, 404: {"description": "Not a member of that workspace"}},
+    summary="Work in another workspace you belong to",
+)
+def switch_organization(
+    body: SwitchOrganizationRequest,
+    request: Request,
+    response: Response,
+    auth: CurrentAuth,
+    service: AuthServiceDep,
+) -> SwitchedOut:
+    switched = service.switch_organization(auth, body.organization_id)
+    response.headers["Cache-Control"] = "no-store"
+    return switched_out(request, service, switched)

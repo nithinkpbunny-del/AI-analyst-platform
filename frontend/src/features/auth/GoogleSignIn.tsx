@@ -37,7 +37,7 @@ function GoogleMark() {
 }
 
 /** "Continue with Google", shown only when the API has Google sign-in switched on. */
-export function GoogleButton({ next }: { next: string }) {
+export function GoogleButton({ next, divider = true }: { next: string; divider?: boolean }) {
   const { t } = useTranslation()
   const providers = useQuery({
     queryKey: ['auth', 'providers'],
@@ -59,11 +59,13 @@ export function GoogleButton({ next }: { next: string }) {
           <p className="m-0 text-caption text-ink-muted">{t('auth.google.standIn')}</p>
         ) : null}
       </div>
-      <div className="flex items-center gap-3 text-small text-ink-muted" aria-hidden>
-        <span className="h-px flex-1 bg-line" />
-        {t('auth.google.or')}
-        <span className="h-px flex-1 bg-line" />
-      </div>
+      {divider ? (
+        <div className="flex items-center gap-3 text-small text-ink-muted" aria-hidden>
+          <span className="h-px flex-1 bg-line" />
+          {t('auth.google.or')}
+          <span className="h-px flex-1 bg-line" />
+        </div>
+      ) : null}
     </div>
   )
 }

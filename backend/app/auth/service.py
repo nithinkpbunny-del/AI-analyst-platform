@@ -122,8 +122,21 @@ class AuthContext:
     role: str
     session: Session
     memberships: list[tuple[Membership, Organization]]
-    # BUILD_SPEC 6.1: Owners may not perform owner actions until this is true (enforced by ``require()``, M4).
+    # BUILD_SPEC 6.1: Owners may not perform owner actions until this is true (``app.auth.permissions.require``).
     two_factor_enabled: bool = False
+
+
+@dataclass(frozen=True)
+class SwitchedSession:
+    """A session moved to another workspace: a new access token; the refresh cookie is unchanged."""
+
+    access_token: str
+    access_expires_at: datetime
+    session: Session
+    user: User
+    organization: Organization
+    role: str
+    memberships: list[tuple[Membership, Organization]]
 
 
 @dataclass
@@ -1376,6 +1389,111 @@ class AuthService:
         )
         self.db.commit()
 
+    # ------------------------------------------------------------------ helpers for invitations (M4)
+    def user_by_email(self, email: str) -> User | None:
+        return self._user_by_email(email)
+
+    def active_memberships(self, user_id: uuid.UUID) -> list[tuple[Membership, Organization]]:
+        return self._active_memberships(user_id)
+
+    def continue_sign_in(
+        self, user: User, org_id: uuid.UUID, auth_method: AuthMethod
+    ) -> LoginOutcome:
+        """The first factor passed (or an invitation was accepted): second step, or a session in ``org_id``."""
+        return self._after_first_factor(
+            user, self._active_memberships(user.id), org_id, auth_method
+        )
+
+    def check_password_for(self, user: User | None, email: str, password: str) -> User:
+        """The password checks of ``login`` (throttle, failure log, same answers) for an invitation sign-in."""
+        ip = self.meta.ip or "-"
+        lockout = self.login_throttle.check(email, ip, self._now())
+        if lockout:
+            self._login_failed(email, user, "rate_limited", count=False)
+            raise ApiError(
+                429,
+                "too_many_attempts",
+                "Too many sign-in attempts. Wait a few minutes, or reset your password.",
+                headers={"Retry-After": str(lockout.retry_after_seconds)},
+            )
+        if user is None or user.password_hash is None:
+            passwords.burn_verification_time(password)
+            self._login_failed(email, user, "unknown_email" if user is None else "no_password")
+            raise ApiError(401, "invalid_credentials", INVALID_CREDENTIALS)
+        if not passwords.verify_password(user.password_hash, password):
+            self._login_failed(email, user, "bad_password")
+            raise ApiError(401, "invalid_credentials", INVALID_CREDENTIALS)
+        if not user.is_active:
+            self._login_failed(email, user, "inactive")
+            raise ApiError(401, "invalid_credentials", INVALID_CREDENTIALS)
+        if passwords.needs_rehash(user.password_hash):
+            user.password_hash = passwords.hash_password(password)
+        self.login_throttle.record_success(email, ip)
+        return user
+
+    def revoke_member_sessions(self, user_id: uuid.UUID, org_id: uuid.UUID) -> int:
+        """End someone's sessions in one workspace (they were removed from it). Returns how many ended."""
+        sessions = self.db.scalars(
+            select(Session).where(
+                Session.user_id == user_id,
+                Session.org_id == org_id,
+                Session.revoked_at.is_(None),
+            )
+        ).all()
+        for session in sessions:
+            self._revoke_session(session, "access_removed")
+        return len(sessions)
+
+    # ------------------------------------------------------------------ switching workspace (M4)
+    def switch_organization(self, auth: AuthContext, org_id: uuid.UUID) -> SwitchedSession:
+        """Move this session to another workspace the person belongs to. Not a member: 404, like a missing one.
+
+        The refresh token stays the same; later refreshes issue tokens for the new workspace. Access tokens for
+        the old one stop working (``authenticate`` answers ``token_expired``, so other tabs refresh and follow).
+        """
+        chosen = next(((m, o) for m, o in auth.memberships if o.id == org_id), None)
+        if chosen is None:
+            raise ApiError(404, "not_found", "Not found.")
+        membership, organization = chosen
+        now = self._now()
+        session = self.db.get(Session, auth.session.id, with_for_update=True)
+        if session is None or session.revoked_at is not None:
+            self.db.rollback()
+            raise ApiError(401, "session_revoked", "You were signed out. Sign in again.")
+        previous = session.org_id
+        session.org_id = organization.id
+        session.last_seen_at = now
+        if previous != organization.id:
+            audit.write(
+                self.db,
+                action="auth.workspace_switched",
+                at=now,
+                meta=self.meta,
+                org_id=organization.id,
+                user_id=auth.user.id,
+                target_type="session",
+                target_id=session.id,
+            )
+        access, access_expires = issue_access_token(
+            secret=self.settings.jwt_secret.get_secret_value(),
+            user_id=auth.user.id,
+            org_id=organization.id,
+            role=membership.role,
+            session_id=session.id,
+            now=now,
+            lifetime=timedelta(minutes=self.settings.access_token_minutes),
+        )
+        self.db.commit()
+        return SwitchedSession(
+            access_token=access,
+            access_expires_at=access_expires,
+            session=session,
+            user=auth.user,
+            organization=organization,
+            role=membership.role,
+            memberships=auth.memberships,
+        )
+
     # ------------------------------------------------------------------ per-request authentication
     def authenticate(self, access_token: str) -> AuthContext:
         now = self._now()
@@ -1389,8 +1507,11 @@ class AuthService:
             raise ApiError(401, "invalid_token", "Sign in to continue.") from error
 
         session = self.db.get(Session, claims.session_id, with_for_update=False)
-        if session is None or session.user_id != claims.user_id or session.org_id != claims.org_id:
+        if session is None or session.user_id != claims.user_id:
             raise ApiError(401, "invalid_token", "Sign in to continue.")
+        if session.org_id != claims.org_id:
+            # The session switched workspace (maybe in another tab): a refresh gives a token for the new one.
+            raise ApiError(401, "token_expired", "Your sign-in needs refreshing.")
         self._check_session_alive(session)
         user, memberships = self._session_people(session)
         membership, organization = next((m, o) for m, o in memberships if o.id == session.org_id)

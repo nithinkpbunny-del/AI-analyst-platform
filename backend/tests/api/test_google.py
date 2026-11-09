@@ -25,6 +25,7 @@ from app.main import create_app
 from app.models import AuditLog, Membership, TwoFactor, User
 from tests.authflow import PASSWORD, login, registered_user, set_up_email_2fa, signup
 from tests.conftest import FakeClock
+from tests.tenancy import add_second_owner
 
 EMAIL = "asha@urbancart.in"
 SUB = "110169484474386276334"
@@ -349,7 +350,10 @@ class TestExistingAccount:
         provider: StandInGoogleProvider,
     ) -> None:
         registered_user(client, outbox)
-        membership = db.scalars(select(Membership)).one()
+        add_second_owner(db)  # a workspace always keeps one active Owner
+        membership = db.scalars(
+            select(Membership).join(User).where(User.email == "asha@urbancart.in")
+        ).one()
         membership.role = "analyst"  # an Analyst who never turned 2FA on
         two_factor = db.get(TwoFactor, membership.user_id)
         assert two_factor is not None
