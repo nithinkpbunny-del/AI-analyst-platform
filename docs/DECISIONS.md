@@ -221,3 +221,117 @@ named in `organization_id`. Switching workspaces comes with M4.
 - `make e2e-update` now rewrites **every** baseline (`--update-snapshots=all`). The default only rewrites
   failing ones, and the 0.2% pixel tolerance let small but real changes pass: the new sidebar "Sign out" item,
   and an M1b empty-state width that the old baselines no longer matched.
+
+## M3: 2FA, Google sign-in, devices
+
+### D25. Sign-in is two steps when a second factor is needed
+- A correct password (or a Google sign-in) no longer creates a session by itself. When a second factor is needed,
+  `/auth/login` answers `two_factor_required` (enter a code) or `two_factor_setup_required` (an Owner without 2FA
+  sets it up now), with an opaque **challenge token**. Only its SHA-256 is stored (`login_challenges`). The web
+  app keeps it in memory, never in storage. The session and its cookies are created only after the second step.
+- A challenge lasts **15 minutes** (enough time to install an app and scan a QR code). It is single use and allows
+  **5 wrong codes**, after which the person signs in again.
+- "Mandatory for Owners" means **an Owner of any workspace**. Someone who owns one workspace and is an Analyst in
+  another still needs 2FA to sign in to either. That is simpler and safer than tracking it per workspace.
+- Google sign-in goes through the same second step. Google's own 2FA cannot be verified by us.
+- `AuthContext.two_factor_enabled` is set on every request. **M4's `require()` must refuse every owner
+  permission when it is false.** That covers people made Owner later (and any Owner session from before M3).
+  Until then, the web app sends such a person to `/setup-two-factor` before any other screen.
+
+### D26. How second-factor secrets are stored
+- `two_factor` has one row per person (primary key `user_id`). `pending_method` / `pending_totp_secret_enc` hold a
+  method being set up or changed. The active method keeps working until the new one is confirmed with a code.
+  `totp_last_step` stops a TOTP code from being used twice (or an older one being used after a newer one).
+- The TOTP secret is **envelope-encrypted** (`app/security/crypto.py`): a random AES-256-GCM data key per value,
+  wrapped by a key derived from `MASTER_KEY` with HKDF. The associated data names the person, so a ciphertext
+  copied into another person's row does not decrypt. A blob that does not decrypt **fails closed** (the code
+  is refused and an error is logged, never a 500). M5 reuses this module for the `secrets` table and adds KMS
+  behind the same `key_version`.
+- Email codes (`two_factor_codes`) and recovery codes are stored as **HMAC-SHA256 with a key derived from
+  `MASTER_KEY`**, not plain hashes. A 6-digit code or a ~49-bit recovery code is too short for a plain hash to
+  survive a database leak. argon2 would cost ~50 ms per code, ×10 at every recovery-code check.
+- Recovery codes: 10 per person, `xxxxx-xxxxx` from 31 letters and digits with no look-alikes (i, l, o, 0, 1).
+  Each works once. They are shown once and replaced as a set (on "Create new recovery codes" and on a method
+  change).
+- TOTP: `pyotp` defaults (SHA-1, 6 digits, 30 s), ±1 step as the spec says, issuer "Analyst". The API sends
+  the QR code as rows of modules (`segno`) and the web app draws it, so the secret never goes to an image
+  service and no QR library ships in the browser.
+- SMS codes stay out of scope. `app/auth/code_delivery.py` is the interface, and email is its only
+  implementation.
+
+### D27. Limits on codes
+- 5 attempts per email code (spec), and also per challenge (D25).
+- Per person: **10 wrong codes within 15 minutes lock code entry** (429 with `Retry-After`), doubling like
+  sign-in lockouts. This matters because each new password sign-in starts a fresh challenge with 5 attempts.
+  The lock is per person, not per IP, because whoever is guessing already has the password.
+- Code emails: at most **10 per person per hour**. Resending during sign-in waits 30 s between sends and allows 5
+  sends per challenge.
+- Failures are logged as `auth.login.failure` with reason `bad_2fa_code`, `bad_2fa_setup_code` or
+  `two_factor_locked`.
+
+### D28. Changing 2FA while signed in ("step-up")
+- Changing the method, creating new recovery codes and turning 2FA off all need **a code from the current method
+  or a recovery code**. Email-method users ask for one with `/auth/2fa/send-code`. A stolen session alone
+  therefore cannot replace someone's second factor.
+- Owners cannot turn 2FA off (403 `two_factor_required`); they can switch methods.
+- Every change sends a "Your two-step verification changed" email and writes an activity-log entry:
+  `auth.2fa.enabled`, `auth.2fa.method_changed`, `auth.2fa.disabled`, `auth.2fa.recovery_codes_regenerated`,
+  `auth.2fa.recovery_code_used`, `auth.2fa.code_failed`.
+
+### D29. Google sign-in details
+- Authlib builds the authorization request and the PKCE challenge. The ID token is checked with `joserfc`
+  (Authlib's JOSE library). The code exchange is one `httpx` POST. Authlib's own httpx client integration is
+  deprecated as of Authlib 1.9 (it asks for an `httpx2` package), so it is not used. Google's keys are cached for
+  an hour and fetched again once when a token's key is unknown (key rotation).
+- `state` and the PKCE verifier live in Redis for 10 minutes. `state` is also bound to the browser by an HttpOnly
+  cookie with **SameSite=Lax**: Strict would not be sent on Google's redirect back. Path is `/auth/google`.
+- After the callback, the browser goes to the web app with a one-time token in the URL fragment
+  (`/signin/google#token=…` or `/signup/google#token=…`). The web app exchanges it with a normal API call, so all
+  session cookies are set the same way as for a password sign-in.
+- A new person signing up with Google still names the workspace and accepts the terms (`/signup/google`). Their
+  account has no password; "Forgot password" can add one later.
+- Linking follows BUILD_SPEC 6.1: same email and Google says it is verified. If the existing account never
+  confirmed its email, its password is **removed** when linking (it may have been set by someone else: the
+  "pre-account takeover" attack). An email already linked to a different Google account is refused
+  (`google_other_account`).
+- **Stand-in provider:** with no `GOOGLE_OAUTH_CLIENT_ID` and `APP_ENV=development`, a local page on the API
+  plays Google's part, so the whole flow can be tried without credentials (BUILD_SPEC 0.4). It refuses to run in
+  production, and tests use the same class. See `docs/SETUP_GOOGLE.md`.
+
+### D30. New-device alerts
+- Each browser gets a random device id in the `analyst_device` cookie (HttpOnly, SameSite=Strict, path `/auth`,
+  400 days), signed with a key derived from `JWT_SECRET`. The database stores only its SHA-256
+  (`known_devices`, `sessions.device_id`). A forged or missing cookie counts as a new device.
+- **The first device a person ever uses is not announced**: that is their own sign-up. Every later unknown
+  device sends "New sign-in to your account" with the time in the workspace's time zone (e.g. "Mon 9 Nov 2026,
+  2:30 pm IST"), the IP address and a short browser description ("Chrome on Windows", from a small built-in
+  parser).
+- "This wasn't me" (`/secure-account#token=…`, valid 7 days, single use) signs out every session, forgets every
+  known device (so the next sign-in from any device alerts again) and ends pending sign-ins. It does not change
+  the password itself. The page sends the person straight to reset it. Each alert's link keeps working even
+  after a later alert.
+
+### D31. Your own sessions
+`/auth/sessions` lists the person's active sessions in every workspace. Sessions belong to a person, not a
+tenant. "Sign out" for one device, or for all the others. Another person's session id answers 404, exactly like
+a missing one.
+
+### D32. UI details
+- New colour tokens `qr-dark` / `qr-light` keep QR codes dark-on-light in **both** themes, because many
+  authenticator apps cannot read inverted codes. The Google "G" mark keeps its four brand colours. That is the
+  one deliberate exception to "tokens only", required by Google's sign-in branding guidelines.
+- After set-up during sign-in, the session is accepted only when the person confirms they saved the recovery
+  codes, so the codes cannot be skipped by an automatic redirect. If they reload at that moment, they are signed
+  in (the cookie is set) and can create new codes in Settings.
+- The "Continue with Google" button appears only when `/auth/providers` says Google is available. With the
+  stand-in it says "Development: Google is simulated on this computer."
+- The 6-digit field uses `autocomplete="one-time-code"` and a numeric keyboard. Spaces and dashes are ignored.
+- Fixed in passing: Settings' system status crashed when `/health/ready` sent back an error body without
+  `checks`.
+
+### D33. Tests
+- The shared test helper `login()` now completes whichever second step applies, using the **email method**:
+  codes are read from the in-memory outbox, so tests do not depend on TOTP time steps. TOTP flows have their
+  own tests that move the fake clock.
+- `tests/unit/test_devices.py` is named `test_device_ids.py` because pytest needs unique basenames
+  (`tests/api/test_devices.py` exists).

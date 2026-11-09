@@ -34,6 +34,8 @@ const pairs: [string, string, number][] = [
   ['line-strong', 'paper', UI],
   ['neel', 'paper', UI], // focus ring
   ['neel', 'surface', UI],
+  // QR codes stay dark-on-light in both themes: authenticator apps cannot read inverted codes.
+  ['qr-dark', 'qr-light', TEXT],
 ]
 
 describe.each(['light', 'dark'] as const)('%s theme contrast (WCAG 2.2 AA)', (mode) => {

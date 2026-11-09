@@ -7,6 +7,8 @@ export const demoSession: SessionInfo = {
     email: 'asha@urbancart.in',
     name: 'Asha Rao',
     preferred_language: 'en',
+    has_password: true,
+    google_linked: false,
   },
   organization: {
     id: '0196f000-0000-7000-8000-0000000000a1',
@@ -25,4 +27,5 @@ export const demoSession: SessionInfo = {
   ],
   session_expires_at: '2026-11-09T18:30:00+00:00',
   idle_timeout_minutes: 30,
+  two_factor: { enabled: true, method: 'totp', required: true, recovery_codes_remaining: 10 },
 }

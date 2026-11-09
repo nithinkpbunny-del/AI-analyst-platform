@@ -1,0 +1,5 @@
+Hi {{ name }},
+
+{{ change }}
+
+If you did not do this, reset your password now. Resetting it signs out every device: {{ link }}

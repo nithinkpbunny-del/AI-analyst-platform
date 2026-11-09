@@ -8,14 +8,16 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import httpx
 import redis
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import __version__
-from app.api import auth, health
+from app.api import auth, google, health, two_factor
 from app.api.errors import install_error_handlers
+from app.auth.google_oidc import AuthlibGoogleProvider, GoogleProvider, StandInGoogleProvider
 from app.auth.service import Clock
 from app.config import Settings, get_settings
 from app.db.session import make_engine, make_session_factory
@@ -31,6 +33,23 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def default_google_provider(
+    settings: Settings, redis_client: redis.Redis[bytes]
+) -> GoogleProvider | None:
+    """Real Google when a client id is configured; the local stand-in in development; otherwise none."""
+    if settings.google_oauth_client_id:
+        return AuthlibGoogleProvider(
+            client_id=settings.google_oauth_client_id,
+            client_secret=settings.google_oauth_client_secret.get_secret_value(),
+            http=httpx.Client(),
+        )
+    if settings.app_env == "development":
+        return StandInGoogleProvider(
+            redis_client, api_base_url=settings.api_base_url, app_env=settings.app_env
+        )
+    return None
+
+
 def create_app(
     settings: Settings | None = None,
     readiness_checks: dict[str, health.ReadinessCheck] | None = None,
@@ -39,11 +58,12 @@ def create_app(
     redis_client: redis.Redis[bytes] | None = None,
     email_sender: EmailSender | None = None,
     clock: Clock | None = None,
+    google_provider: GoogleProvider | None = None,
 ) -> FastAPI:
     """Build the app. Every dependency is injectable so tests never touch real services.
 
     Defaults: engine and Redis client from settings (both connect lazily, on first use), SMTP for email,
-    the system clock.
+    the system clock, and ``default_google_provider``.
     """
     settings = settings or get_settings()
     configure_logging(settings)
@@ -66,6 +86,9 @@ def create_app(
     )
     app.state.email_sender = email_sender or SmtpEmailSender(settings)
     app.state.clock = clock or _utc_now
+    app.state.google_provider = google_provider or default_google_provider(
+        settings, app.state.redis
+    )
     install_error_handlers(app)
 
     # The SPA runs on another origin in development; credentials are needed for the refresh cookie.
@@ -105,6 +128,8 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(two_factor.router)
+    app.include_router(google.router)
     return app
 
 

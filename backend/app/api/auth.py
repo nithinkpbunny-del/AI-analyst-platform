@@ -5,8 +5,10 @@ Cookies:
   path ``/auth`` so it is only sent to these routes. Rotated on every refresh.
 * ``analyst_csrf``: random value, readable by the web app. Cookie-authenticated routes (refresh, logout)
   require it echoed in the ``X-CSRF-Token`` header (double submit).
+* ``analyst_device``: signed random device id (HttpOnly, path ``/auth``), for "New sign-in" emails.
 
-Everything else uses the short-lived access token in ``Authorization: Bearer``.
+Everything else uses the short-lived access token in ``Authorization: Bearer``. Sign-in challenges (2FA) use an
+opaque token in the JSON body that the web app keeps in memory; it is useless without the second factor.
 """
 
 from __future__ import annotations
@@ -25,24 +27,34 @@ from app.auth.deps import (
     CurrentAuth,
     require_csrf,
 )
-from app.auth.service import AuthContext, AuthService, IssuedSession
+from app.auth.devices import DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE
+from app.auth.service import AuthService, IssuedSession, LoginOutcome, PendingSignIn
 from app.auth.tokens import new_opaque_token
+from app.auth.two_factor import SetupStarted
 from app.config import Settings
 from app.email.sender import EmailSender
-from app.models import Membership, Organization
+from app.models import Membership, Organization, User
 from app.schemas.auth import (
     Accepted,
+    ChallengeCodeRequest,
+    ChallengeOut,
+    ChallengeRequest,
+    ChallengeSetupRequest,
     CsrfOut,
     Done,
     EmailRequest,
+    LoginOut,
     LoginRequest,
     Me,
     MembershipOut,
     OrganizationOut,
     ResetPasswordRequest,
     SessionOut,
+    SetupDoneOut,
+    SetupOut,
     SignupRequest,
     TokenRequest,
+    TwoFactorOut,
     UserOut,
 )
 
@@ -61,7 +73,7 @@ def _settings(request: Request) -> Settings:
     return settings
 
 
-def _send_queued(request: Request, background: BackgroundTasks, service: AuthService) -> None:
+def send_queued(request: Request, background: BackgroundTasks, service: AuthService) -> None:
     sender: EmailSender = request.app.state.email_sender
     for message in service.outbox:
         background.add_task(sender.send, message)
@@ -94,6 +106,16 @@ def _set_auth_cookies(
         secure=settings.cookies_secure,
         samesite="strict",
     )
+    if issued.device_cookie:
+        response.set_cookie(
+            DEVICE_COOKIE,
+            issued.device_cookie,
+            max_age=DEVICE_COOKIE_MAX_AGE,
+            path="/auth",
+            httponly=True,
+            secure=settings.cookies_secure,
+            samesite="strict",
+        )
 
 
 def _clear_auth_cookies(response: Response, request: Request) -> None:
@@ -112,16 +134,23 @@ def _memberships(rows: list[tuple[Membership, Organization]]) -> list[Membership
 
 def _me(
     request: Request,
+    service: AuthService,
     *,
-    user: Any,
+    user: User,
     organization: Organization,
     role: str,
     session_expires_at: datetime,
     memberships: list[tuple[Membership, Organization]],
 ) -> dict[str, Any]:
+    two_factor = service.factors.summary(user.id)
     return {
         "user": UserOut(
-            id=user.id, email=user.email, name=user.name, preferred_language=user.preferred_language
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            preferred_language=user.preferred_language,
+            has_password=user.password_hash is not None,
+            google_linked=user.google_sub is not None,
         ),
         "organization": OrganizationOut(
             id=organization.id,
@@ -134,23 +163,66 @@ def _me(
         "memberships": _memberships(memberships),
         "session_expires_at": session_expires_at.isoformat(),
         "idle_timeout_minutes": _settings(request).session_idle_minutes,
+        "two_factor": TwoFactorOut(**two_factor.__dict__),
     }
 
 
-def _session_out(request: Request, issued: IssuedSession, csrf: str, now: datetime) -> SessionOut:
-    return SessionOut(
+def _session_fields(
+    request: Request, service: AuthService, issued: IssuedSession, csrf: str, now: datetime
+) -> dict[str, Any]:
+    return {
         **_me(
             request,
+            service,
             user=issued.user,
             organization=issued.organization,
             role=issued.role,
             session_expires_at=issued.session.expires_at,
             memberships=issued.memberships,
         ),
-        access_token=issued.access_token,
-        expires_in=max(0, int((issued.access_expires_at - now).total_seconds())),
-        csrf_token=csrf,
+        "access_token": issued.access_token,
+        "expires_in": max(0, int((issued.access_expires_at - now).total_seconds())),
+        "csrf_token": csrf,
+    }
+
+
+def _session_out(
+    request: Request, service: AuthService, issued: IssuedSession, csrf: str, now: datetime
+) -> SessionOut:
+    return SessionOut(**_session_fields(request, service, issued, csrf, now))
+
+
+def _challenge_out(pending: PendingSignIn, now: datetime) -> ChallengeOut:
+    return ChallengeOut(
+        status="two_factor_required"
+        if pending.kind == "two_factor"
+        else "two_factor_setup_required",
+        challenge_token=pending.challenge_token,
+        method="totp" if pending.method == "totp" else "email" if pending.method else None,
+        email_hint=pending.email_hint,
+        code_sent=pending.code_sent,
+        expires_in=max(0, int((pending.expires_at - now).total_seconds())),
     )
+
+
+def signed_in(
+    request: Request, response: Response, service: AuthService, issued: IssuedSession
+) -> SessionOut:
+    """Set the session cookies and build the response for a finished sign-in."""
+    now = request.app.state.clock()
+    csrf_token = _csrf_value(request)
+    _set_auth_cookies(response, request, issued, csrf_token, now)
+    response.headers["Cache-Control"] = "no-store"
+    return _session_out(request, service, issued, csrf_token, now)
+
+
+def login_response(
+    request: Request, response: Response, service: AuthService, outcome: LoginOutcome
+) -> SessionOut | ChallengeOut:
+    if isinstance(outcome, PendingSignIn):
+        response.headers["Cache-Control"] = "no-store"
+        return _challenge_out(outcome, request.app.state.clock())
+    return signed_in(request, response, service, outcome)
 
 
 @router.get("/csrf", response_model=CsrfOut, summary="Get (or start) the CSRF token")
@@ -186,7 +258,7 @@ def signup(
         password=body.password,
         organization_name=body.organization_name,
     )
-    _send_queued(request, background, service)
+    send_queued(request, background, service)
     # Same answer whether or not the email already had an account (no account enumeration).
     return Accepted(message="Check your email for a link to confirm your address.")
 
@@ -210,7 +282,7 @@ def resend_verification(
     body: EmailRequest, request: Request, background: BackgroundTasks, service: AuthServiceDep
 ) -> Accepted:
     service.resend_verification(str(body.email))
-    _send_queued(request, background, service)
+    send_queued(request, background, service)
     return Accepted(
         message="If this address has an account that is not confirmed yet, we sent a new link."
     )
@@ -218,21 +290,118 @@ def resend_verification(
 
 @router.post(
     "/login",
-    response_model=SessionOut,
+    response_model=LoginOut,
     responses=_ERRORS,
-    summary="Sign in with email and password",
+    summary="Sign in with email and password (may ask for a second step)",
 )
 def login(
-    body: LoginRequest, request: Request, response: Response, service: AuthServiceDep
-) -> SessionOut:
-    issued = service.login(
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    background: BackgroundTasks,
+    service: AuthServiceDep,
+) -> SessionOut | ChallengeOut:
+    outcome = service.login(
         email=str(body.email), password=body.password, organization_id=body.organization_id
     )
-    now = request.app.state.clock()
-    csrf_token = _csrf_value(request)
-    _set_auth_cookies(response, request, issued, csrf_token, now)
+    send_queued(request, background, service)
+    return login_response(request, response, service, outcome)
+
+
+@router.post(
+    "/login/verify",
+    response_model=SessionOut,
+    responses=_ERRORS,
+    summary="Finish signing in with a 2FA code or a recovery code",
+)
+def login_verify(
+    body: ChallengeCodeRequest,
+    request: Request,
+    response: Response,
+    background: BackgroundTasks,
+    service: AuthServiceDep,
+) -> SessionOut:
+    issued = service.verify_login_code(body.challenge_token, body.code)
+    send_queued(request, background, service)
+    return signed_in(request, response, service, issued)
+
+
+@router.post(
+    "/login/resend-code",
+    response_model=ChallengeOut,
+    responses=_ERRORS,
+    summary="Email a new sign-in code",
+)
+def login_resend_code(
+    body: ChallengeRequest, request: Request, background: BackgroundTasks, service: AuthServiceDep
+) -> ChallengeOut:
+    pending = service.resend_login_code(body.challenge_token)
+    send_queued(request, background, service)
+    return _challenge_out(pending, request.app.state.clock())
+
+
+@router.post(
+    "/login/setup",
+    response_model=SetupOut,
+    responses=_ERRORS,
+    summary="Owners without 2FA: start setting it up during sign-in",
+)
+def login_setup(
+    body: ChallengeSetupRequest,
+    request: Request,
+    response: Response,
+    background: BackgroundTasks,
+    service: AuthServiceDep,
+) -> SetupOut:
+    started = service.begin_login_setup(body.challenge_token, body.method)
+    send_queued(request, background, service)
     response.headers["Cache-Control"] = "no-store"
-    return _session_out(request, issued, csrf_token, now)
+    return setup_out(started)
+
+
+@router.post(
+    "/login/setup/resend-code",
+    response_model=Accepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_ERRORS,
+    summary="Email a new set-up code during sign-in",
+)
+def login_setup_resend(
+    body: ChallengeRequest, request: Request, background: BackgroundTasks, service: AuthServiceDep
+) -> Accepted:
+    service.resend_login_setup_code(body.challenge_token)
+    send_queued(request, background, service)
+    return Accepted(message="We sent a new code.")
+
+
+@router.post(
+    "/login/setup/confirm",
+    response_model=SetupDoneOut,
+    responses=_ERRORS,
+    summary="Confirm the new 2FA method, get recovery codes and finish signing in",
+)
+def login_setup_confirm(
+    body: ChallengeCodeRequest,
+    request: Request,
+    response: Response,
+    background: BackgroundTasks,
+    service: AuthServiceDep,
+) -> SetupDoneOut:
+    issued, recovery = service.confirm_login_setup(body.challenge_token, body.code)
+    send_queued(request, background, service)
+    session = signed_in(request, response, service, issued)
+    return SetupDoneOut(**session.model_dump(), recovery_codes=recovery)
+
+
+def setup_out(started: SetupStarted) -> SetupOut:
+    if started.totp is not None:
+        return SetupOut(
+            method="totp",
+            secret=started.totp.secret,
+            otpauth_uri=started.totp.uri,
+            qr=started.totp.qr,
+        )
+    return SetupOut(method="email", email_hint=started.email_hint)
 
 
 @router.post(
@@ -259,7 +428,7 @@ def refresh(
     csrf_token = request.cookies.get(CSRF_COOKIE, "")
     _set_auth_cookies(response, request, issued, csrf_token, now)
     response.headers["Cache-Control"] = "no-store"
-    return _session_out(request, issued, csrf_token, now)
+    return _session_out(request, service, issued, csrf_token, now)
 
 
 @router.post(
@@ -287,7 +456,7 @@ def forgot_password(
     body: EmailRequest, request: Request, background: BackgroundTasks, service: AuthServiceDep
 ) -> Accepted:
     service.forgot_password(str(body.email))
-    _send_queued(request, background, service)
+    send_queued(request, background, service)
     return Accepted(message="If this address has an account, we sent a link to reset the password.")
 
 
@@ -301,21 +470,33 @@ def reset_password(
     service: AuthServiceDep,
 ) -> Done:
     service.reset_password(body.token, body.password)
-    _send_queued(request, background, service)
+    send_queued(request, background, service)
     return Done(message="Your password is changed. Sign in with the new password.")
 
 
 @router.get("/me", response_model=Me, responses=_ERRORS, summary="Who is signed in")
-def me(request: Request, auth: CurrentAuth) -> Me:
-    return Me(**_me_from_auth(request, auth))
+def me(request: Request, auth: CurrentAuth, service: AuthServiceDep) -> Me:
+    return Me(
+        **_me(
+            request,
+            service,
+            user=auth.user,
+            organization=auth.organization,
+            role=auth.role,
+            session_expires_at=auth.session.expires_at,
+            memberships=auth.memberships,
+        )
+    )
 
 
-def _me_from_auth(request: Request, auth: AuthContext) -> dict[str, Any]:
-    return _me(
-        request,
-        user=auth.user,
-        organization=auth.organization,
-        role=auth.role,
-        session_expires_at=auth.session.expires_at,
-        memberships=auth.memberships,
+@router.post(
+    "/secure-account",
+    response_model=Done,
+    responses=_ERRORS,
+    summary='"This wasn\'t me": sign out every device',
+)
+def secure_account(body: TokenRequest, service: AuthServiceDep) -> Done:
+    service.secure_account(body.token)
+    return Done(
+        message="Every device is signed out. Choose a new password now to keep your account safe."
     )

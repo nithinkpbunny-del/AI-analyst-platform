@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.api.errors import ApiError
 from app.audit.writer import RequestMeta
+from app.auth.devices import DEVICE_COOKIE, verified_device_id
 from app.auth.ratelimit import FixedWindowLimiter, LoginThrottle
 from app.auth.service import (
     EMAIL_LIMIT_PER_ADDRESS,
@@ -19,6 +20,11 @@ from app.auth.service import (
     AuthService,
 )
 from app.auth.tokens import tokens_match
+from app.auth.two_factor import (
+    CODE_EMAILS_PER_HOUR,
+    CODE_FAILURE_WINDOW,
+    CODE_FAILURES_BEFORE_LOCK,
+)
 from app.config import Settings
 
 REFRESH_COOKIE = "analyst_refresh"
@@ -64,6 +70,18 @@ def get_auth_service(request: Request, db: Annotated[DbSession, Depends(get_db)]
             redis_client, prefix="email-ip", limit=EMAIL_LIMIT_PER_IP, window=timedelta(hours=1)
         ),
         meta=request_meta(request),
+        code_failures=LoginThrottle(
+            redis_client,
+            max_failures=CODE_FAILURES_BEFORE_LOCK,
+            window=CODE_FAILURE_WINDOW,
+            prefix="2fa",
+        ),
+        code_email_limiter=FixedWindowLimiter(
+            redis_client, prefix="2fa-email", limit=CODE_EMAILS_PER_HOUR, window=timedelta(hours=1)
+        ),
+        device_id=verified_device_id(
+            request.cookies.get(DEVICE_COOKIE), settings.jwt_secret.get_secret_value()
+        ),
     )
 
 

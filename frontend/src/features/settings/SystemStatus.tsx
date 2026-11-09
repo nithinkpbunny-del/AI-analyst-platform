@@ -23,7 +23,7 @@ export function SystemStatus() {
         {t('settings.connected', { version: health.version, env: health.env })}
       </p>
       <ul aria-label="Service checks" className="m-0 mt-3 list-none p-0">
-        {Object.entries(readiness.checks).map(([name, result]) => (
+        {Object.entries(readiness.checks ?? {}).map(([name, result]) => (
           <li
             key={name}
             className="flex min-h-11 items-center justify-between border-t border-line text-small last:border-b"

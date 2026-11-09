@@ -1,0 +1,8 @@
+{% extends "_layout.html" %}
+{% block body %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">{{ subject }}</h1>
+<p style="margin:0;">Hi {{ name }}, {% if purpose == "setup" %}enter this code to finish turning on two-step verification.{% elif purpose == "step_up" %}enter this code to confirm the change to your security settings.{% else %}enter this code to finish signing in.{% endif %}</p>
+<p style="margin:24px 0;font-size:32px;line-height:1.15;font-weight:700;letter-spacing:6px;font-variant-numeric:tabular-nums;">{{ code }}</p>
+<p style="margin:0;">The code works once, for {{ minutes }} minutes. Never share it: we will never ask you for it.</p>
+<p style="margin:16px 0 0;">If you did not try to sign in, someone may know your password. Change it now.</p>
+{% endblock %}

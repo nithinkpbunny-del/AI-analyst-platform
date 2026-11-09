@@ -6,6 +6,8 @@ import { Button } from '../../components/ui/button'
 import { useAuth, useSession } from '../../lib/authContext'
 import { cn } from '../../lib/cn'
 import { useTheme, type ThemePreference } from '../../lib/theme'
+import { DevicesSection } from './DevicesSection'
+import { SecuritySection } from './SecuritySection'
 import { SystemStatus } from './SystemStatus'
 
 const options: { value: ThemePreference; key: string }[] = [
@@ -58,6 +60,8 @@ export function SettingsPage() {
       <PageHeader title={t('pages.settings.title')} intro={t('pages.settings.intro')} />
       <div className="grid gap-6 desktop:grid-cols-2">
         <AccountSection />
+        <SecuritySection />
+        <DevicesSection />
         <section className="rounded-panel border border-line bg-surface p-4 tablet:p-6">
           <h2 className="text-h4">{t('settings.appearance')}</h2>
           <fieldset className="m-0 mt-4 border-0 p-0">

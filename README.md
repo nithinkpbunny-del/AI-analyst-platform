@@ -36,7 +36,9 @@ Backend tests start a throwaway Postgres 16 with testcontainers, so Docker must 
 
 ## Signing in locally
 Open http://localhost:5173, choose **Create an account**, then open the confirmation email in Mailpit
-(http://localhost:8025). Owners will also need two-step verification from milestone M3.
+(http://localhost:8025). On your first sign-in, as an Owner, you set up two-step verification: an authenticator app
+(scan the QR code) or codes by email (they arrive in Mailpit). Save the recovery codes it shows.
+"Continue with Google" uses a local stand-in page until you add real Google credentials (`docs/SETUP_GOOGLE.md`).
 
 ## Layout
 `backend/` FastAPI + Celery · `frontend/` React + Vite · `design/` design tokens · `eval/` demo-data generator and answer key ·

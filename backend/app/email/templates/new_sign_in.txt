@@ -1,0 +1,11 @@
+Hi {{ name }},
+
+Your account was just used to sign in to {{ org_name }} from a device we have not seen before.
+
+When:       {{ when }}
+Browser:    {{ browser }}
+IP address: {{ ip }}
+
+If this was you, there is nothing to do.
+
+If it was not you, sign out every device now, then choose a new password: {{ link }}

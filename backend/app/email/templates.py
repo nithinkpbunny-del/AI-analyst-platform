@@ -22,11 +22,14 @@ SUBJECTS = {
     "reset_password": "Reset your password",
     "password_changed": "Your password was changed",
     "account_exists": "You already have an account",
+    "two_factor_code": "Your sign-in code",
+    "new_sign_in": "New sign-in to your account",
+    "two_factor_changed": "Your two-step verification changed",
 }
 
 
-def render(template: str, *, to: str, **context: Any) -> OutgoingEmail:
-    subject = SUBJECTS[template]
+def render(template: str, *, to: str, subject: str | None = None, **context: Any) -> OutgoingEmail:
+    subject = subject or SUBJECTS[template]
     context = {"subject": subject, **context}
     html = _env.get_template(f"{template}.html").render(**context)
     text = _env.get_template(f"{template}.txt").render(**context)

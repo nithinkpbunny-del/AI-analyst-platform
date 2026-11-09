@@ -1,0 +1,9 @@
+Hi {{ name }},
+
+{% if purpose == "setup" %}Enter this code to finish turning on two-step verification:{% elif purpose == "step_up" %}Enter this code to confirm the change to your security settings:{% else %}Enter this code to finish signing in:{% endif %}
+
+    {{ code }}
+
+The code works once, for {{ minutes }} minutes. Never share it: we will never ask you for it.
+
+If you did not try to sign in, someone may know your password. Change it now.

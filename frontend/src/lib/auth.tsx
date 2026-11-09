@@ -5,15 +5,23 @@ import {
   authApi,
   ENDED_CODES,
   endedReason,
+  isChallenge,
   refreshSession,
+  type LoginResponse,
   type SessionInfo,
   type SessionResponse,
 } from './authApi'
 
 // The API helpers live in ./authApi; this file holds React state only (keeps fast refresh working).
-import { AuthContext, type AuthContextValue, type AuthState } from './authContext'
+import {
+  AuthContext,
+  staticAuthValue,
+  type AuthContextValue,
+  type AuthState,
+  type PendingChallenge,
+} from './authContext'
 
-function toSessionInfo(response: SessionResponse): SessionInfo {
+function toSessionInfo(response: SessionInfo): SessionInfo {
   return {
     user: response.user,
     organization: response.organization,
@@ -21,14 +29,17 @@ function toSessionInfo(response: SessionResponse): SessionInfo {
     memberships: response.memberships,
     session_expires_at: response.session_expires_at,
     idle_timeout_minutes: response.idle_timeout_minutes,
+    two_factor: response.two_factor,
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: 'loading' })
+  const [challenge, setChallenge] = useState<PendingChallenge | null>(null)
 
   const accept = useCallback((response: SessionResponse) => {
     setAccessToken(response.access_token)
+    setChallenge(null)
     setState({ status: 'signedIn', session: toSessionInfo(response) })
   }, [])
 
@@ -36,6 +47,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null)
     setState({ status: 'signedOut', reason })
   }, [])
+
+  const acceptLogin = useCallback(
+    (response: LoginResponse, next = '/today') => {
+      if (isChallenge(response)) setChallenge({ ...response, next })
+      else accept(response)
+    },
+    [accept],
+  )
 
   const refresh = useCallback(
     (): Promise<string | null> =>
@@ -59,12 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setRefreshHandler(null)
   }, [refresh, accept, end])
 
-  const signIn = useCallback(
-    async (email: string, password: string) => {
-      accept(await authApi.login(email, password))
-    },
-    [accept],
-  )
+  const reload = useCallback(async () => {
+    const info = await authApi.me()
+    setState({ status: 'signedIn', session: toSessionInfo(info) })
+  }, [])
 
   const signOut = useCallback(async () => {
     try {
@@ -73,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* signed out locally either way */
     }
+    setChallenge(null)
     end(null)
   }, [end])
 
@@ -124,8 +142,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [idleMinutes, signOut, end])
 
   const value = useMemo(
-    () => ({ state, signIn, signOut, clearReason }),
-    [state, signIn, signOut, clearReason],
+    () => ({ state, challenge, acceptLogin, signOut, reload, clearReason }),
+    [state, challenge, acceptLogin, signOut, reload, clearReason],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
@@ -139,12 +157,7 @@ export function StaticAuthProvider({
   children: ReactNode
 }) {
   const value = useMemo<AuthContextValue>(
-    () => ({
-      state: { status: 'signedIn', session },
-      signIn: async () => {},
-      signOut: async () => {},
-      clearReason: () => {},
-    }),
+    () => staticAuthValue({ status: 'signedIn', session }),
     [session],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

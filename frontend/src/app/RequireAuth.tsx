@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Navigate, Outlet, useLocation } from 'react-router'
+import { safeNext } from '../features/auth/loginFlow'
 import { useAuth } from '../lib/authContext'
 import { brandIcon as BrandIcon } from './nav'
 
@@ -15,7 +16,12 @@ function SigningIn() {
   )
 }
 
-/** App screens need a session. Signed-out visitors go to sign-in and come back afterwards. */
+const SETUP_PATH = '/setup-two-factor'
+
+/**
+ * App screens need a session. Signed-out visitors go to sign-in and come back afterwards. An Owner without
+ * two-step verification (BUILD_SPEC 6.1) must set it up before using anything else.
+ */
 export function RequireAuth() {
   const { state } = useAuth()
   const location = useLocation()
@@ -23,13 +29,21 @@ export function RequireAuth() {
   if (state.status === 'signedOut') {
     return <Navigate to="/signin" replace state={{ from: location.pathname + location.search }} />
   }
+  const { two_factor } = state.session
+  if (two_factor.required && !two_factor.enabled && location.pathname !== SETUP_PATH) {
+    return <Navigate to={SETUP_PATH} replace />
+  }
   return <Outlet />
 }
 
-/** Sign-in and sign-up make no sense when already signed in. */
+/** Sign-in and sign-up make no sense when already signed in: go where the person was heading. */
 export function RedirectIfSignedIn() {
   const { state } = useAuth()
+  const location = useLocation()
   if (state.status === 'loading') return <SigningIn />
-  if (state.status === 'signedIn') return <Navigate to="/today" replace />
+  if (state.status === 'signedIn') {
+    const from = (location.state as { from?: unknown } | null)?.from
+    return <Navigate to={safeNext(from)} replace />
+  }
   return <Outlet />
 }

@@ -3,20 +3,78 @@ import type { Role } from './role'
 
 // ------------------------------------------------------------------------------------------------ API types
 
+export type TwoFactorMethod = 'totp' | 'email'
+
+export interface TwoFactorInfo {
+  enabled: boolean
+  method: TwoFactorMethod | null
+  /** Owners must have it on; the app sends them to set-up until it is. */
+  required: boolean
+  recovery_codes_remaining: number
+}
+
 export interface SessionInfo {
-  user: { id: string; email: string; name: string; preferred_language: string }
+  user: {
+    id: string
+    email: string
+    name: string
+    preferred_language: string
+    has_password: boolean
+    google_linked: boolean
+  }
   organization: { id: string; name: string; timezone: string; currency: string; plan: string }
   role: Role
   memberships: { organization_id: string; organization_name: string; role: Role }[]
   session_expires_at: string
   idle_timeout_minutes: number
+  two_factor: TwoFactorInfo
 }
 
 export interface SessionResponse extends SessionInfo {
+  status: 'signed_in'
   access_token: string
   token_type: 'bearer'
   expires_in: number
   csrf_token: string
+}
+
+/** The first step (password or Google) worked; a code is needed, or an Owner must set up 2FA first. */
+export interface ChallengeResponse {
+  status: 'two_factor_required' | 'two_factor_setup_required'
+  challenge_token: string
+  method: TwoFactorMethod | null
+  email_hint: string | null
+  code_sent: boolean
+  expires_in: number
+}
+
+export type LoginResponse = SessionResponse | ChallengeResponse
+
+export interface SetupInfo {
+  method: TwoFactorMethod
+  secret: string | null
+  otpauth_uri: string | null
+  /** QR code modules: one string of "0"/"1" per row. */
+  qr: string[] | null
+  email_hint: string | null
+}
+
+export interface SetupDoneResponse extends SessionResponse {
+  recovery_codes: string[]
+}
+
+export interface SessionItem {
+  id: string
+  current: boolean
+  browser: string
+  ip: string | null
+  created_at: string
+  last_seen_at: string
+}
+
+export interface Providers {
+  google: boolean
+  google_stand_in: boolean
 }
 
 export interface Accepted {
@@ -45,7 +103,45 @@ export const authApi = {
   resendVerification: (email: string) =>
     request<Accepted>('/auth/resend-verification', { method: 'POST', body: { email } }),
   login: (email: string, password: string) =>
-    request<SessionResponse>('/auth/login', { method: 'POST', body: { email, password } }),
+    request<LoginResponse>('/auth/login', { method: 'POST', body: { email, password } }),
+  loginVerify: (challenge_token: string, code: string) =>
+    request<SessionResponse>('/auth/login/verify', {
+      method: 'POST',
+      body: { challenge_token, code },
+    }),
+  loginResendCode: (challenge_token: string) =>
+    request<ChallengeResponse>('/auth/login/resend-code', {
+      method: 'POST',
+      body: { challenge_token },
+    }),
+  loginSetup: (challenge_token: string, method: TwoFactorMethod) =>
+    request<SetupInfo>('/auth/login/setup', { method: 'POST', body: { challenge_token, method } }),
+  loginSetupResend: (challenge_token: string) =>
+    request<Accepted>('/auth/login/setup/resend-code', {
+      method: 'POST',
+      body: { challenge_token },
+    }),
+  loginSetupConfirm: (challenge_token: string, code: string) =>
+    request<SetupDoneResponse>('/auth/login/setup/confirm', {
+      method: 'POST',
+      body: { challenge_token, code },
+    }),
+  providers: () => request<Providers>('/auth/providers'),
+  googleFinish: (token: string) =>
+    request<LoginResponse>('/auth/google/finish', { method: 'POST', body: { token } }),
+  googleSignupInfo: (token: string) =>
+    request<{ email: string; name: string }>('/auth/google/signup-info', {
+      method: 'POST',
+      body: { token },
+    }),
+  googleSignup: (body: {
+    token: string
+    name: string
+    organization_name: string
+    accept_terms: boolean
+  }) => request<LoginResponse>('/auth/google/signup', { method: 'POST', body }),
+  secureAccount: (token: string) =>
+    request<Done>('/auth/secure-account', { method: 'POST', body: { token } }),
   refresh: (csrf: string) =>
     request<SessionResponse>('/auth/refresh', {
       method: 'POST',
@@ -58,6 +154,34 @@ export const authApi = {
   resetPassword: (token: string, password: string) =>
     request<Done>('/auth/reset-password', { method: 'POST', body: { token, password } }),
   me: () => authedRequest<SessionInfo>('/auth/me'),
+  // Signed-in security settings.
+  setup: (method: TwoFactorMethod, code?: string) =>
+    authedRequest<SetupInfo>('/auth/2fa/setup', { method: 'POST', body: { method, code } }),
+  setupResend: () => authedRequest<Accepted>('/auth/2fa/setup/resend-code', { method: 'POST' }),
+  setupConfirm: (code: string) =>
+    authedRequest<{ recovery_codes: string[] }>('/auth/2fa/setup/confirm', {
+      method: 'POST',
+      body: { code },
+    }),
+  sendCode: () => authedRequest<Accepted>('/auth/2fa/send-code', { method: 'POST' }),
+  newRecoveryCodes: (code: string) =>
+    authedRequest<{ recovery_codes: string[] }>('/auth/2fa/recovery-codes', {
+      method: 'POST',
+      body: { code },
+    }),
+  disableTwoFactor: (code: string) =>
+    authedRequest<Done>('/auth/2fa/disable', { method: 'POST', body: { code } }),
+  sessions: () => authedRequest<{ sessions: SessionItem[] }>('/auth/sessions'),
+  revokeSession: (id: string) =>
+    authedRequest<void>(`/auth/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  revokeOtherSessions: () =>
+    authedRequest<{ sessions_revoked: number }>('/auth/sessions/revoke-others', {
+      method: 'POST',
+    }),
+}
+
+export function isChallenge(response: LoginResponse): response is ChallengeResponse {
+  return response.status !== 'signed_in'
 }
 
 // ------------------------------------------------------------------------------------------------- refresh

@@ -4,15 +4,20 @@ from app.models.audit import AuditLog
 from app.models.auth import RefreshToken, Session, UserToken
 from app.models.consent import Consent
 from app.models.org import Membership, Organization
+from app.models.two_factor import KnownDevice, LoginChallenge, TwoFactor, TwoFactorCode
 from app.models.user import User
 
 __all__ = [
     "AuditLog",
     "Consent",
+    "KnownDevice",
+    "LoginChallenge",
     "Membership",
     "Organization",
     "RefreshToken",
     "Session",
+    "TwoFactor",
+    "TwoFactorCode",
     "User",
     "UserToken",
 ]

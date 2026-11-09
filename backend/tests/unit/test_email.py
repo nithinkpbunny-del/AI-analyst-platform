@@ -93,3 +93,20 @@ def test_smtp_failure_is_logged_not_raised(
     SmtpEmailSender(settings).send(OutgoingEmail(to="a@x.in", subject="Hi", text="t", html="h"))
     assert "could not send email: Hi" in caplog.text
     assert "a@x.in" not in caplog.text
+
+
+def test_two_factor_code_email_by_purpose() -> None:
+    from app.auth.code_delivery import EmailCodeDelivery
+    from app.models import User
+
+    outbox: list[OutgoingEmail] = []
+    delivery = EmailCodeDelivery(outbox)
+    user = User(email="asha@urbancart.in", name="Asha")
+    delivery.deliver(user, "482913", purpose="login", minutes=10)
+    delivery.deliver(user, "112233", purpose="setup", minutes=10)
+    login, setup = outbox
+    assert (login.subject, setup.subject) == ("Your sign-in code", "Your verification code")
+    assert "482913" in login.text and "482913" in login.html
+    assert "finish signing in" in login.text
+    assert "turning on two-step verification" in setup.text
+    assert "10 minutes" in setup.html

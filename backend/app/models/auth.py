@@ -30,7 +30,8 @@ class Session(IdMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    device_id: Mapped[str | None] = mapped_column(String(64))  # M3: new-device alerts
+    # SHA-256 of the browser's device id (the signed ``analyst_device`` cookie), for new-device alerts.
+    device_id: Mapped[str | None] = mapped_column(String(64))
     ip: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(String(512))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -58,11 +59,13 @@ class RefreshToken(IdMixin, TimestampMixin, Base):
 
 
 class UserToken(IdMixin, TimestampMixin, Base):
-    """Single-use links sent by email: confirm an email address, reset a password."""
+    """Single-use links sent by email: confirm an email address, reset a password, "This wasn't me"."""
 
     __tablename__ = "user_tokens"
     __table_args__ = (
-        CheckConstraint("purpose IN ('verify_email', 'reset_password')", name="purpose"),
+        CheckConstraint(
+            "purpose IN ('verify_email', 'reset_password', 'secure_account')", name="purpose"
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(

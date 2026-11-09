@@ -22,8 +22,10 @@ from app.models import AuditLog, Consent, Membership, Organization, Session, Use
 from tests.authflow import (
     PASSWORD,
     bearer,
+    emailed_code,
     link_token,
     login,
+    login_start,
     refresh,
     registered_user,
     signup,
@@ -234,13 +236,21 @@ class TestLogin:
         assert session.user_agent
         success = db.scalars(select(AuditLog).where(AuditLog.action == "auth.login.success")).one()
         assert success.org_id == session.org_id
-        assert success.details == {"method": "password"}
+        # M3: every Owner signs in with a second step; the first device is never announced.
+        assert success.details == {"method": "password", "two_factor": "email", "new_device": False}
 
     def test_refresh_cookie_flags(self, client: TestClient, outbox: MemoryEmailSender) -> None:
         registered_user(client, outbox, "ravi@urbancart.in")
         client.cookies.clear()
+        challenge = login_start(client, "ravi@urbancart.in")
+        # No session cookie until the second step is done.
+        assert not client.cookies.get(REFRESH_COOKIE)
         response = client.post(
-            "/auth/login", json={"email": "ravi@urbancart.in", "password": PASSWORD}
+            "/auth/login/verify",
+            json={
+                "challenge_token": challenge["challenge_token"],
+                "code": emailed_code(outbox, "ravi@urbancart.in"),
+            },
         )
         cookies = response.headers.get_list("set-cookie")
         refresh_cookie = next(c for c in cookies if c.startswith(f"{REFRESH_COOKIE}="))
@@ -251,6 +261,9 @@ class TestLogin:
         assert "max-age=43200" in lowered
         csrf_cookie = next(c for c in cookies if c.startswith(f"{CSRF_COOKIE}="))
         assert "httponly" not in csrf_cookie.lower()
+        device_cookie = next(c for c in cookies if c.startswith("analyst_device=")).lower()
+        assert "httponly" in device_cookie and "samesite=strict" in device_cookie
+        assert "path=/auth" in device_cookie
         assert response.headers["cache-control"] == "no-store"
 
     @pytest.mark.parametrize(
@@ -600,8 +613,8 @@ class TestPasswordReset:
             client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD}).status_code
             == 401
         )
+        assert "Your password was changed" in [m.subject for m in outbox.to(EMAIL)]
         login(client, EMAIL, new_password)
-        assert outbox.to(EMAIL)[-1].subject == "Your password was changed"
         assert {"auth.password_reset.requested", "auth.password_reset.completed"} <= set(
             actions(db)
         )

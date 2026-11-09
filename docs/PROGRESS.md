@@ -1,7 +1,8 @@
 # Progress
 
-**Next milestone: M3: 2FA, Google sign-in, devices** (start when the human says "continue").
-**Unfinished work:** none for M2.
+**Next milestone: M4: Orgs, roles, invites, RLS** (start when the human says "continue").
+**Unfinished work:** none for M3. Carry into M4: `require()` must refuse owner permissions while
+`AuthContext.two_factor_enabled` is false (DECISIONS D25).
 
 ## Milestone checklist (BUILD_SPEC §14)
 
@@ -9,7 +10,7 @@
 - [x] M1: Foundation
 - [x] M1b: Design system + app shell
 - [x] M2: Auth core
-- [ ] M3: 2FA, Google sign-in, devices
+- [x] M3: 2FA, Google sign-in, devices
 - [ ] M4: Orgs, roles, invites, RLS
 - [ ] M5: Secrets, LLM layer, plans, usage
 - [ ] M6: Connections framework + Excel/CSV + Google Sheets
@@ -156,3 +157,64 @@ http://localhost:5173, create an account, confirm it from Mailpit at http://loca
   `make e2e-update` now rewrites every baseline, so baselines match the code exactly, but a check alone
   can still miss small changes. Consider a tighter threshold when it proves stable.
 - Backend tests need Docker running (testcontainers), as CI already has.
+
+---
+
+## M3: 2FA, Google sign-in, devices (done)
+
+**Built**
+- Database (migration `0003`, reversible): `two_factor`, `two_factor_codes`, `login_challenges`, `known_devices`;
+  `user_tokens` gains the "This wasn't me" link purpose.
+- **Two-step sign-in.** After a correct password (or Google), the API returns either a session or a challenge:
+  "enter your code", or for an Owner without 2FA, "set it up now". The session exists only after the second
+  step. Methods: an **authenticator app** (TOTP, QR code + typed key, ±1 step, no code reuse) or **6-digit
+  email codes** (10 minutes, single use, 5 attempts). **10 recovery codes** each work once. Mandatory for
+  anyone who owns a workspace; optional for everyone else.
+- Limits: 5 wrong codes per sign-in attempt; 10 wrong codes in 15 minutes lock code entry for that person
+  (doubling); 10 code emails per person per hour; 30 s between resends.
+- Signed-in settings (`/auth/2fa/*`): turn on, change method, create new recovery codes, turn off (not for
+  Owners). Changes need a code from the current method. Every change emails the person and is logged.
+- **Google sign-in** (`/auth/google/*`): OIDC with PKCE, state and nonce; ID token checked (signature, issuer,
+  audience, expiry, nonce, verified email). Linking follows the spec, and an unconfirmed password is removed when
+  Google proves the email. New people name their workspace and accept the terms. Google still goes through our
+  2FA. With no Google credentials, development uses a **local stand-in page** (`docs/SETUP_GOOGLE.md`).
+- **Devices:** signed device cookie. A sign-in from a new device emails "New sign-in" (time in IST, browser, IP)
+  with a **"This wasn't me"** link that signs out every device. Settings lists **signed-in devices**, with "Sign
+  out" for one or all others.
+- Envelope encryption module (`app/security/crypto.py`, AES-256-GCM + HKDF from `MASTER_KEY`), used now for
+  TOTP secrets and by M5 for connection secrets.
+- SMS codes: interface only (`app/auth/code_delivery.py`), as the spec says.
+- Web app: "Continue with Google" on sign-in and sign-up; code step (`/signin/verify`) with "Use a recovery code
+  instead" and "Send a new code"; set-up during sign-in (`/signin/setup`): choose a method, QR code or emailed
+  code, then recovery codes (copy, download, "I have saved them"). Google return and sign-up pages, "This
+  wasn't me" page, and a forced set-up page for signed-in Owners without 2FA. Settings gains "Two-step
+  verification" and "Signed-in devices". New tokens `qr-dark`/`qr-light`. Storybook stories for the new
+  screens, recovery codes and QR code.
+- Activity log: `auth.2fa.*`, `auth.google.linked`, `auth.device.new`, `auth.device.reported`,
+  `auth.session.revoked`, `auth.session.revoked_others`; `auth.login.success` now records method, second factor
+  and new device; new failure reasons for codes.
+- Design decisions D25–D33 in `docs/DECISIONS.md`.
+
+**Test status:** backend 314 passed (2FA flows, TOTP replay, lockouts, recovery codes, step-up, Google flow with
+every callback failure, ID-token checks with locally signed tokens, device alerts, "This wasn't me", sessions
+incl. 404 for someone else's, secrets at rest, fail-closed decryption, no codes in logs, migration round-trip);
+ruff + mypy strict clean. Frontend: vitest 185 passed; eslint, prettier, tsc, tokens:check clean; build OK (shell
+127.5 KB of 200 KB gzipped); Storybook builds. Playwright 203 passed (29 skipped by design), including new
+baselines for the code step, set-up choice, QR step, recovery codes, forced set-up and "This wasn't me", with axe
+checks. A live run against `make dev` passed 21 checks: sign-up, Mailpit, TOTP set-up, second device, replay
+refused, new-sign-in email, "This wasn't me", Google stand-in sign-up.
+
+**How to try it:** see the testing steps given at the end of M3 (summary: `make dev`, create an account, confirm it
+in Mailpit, sign in, set up an authenticator app or email codes, save the recovery codes; sign in from a private
+window to get the "New sign-in" email).
+
+**Known gaps / notes**
+- No owner-only actions exist yet. M4's `require()` must check `two_factor_enabled` for owner permissions
+  (D25).
+- Real Google sign-in needs your OAuth client (`docs/SETUP_GOOGLE.md`). Until then the stand-in is used locally.
+- The IP address in "New sign-in" emails and the devices list is the direct peer. Behind a load balancer it
+  needs trusted proxy headers (M19, as noted in M2).
+- The browser description is a small built-in user-agent parser: good for "Chrome on Windows", not for exotic
+  browsers.
+- Workspace switching (choosing which organisation to sign in to) is still the M2 behaviour: first membership.
+

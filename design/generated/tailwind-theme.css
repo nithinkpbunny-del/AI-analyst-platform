@@ -23,6 +23,8 @@
   --color-caution-soft: var(--caution-soft);
   --color-loss-soft: var(--loss-soft);
   --color-gain-soft: var(--gain-soft);
+  --color-qr-dark: var(--qr-dark);
+  --color-qr-light: var(--qr-light);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);

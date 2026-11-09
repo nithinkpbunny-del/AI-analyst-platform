@@ -62,6 +62,7 @@ export const signedOutRoutes = {
 export function sessionResponse(overrides: Partial<SessionResponse> = {}): SessionResponse {
   return {
     ...demoSession,
+    status: 'signed_in',
     access_token: 'access-1',
     token_type: 'bearer',
     expires_in: 600,

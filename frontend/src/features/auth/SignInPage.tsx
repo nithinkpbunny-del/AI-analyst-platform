@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { FormAlert } from '../../components/FormAlert'
 import { Button } from '../../components/ui/button'
 import { Field } from '../../components/ui/input'
@@ -8,24 +8,22 @@ import { ApiError } from '../../lib/api'
 import { useAuth } from '../../lib/authContext'
 import { authApi } from '../../lib/authApi'
 import { AuthPage } from './AuthLayout'
+import { GoogleButton } from './GoogleSignIn'
 import { looksLikeEmail } from './linkToken'
+import { safeNext, useFinishLogin, useGoogleError } from './loginFlow'
 
 interface Problem {
   code: string
   message: string
 }
 
-/** Where to go after signing in: the page the person was sent away from, if it is one of ours. */
-function nextPath(state: unknown): string {
-  const from = (state as { from?: string } | null)?.from
-  return from && from.startsWith('/') && !from.startsWith('//') ? from : '/today'
-}
-
 export function SignInPage() {
   const { t } = useTranslation()
-  const { state, signIn, clearReason } = useAuth()
-  const navigate = useNavigate()
+  const { state, clearReason } = useAuth()
+  const finish = useFinishLogin()
   const location = useLocation()
+  const next = safeNext((location.state as { from?: unknown } | null)?.from)
+  const googleError = useGoogleError(location.search)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({})
@@ -53,8 +51,7 @@ export function SignInPage() {
     if (Object.keys(errors).length) return
     setBusy(true)
     try {
-      await signIn(email.trim(), password)
-      void navigate(nextPath(location.state), { replace: true })
+      finish(await authApi.login(email.trim(), password), next)
     } catch (error) {
       if (error instanceof ApiError) {
         setProblem({ code: error.code, message: error.message })
@@ -74,6 +71,7 @@ export function SignInPage() {
   return (
     <AuthPage title={t('auth.signIn.title')} intro={t('auth.signIn.intro')}>
       {reason ? <FormAlert tone="info">{reason}</FormAlert> : null}
+      {googleError && !problem ? <FormAlert tone="error">{googleError}</FormAlert> : null}
       {resent ? (
         <FormAlert tone="success">{t('auth.signIn.resent', { email: email.trim() })}</FormAlert>
       ) : null}
@@ -95,6 +93,7 @@ export function SignInPage() {
           {problem.message}
         </FormAlert>
       ) : null}
+      <GoogleButton next={next} />
       <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-5">
         <Field
           label={t('auth.email')}

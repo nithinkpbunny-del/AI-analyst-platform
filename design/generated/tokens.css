@@ -51,6 +51,8 @@
   --caution-soft: #FBF3E4;
   --loss-soft: #FBECEA;
   --gain-soft: #E6F4EF;
+  --qr-dark: #1E1C3A;
+  --qr-light: #FFFFFF;
   --chart-1: #3A36A8;
   --chart-2: #11795A;
   --chart-3: #B07400;
@@ -81,6 +83,8 @@
     --caution-soft: #2E2630;
     --loss-soft: #33213A;
     --gain-soft: #183040;
+    --qr-dark: #1E1C3A;
+    --qr-light: #FFFFFF;
     --chart-1: #8F8BFF;
     --chart-2: #4FD1A1;
     --chart-3: #F0B44C;
@@ -111,6 +115,8 @@
   --caution-soft: #2E2630;
   --loss-soft: #33213A;
   --gain-soft: #183040;
+  --qr-dark: #1E1C3A;
+  --qr-light: #FFFFFF;
   --chart-1: #8F8BFF;
   --chart-2: #4FD1A1;
   --chart-3: #F0B44C;

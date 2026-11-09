@@ -7,9 +7,9 @@ import { CheckboxField, Field } from '../../components/ui/input'
 import { ApiError } from '../../lib/api'
 import { authApi } from '../../lib/authApi'
 import { AuthPage } from './AuthLayout'
+import { ConsentLabel } from './ConsentLabel'
+import { GoogleButton } from './GoogleSignIn'
 import { looksLikeEmail } from './linkToken'
-
-const SITE_URL: string = import.meta.env.VITE_SITE_BASE_URL ?? 'http://localhost:4321'
 
 type FieldName = 'name' | 'email' | 'organization_name' | 'password' | 'accept_terms'
 
@@ -63,6 +63,7 @@ export function SignUpPage() {
 
   return (
     <AuthPage title={t('auth.signUp.title')} intro={t('auth.signUp.intro')}>
+      <GoogleButton next="/today" />
       {problem ? <FormAlert tone="error">{problem}</FormAlert> : null}
       <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-5">
         <Field
@@ -107,19 +108,7 @@ export function SignUpPage() {
           checked={accepted}
           onChange={setAccepted}
           error={errors.accept_terms}
-          label={
-            <>
-              {t('auth.signUp.consentBefore')}{' '}
-              <a href={`${SITE_URL}/privacy`} target="_blank" rel="noreferrer">
-                {t('auth.signUp.privacy')}
-              </a>{' '}
-              {t('auth.signUp.and')}{' '}
-              <a href={`${SITE_URL}/terms`} target="_blank" rel="noreferrer">
-                {t('auth.signUp.terms')}
-              </a>
-              .
-            </>
-          }
+          label={<ConsentLabel />}
         />
         <Button type="submit" disabled={busy} className="w-full">
           {t('auth.signUp.submit')}
