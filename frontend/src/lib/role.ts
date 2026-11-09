@@ -1,6 +1,10 @@
+import { useContext } from 'react'
+import { AuthContext } from './authContext'
+
 export type Role = 'owner' | 'analyst' | 'viewer'
 
-/** The signed-in user's role. Authentication arrives in M2; until then the shell shows the Owner view. */
+/** The signed-in user's role in the current organisation. Outside a signed-in session: the least access. */
 export function useRole(): Role {
-  return 'owner'
+  const auth = useContext(AuthContext)
+  return auth?.state.status === 'signedIn' ? auth.state.session.role : 'viewer'
 }

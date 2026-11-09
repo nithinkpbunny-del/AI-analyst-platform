@@ -95,7 +95,7 @@ e2e: ## Visual snapshots + accessibility + layout checks (Playwright in Docker, 
 	$(PLAYWRIGHT_RUN) "npm ci --no-audit --no-fund && npx playwright test"
 
 e2e-update: ## Re-record visual snapshots after an intended design change (then review the PNGs)
-	$(PLAYWRIGHT_RUN) "npm ci --no-audit --no-fund && npx playwright test --update-snapshots"
+	$(PLAYWRIGHT_RUN) "npm ci --no-audit --no-fund && npx playwright test --update-snapshots=all"
 
 
 # --- Demo data and evaluation -------------------------------------------------------------------------------------

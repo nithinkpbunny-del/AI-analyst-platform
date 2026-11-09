@@ -3,10 +3,19 @@ import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router'
 import { AppRoutes } from './app/AppRoutes'
 import { Providers } from './app/Providers'
+import type { SessionInfo } from './lib/authApi'
+import { demoSession } from './lib/demoSession'
 
-export function renderApp(path = '/today') {
+/**
+ * Render the whole app at `path`. By default with a fixed signed-in Owner; pass `session: null` to use the
+ * real auth provider (then mock `fetch` for /auth/*).
+ */
+export function renderApp(
+  path = '/today',
+  { session = demoSession }: { session?: SessionInfo | null } = {},
+) {
   return render(
-    <Providers>
+    <Providers session={session ?? undefined}>
       <MemoryRouter initialEntries={[path]}>
         <AppRoutes />
       </MemoryRouter>

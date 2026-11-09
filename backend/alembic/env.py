@@ -6,20 +6,22 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
+import app.models  # noqa: F401  (registers every table on Base.metadata)
 from alembic import context
 from app.config import get_settings
 from app.db.base import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-# Importing the models package (added in M2+) registers tables on Base.metadata.
 target_metadata = Base.metadata
 
 
 def _url() -> str:
-    return get_settings().database_url
+    # Tests pass their own database through ``config.attributes`` so the developer's .env is never used.
+    override = config.attributes.get("database_url")
+    return str(override) if override else get_settings().database_url
 
 
 def run_migrations_offline() -> None:

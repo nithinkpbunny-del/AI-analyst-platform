@@ -1,0 +1,7 @@
+{% extends "_layout.html" %}
+{% block body %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">You already have an account</h1>
+<p style="margin:0;">Someone tried to create a new Analyst account with this email address. You already have one, so nothing was changed.</p>
+{% with url=link, label="Sign in" %}{% include "_button.html" %}{% endwith %}
+<p style="margin:16px 0 0;">Forgot your password? <a href="{{ reset_link }}" style="color:#3A36A8;">Reset it here</a>.</p>
+{% endblock %}

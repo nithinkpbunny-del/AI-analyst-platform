@@ -1,0 +1,6 @@
+{% extends "_layout.html" %}
+{% block body %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">Confirm your email address</h1>
+<p style="margin:0;">Hi {{ name }}, confirm this address to finish setting up {{ org_name }}. The link works for {{ hours }} hours.</p>
+{% with url=link, label="Confirm email" %}{% include "_button.html" %}{% endwith %}
+{% endblock %}

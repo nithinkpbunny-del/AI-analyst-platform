@@ -2,12 +2,13 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter } from 'react-router'
 import { AppRoutes } from '../app/AppRoutes'
 import { Providers } from '../app/Providers'
+import { demoSession } from '../lib/demoSession'
 import { dark, phone } from './variants'
 
 function Shell({ path }: { path: string }) {
   return (
     <div className="-m-4">
-      <Providers>
+      <Providers session={demoSession}>
         <MemoryRouter initialEntries={[path]}>
           <AppRoutes />
         </MemoryRouter>

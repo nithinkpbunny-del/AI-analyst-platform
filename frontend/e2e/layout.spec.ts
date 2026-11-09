@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { open, screens } from './helpers'
+import { authScreens, open, screens } from './helpers'
 
 // Layout behaviour across the four widths of BUILD_SPEC 11a.9 (run once, in the desktop-light project).
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument
@@ -25,6 +25,10 @@ for (const size of widths) {
     await page.setViewportSize(size)
     for (const screen of screens) {
       await open(page, `/${screen}`)
+      expect(await hasNoHorizontalScroll(page), screen).toBe(true)
+    }
+    for (const screen of authScreens) {
+      await open(page, `/${screen}`, { signedIn: false })
       expect(await hasNoHorizontalScroll(page), screen).toBe(true)
     }
   })

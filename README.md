@@ -31,6 +31,12 @@ make e2e         # visual snapshots + accessibility + layout checks (Playwright 
 make tokens      # regenerate design/generated/ after editing design/tokens.json
 make help        # every command
 ```
+Backend tests start a throwaway Postgres 16 with testcontainers, so Docker must be running (or set
+`TEST_DATABASE_URL` to an empty database you own). They never touch your dev database or `.env`.
+
+## Signing in locally
+Open http://localhost:5173, choose **Create an account**, then open the confirmation email in Mailpit
+(http://localhost:8025). Owners will also need two-step verification from milestone M3.
 
 ## Layout
 `backend/` FastAPI + Celery · `frontend/` React + Vite · `design/` design tokens · `eval/` demo-data generator and answer key ·

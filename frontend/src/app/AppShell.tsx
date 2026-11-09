@@ -1,13 +1,23 @@
-import { Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { LogOut, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Outlet, useLocation } from 'react-router'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { Sheet, SheetContent, SheetTrigger } from '../components/ui/sheet'
+import { useAuth } from '../lib/authContext'
 import { cn } from '../lib/cn'
 import { useRole } from '../lib/role'
 import { brandIcon as BrandIcon, mainNav, mobileTabs, visibleAdminNav, type NavItem } from './nav'
 
 const COLLAPSE_KEY = 'analyst.sidebarCollapsed'
+
+function useSignOut() {
+  const { signOut } = useAuth()
+  const navigate = useNavigate()
+  return async () => {
+    await signOut()
+    void navigate('/signin', { replace: true })
+  }
+}
 
 function readCollapsed(): boolean {
   try {
@@ -44,6 +54,7 @@ function SideLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
 function SideNav() {
   const { t } = useTranslation()
   const role = useRole()
+  const signOut = useSignOut()
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const toggle = () => {
     setCollapsed((value) => {
@@ -92,10 +103,25 @@ function SideNav() {
       )}
       <button
         type="button"
+        onClick={() => void signOut()}
+        title={t('account.signOut')}
+        className={cn(
+          'mt-auto flex min-h-11 items-center gap-3 rounded-control px-3 text-small font-medium text-ink-muted hover:bg-neel-soft hover:text-ink',
+          'justify-center desktop:justify-start',
+          collapsed && 'desktop:justify-center',
+        )}
+      >
+        <LogOut className="size-5 shrink-0" aria-hidden strokeWidth={1.5} />
+        <span className={cn('sr-only', !collapsed && 'desktop:not-sr-only')}>
+          {t('account.signOut')}
+        </span>
+      </button>
+      <button
+        type="button"
         onClick={toggle}
         aria-label={collapsed ? t('nav.expand') : t('nav.collapse')}
         aria-pressed={collapsed}
-        className="mt-auto hidden min-h-11 items-center justify-center rounded-control text-ink-muted hover:bg-neel-soft hover:text-ink desktop:flex"
+        className="hidden min-h-11 items-center justify-center rounded-control text-ink-muted hover:bg-neel-soft hover:text-ink desktop:flex"
       >
         {collapsed ? (
           <PanelLeftOpen className="size-5" aria-hidden strokeWidth={1.5} />
@@ -112,6 +138,7 @@ function MobileNav() {
   const { t } = useTranslation()
   const role = useRole()
   const location = useLocation()
+  const signOut = useSignOut()
   const [moreOpen, setMoreOpen] = useState(false)
   const tabs = mainNav.filter((item) => mobileTabs.includes(item.key))
   const rest = [
@@ -180,6 +207,17 @@ function MobileNav() {
                 )
               })}
             </ul>
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false)
+                void signOut()
+              }}
+              className="mt-4 flex min-h-12 w-full items-center gap-3 rounded-control border border-line px-3 text-small font-medium text-ink"
+            >
+              <LogOut className="size-5" aria-hidden strokeWidth={1.5} />
+              {t('account.signOut')}
+            </button>
           </SheetContent>
         </Sheet>
       </nav>

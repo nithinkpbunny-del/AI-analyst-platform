@@ -1,14 +1,14 @@
 # Progress
 
-**Next milestone: M2: Auth core** (start when the human says "continue").
-**Unfinished work:** none for M1b.
+**Next milestone: M3: 2FA, Google sign-in, devices** (start when the human says "continue").
+**Unfinished work:** none for M2.
 
 ## Milestone checklist (BUILD_SPEC §14)
 
 ### Phase 1: MVP
 - [x] M1: Foundation
 - [x] M1b: Design system + app shell
-- [ ] M2: Auth core
+- [x] M2: Auth core
 - [ ] M3: 2FA, Google sign-in, devices
 - [ ] M4: Orgs, roles, invites, RLS
 - [ ] M5: Secrets, LLM layer, plans, usage
@@ -103,3 +103,56 @@ desktop-only checks).
 - Remaining shadcn primitives (Toast, Dialog, Tabs, Table, Select, DatePicker) are added with their first screen
   (DECISIONS D11). The command palette and the `/` shortcut arrive with Ask (M8).
 - The role is fixed to Owner until auth (M2).
+
+---
+
+## M2: Auth core (done)
+
+**Built**
+- Database (migration `0002`, reversible): `organizations`, `users` (citext email), `memberships`, `sessions`,
+  `refresh_tokens`, `user_tokens` (email links), `consents`, `audit_log` (append-only: triggers reject UPDATE,
+  DELETE and TRUNCATE).
+- `/auth` API: `csrf`, `signup`, `verify-email`, `resend-verification`, `login`, `refresh`, `logout`,
+  `forgot-password`, `reset-password`, `me`. One error shape: `{"error": {"code", "message", "fields"}}`.
+- Sign-up creates the organisation, makes the person its Owner, records consent (policy version) and emails a
+  confirmation link. Login is refused until the email is confirmed.
+- Passwords: argon2id; at least 10 characters; checked against the bundled NCSC list of the 100k most common
+  passwords; no composition rules.
+- Sessions: 10-minute access JWT kept in memory. HttpOnly SameSite=Strict refresh cookie, rotated on every use.
+  Reuse of an old refresh token ends the whole session. 30-minute idle and 12-hour absolute limits are enforced
+  on the server. Double-submit CSRF protects refresh and logout. Role and membership are re-read on every request,
+  so removal takes effect immediately.
+- Rate limits: 5 failed sign-ins per email+IP per 15 min, then lockouts that double. Limits on email-sending
+  requests per IP and per recipient. No account enumeration: same answers and similar timing.
+- Password reset: single-use 60-minute link; signs out every device; sends a "password changed" email.
+- Activity log entries for sign-up, consent, email confirmation, every login success/failure (with reason),
+  logout, token reuse, session timeouts and password resets.
+- Emails (HTML + text) through SMTP, i.e. Mailpit locally.
+- Web app: sign in, create account, check email, confirm email, forgot password and reset password screens.
+  Route guard (signed-out visitors go to sign in and come back afterwards). Session restored on reload.
+  "Why you were signed out" note. Client-side idle sign-out and activity pings. Sign out in the sidebar,
+  the phone "More" sheet and Settings (new Account section). `useRole()` now uses the real role.
+- Design decisions D14–D24 in `docs/DECISIONS.md`.
+
+**Test status:** backend 204 passed (API flows, security attacks incl. refresh-token reuse, forged/tampered JWTs,
+append-only audit, no secrets in DB or logs, migration round-trip); ruff + mypy strict clean. Frontend: vitest 162
+passed; eslint, prettier, tsc, tokens:check clean; build OK (shell 119.3 KB of 200 KB gzipped); Storybook builds.
+Playwright 151 passed (29 skipped by design), now including 24 sign-in-screen baselines and their axe checks.
+A live check against `make dev` (sign-up → Mailpit → confirm → login → refresh → replay of the old refresh
+token) behaved as expected.
+
+**How to try it:** see the testing steps given at the end of M2 (summary: `make dev`, open
+http://localhost:5173, create an account, confirm it from Mailpit at http://localhost:8025, sign in).
+
+**Known gaps / notes**
+- 2FA (mandatory for Owners), Google sign-in and new-device alerts are M3, so Owners currently sign in with a
+  password only. The `sessions.device_id` column is ready for M3.
+- Route-test rule: auth routes are public or self-only, so 401 is tested. 403 (wrong role) and 404
+  (cross-tenant) begin with the first role-restricted and tenant-owned routes in M4, together with RLS and
+  `require()`.
+- Privacy policy and terms links point to the marketing site, which is built in M10b.
+- Behind a load balancer the client IP needs trusted proxy headers (M19).
+- Visual-snapshot tolerance (0.2% of pixels) is loose enough to miss small changes such as one nav item.
+  `make e2e-update` now rewrites every baseline, so baselines match the code exactly, but a check alone
+  can still miss small changes. Consider a tighter threshold when it proves stable.
+- Backend tests need Docker running (testcontainers), as CI already has.

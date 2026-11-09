@@ -1,6 +1,9 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router'
 import { PageHeader } from '../../components/PageHeader'
+import { Button } from '../../components/ui/button'
+import { useAuth, useSession } from '../../lib/authContext'
 import { cn } from '../../lib/cn'
 import { useTheme, type ThemePreference } from '../../lib/theme'
 import { SystemStatus } from './SystemStatus'
@@ -10,6 +13,38 @@ const options: { value: ThemePreference; key: string }[] = [
   { value: 'light', key: 'settings.themeLight' },
   { value: 'dark', key: 'settings.themeDark' },
 ]
+
+function AccountSection() {
+  const { t } = useTranslation()
+  const session = useSession()
+  const { signOut } = useAuth()
+  const navigate = useNavigate()
+  return (
+    <section className="rounded-panel border border-line bg-surface p-4 tablet:p-6">
+      <h2 className="text-h4">{t('account.title')}</h2>
+      <p className="m-0 mt-4 text-small break-words">
+        {t('account.signedInAs', { name: session.user.name, email: session.user.email })}
+      </p>
+      <dl className="m-0 mt-4 grid grid-cols-[auto_1fr] text-small">
+        <dt className="flex min-h-11 items-center border-b border-line pr-6 text-ink-muted">
+          {t('account.workspace')}
+        </dt>
+        <dd className="m-0 flex min-h-11 items-center border-b border-line">
+          {session.organization.name}
+        </dd>
+        <dt className="flex min-h-11 items-center pr-6 text-ink-muted">{t('account.role')}</dt>
+        <dd className="m-0 flex min-h-11 items-center">{t(`account.roles.${session.role}`)}</dd>
+      </dl>
+      <Button
+        variant="secondary"
+        className="mt-4"
+        onClick={() => void signOut().then(() => navigate('/signin', { replace: true }))}
+      >
+        {t('account.signOut')}
+      </Button>
+    </section>
+  )
+}
 
 export function SettingsPage() {
   const { t } = useTranslation()
@@ -22,6 +57,7 @@ export function SettingsPage() {
     <>
       <PageHeader title={t('pages.settings.title')} intro={t('pages.settings.intro')} />
       <div className="grid gap-6 desktop:grid-cols-2">
+        <AccountSection />
         <section className="rounded-panel border border-line bg-surface p-4 tablet:p-6">
           <h2 className="text-h4">{t('settings.appearance')}</h2>
           <fieldset className="m-0 mt-4 border-0 p-0">

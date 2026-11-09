@@ -79,3 +79,25 @@ def test_invalid_numbers_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ACCESS_TOKEN_MINUTES", "0")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_auth_defaults_match_the_spec() -> None:
+    s = Settings(_env_file=None)
+    assert (s.login_max_failures, s.login_window_minutes) == (5, 15)
+    assert s.email_verification_hours == 24
+    assert s.password_reset_minutes == 60
+
+
+@pytest.mark.parametrize(
+    ("api_base_url", "cookie_secure", "expected"),
+    [
+        ("http://localhost:8000", "auto", False),
+        ("http://127.0.0.1:8000", "auto", False),
+        ("https://api.analyst.in", "auto", True),
+        ("http://localhost:8000", "true", True),
+        ("https://api.analyst.in", "false", False),
+    ],
+)
+def test_cookie_secure_flag(api_base_url: str, cookie_secure: str, expected: bool) -> None:
+    s = Settings(_env_file=None, api_base_url=api_base_url, cookie_secure=cookie_secure)
+    assert s.cookies_secure is expected

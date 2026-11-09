@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     access_token_minutes: int = Field(default=10, ge=1)
     session_idle_minutes: int = Field(default=30, ge=1)
     session_max_hours: int = Field(default=12, ge=1)
+    # Auth details (BUILD_SPEC 6.1). Defaults follow the spec; change only with a reason.
+    login_max_failures: int = Field(default=5, ge=1)
+    login_window_minutes: int = Field(default=15, ge=1)
+    email_verification_hours: int = Field(default=24, ge=1)
+    password_reset_minutes: int = Field(default=60, ge=5)
+    # Refresh/CSRF cookies get the "Secure" flag. "auto": on unless API_BASE_URL is plain http://localhost.
+    cookie_secure: Literal["auto", "true", "false"] = "auto"
+    # Version of the privacy policy + terms a new user accepts at sign-up (stored in ``consents``).
+    policy_version: str = "2026-11-09"
 
     # --- Email ---
     smtp_host: str = "localhost"
@@ -111,6 +120,12 @@ class Settings(BaseSettings):
                         f"{_MIN_SECRET_LENGTH} characters when APP_ENV=production"
                     )
         return self
+
+    @property
+    def cookies_secure(self) -> bool:
+        if self.cookie_secure != "auto":
+            return self.cookie_secure == "true"
+        return not self.api_base_url.startswith(("http://localhost", "http://127.0.0.1"))
 
     def secret_values(self) -> list[str]:
         """Every non-empty secret value, used by the log redactor to scrub exact matches."""

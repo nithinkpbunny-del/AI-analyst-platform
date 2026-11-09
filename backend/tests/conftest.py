@@ -41,3 +41,141 @@ def restore_root_logging() -> Iterator[None]:
     yield
     root.handlers[:] = handlers
     root.setLevel(level)
+
+
+# --------------------------------------------------------------------------------------------- database & app
+# Database tests run against a real Postgres 16 (citext, triggers and, later, RLS behave as in production):
+# TEST_DATABASE_URL if set, otherwise a throwaway testcontainers instance (Docker must be running).
+
+from dataclasses import dataclass, field  # noqa: E402
+from datetime import UTC, datetime, timedelta  # noqa: E402
+
+import fakeredis  # noqa: E402
+from alembic.config import Config  # noqa: E402
+from argon2 import PasswordHasher  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import Engine, text  # noqa: E402
+from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
+
+from alembic import command  # noqa: E402
+from app.auth import passwords  # noqa: E402
+from app.db.base import Base  # noqa: E402
+from app.db.session import make_engine, make_session_factory  # noqa: E402
+from app.email.sender import MemoryEmailSender  # noqa: E402
+from app.main import create_app  # noqa: E402
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+def alembic_config(database_url: str) -> Config:
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    config.attributes["database_url"] = database_url
+    return config
+
+
+@pytest.fixture(scope="session", autouse=True)
+def fast_password_hashing() -> Iterator[None]:
+    """Production argon2 parameters cost ~50 ms per hash; tests use cheap ones (same algorithm)."""
+    passwords.use_hasher(PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
+    yield
+    passwords.use_hasher(PasswordHasher())
+
+
+@pytest.fixture(scope="session")
+def database_url() -> Iterator[str]:
+    configured = os.environ.get("TEST_DATABASE_URL")
+    if configured:
+        yield configured
+        return
+    from testcontainers.community.postgres import PostgresContainer
+
+    try:
+        container = PostgresContainer("postgres:16-alpine", driver="psycopg")
+        container.start()
+    except Exception as error:  # pragma: no cover - only when Docker is missing
+        pytest.fail(
+            f"Database tests need Docker (or TEST_DATABASE_URL). Start Docker Desktop. ({error})"
+        )
+    try:
+        yield container.get_connection_url()
+    finally:
+        container.stop()
+
+
+@pytest.fixture(scope="session")
+def migrated_engine(database_url: str) -> Iterator[Engine]:
+    command.upgrade(alembic_config(database_url), "head")
+    engine = make_engine(database_url)
+    yield engine
+    engine.dispose()
+
+
+def _truncate_all(engine: Engine) -> None:
+    tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+    with engine.begin() as connection:
+        # Replica mode skips the append-only trigger on audit_log; only the test superuser can do this.
+        connection.execute(text("SET LOCAL session_replication_role = replica"))
+        connection.execute(text(f"TRUNCATE {tables} CASCADE"))
+
+
+@pytest.fixture
+def session_factory(migrated_engine: Engine) -> Iterator[sessionmaker[Session]]:
+    _truncate_all(migrated_engine)
+    yield make_session_factory(migrated_engine)
+
+
+@pytest.fixture
+def db(session_factory: sessionmaker[Session]) -> Iterator[Session]:
+    session = session_factory()
+    yield session
+    session.rollback()
+    session.close()
+
+
+@dataclass
+class FakeClock:
+    """A clock tests can move. Starts at a fixed UTC moment."""
+
+    now: datetime = field(default_factory=lambda: datetime(2026, 11, 9, 9, 0, tzinfo=UTC))
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, **delta: float) -> None:
+        self.now += timedelta(**delta)
+
+
+@pytest.fixture
+def clock() -> FakeClock:
+    return FakeClock()
+
+
+@pytest.fixture
+def outbox() -> MemoryEmailSender:
+    return MemoryEmailSender()
+
+
+@pytest.fixture
+def fake_redis() -> fakeredis.FakeRedis:
+    return fakeredis.FakeRedis()
+
+
+@pytest.fixture
+def client(
+    settings: Settings,
+    session_factory: sessionmaker[Session],
+    fake_redis: fakeredis.FakeRedis,
+    outbox: MemoryEmailSender,
+    clock: FakeClock,
+) -> Iterator[TestClient]:
+    app = create_app(
+        settings,
+        readiness_checks={},
+        session_factory=session_factory,
+        redis_client=fake_redis,
+        email_sender=outbox,
+        clock=clock,
+    )
+    with TestClient(app, base_url="http://localhost:8000") as test_client:
+        yield test_client

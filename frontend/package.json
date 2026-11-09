@@ -17,7 +17,7 @@
     "tokens": "node ../design/build.mjs",
     "tokens:check": "node ../design/build.mjs --check",
     "e2e": "playwright test",
-    "e2e:update": "playwright test --update-snapshots",
+    "e2e:update": "playwright test --update-snapshots=all",
     "size": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
