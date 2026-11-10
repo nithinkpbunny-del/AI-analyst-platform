@@ -1,4 +1,4 @@
-"""Celery application (worker + beat). Real jobs (briefings, long tasks, cache refresh) arrive in later milestones."""
+"""Celery application (worker + beat): connection syncs and snapshot purging (M6); briefings and long tasks later."""
 
 from __future__ import annotations
 
@@ -31,6 +31,8 @@ celery_app.conf.update(
     result_expires=3600,
     beat_schedule={
         "heartbeat": {"task": "app.tasks.jobs.ping", "schedule": 300.0},
+        # Cached copies of customer data never outlive SNAPSHOT_MAX_AGE_HOURS (BUILD_SPEC 6.6).
+        "purge-snapshots": {"task": "app.tasks.jobs.purge_snapshots", "schedule": 900.0},
     },
 )
 

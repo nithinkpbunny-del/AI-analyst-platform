@@ -15,17 +15,32 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import __version__
-from app.api import ai, audit, auth, google, health, invitations, org, team, two_factor
+from app.api import (
+    ai,
+    audit,
+    auth,
+    connections,
+    google,
+    health,
+    invitations,
+    org,
+    team,
+    two_factor,
+)
 from app.api.errors import install_error_handlers
 from app.auth.google_oidc import AuthlibGoogleProvider, GoogleProvider, StandInGoogleProvider
 from app.auth.service import Clock
 from app.config import Settings, get_settings
+from app.connectors.google_sheets import GoogleSheetsSetup, default_setup
+from app.connectors.registry import ConnectorRuntime
+from app.data.objects import ObjectStore, S3ObjectStore
 from app.db.session import make_engine, make_session_factory
 from app.email.sender import EmailSender, SmtpEmailSender
 from app.llm.base import LLMFactory
 from app.llm.keys import default_factory
 from app.logging_config import configure_logging, request_id_var
 from app.security.secrets import SecretStore, key_wrapper
+from app.tasks.queue import CeleryJobQueue, InlineJobQueue, JobQueue
 
 logger = logging.getLogger("app.request")
 
@@ -64,12 +79,17 @@ def create_app(
     google_provider: GoogleProvider | None = None,
     llm_factory: LLMFactory | None = None,
     secret_store: SecretStore | None = None,
+    object_store: ObjectStore | None = None,
+    google_sheets: GoogleSheetsSetup | None = None,
+    job_queue: JobQueue | None = None,
+    inline_jobs: bool = False,
 ) -> FastAPI:
     """Build the app. Every dependency is injectable so tests never touch real services.
 
     Defaults: engine and Redis client from settings (both connect lazily, on first use), SMTP for email,
-    the system clock, ``default_google_provider``, the real LLM providers and secrets sealed with ``MASTER_KEY``
-    (or KMS when ``KMS_KEY_ID`` is set).
+    the system clock, ``default_google_provider``, the real LLM providers, secrets sealed with ``MASTER_KEY``
+    (or KMS when ``KMS_KEY_ID`` is set), the S3 bucket, Google Sheets from ``default_setup`` and background jobs
+    sent to Celery (``inline_jobs=True`` runs them in this process instead, for tests).
     """
     settings = settings or get_settings()
     configure_logging(settings)
@@ -97,6 +117,18 @@ def create_app(
     )
     app.state.llm_factory = llm_factory or default_factory(settings)
     app.state.secret_store = secret_store or SecretStore(key_wrapper(settings))
+    app.state.connector_runtime = ConnectorRuntime(
+        settings=settings,
+        session_factory=app.state.session_factory,
+        objects=object_store or S3ObjectStore(settings),
+        redis=app.state.redis,
+        secrets=app.state.secret_store,
+        google=google_sheets or default_setup(settings),
+        clock=app.state.clock,
+    )
+    app.state.job_queue = job_queue or (
+        InlineJobQueue(app.state.connector_runtime) if inline_jobs else CeleryJobQueue()
+    )
     install_error_handlers(app)
 
     # The SPA runs on another origin in development; credentials are needed for the refresh cookie.
@@ -142,6 +174,7 @@ def create_app(
     app.include_router(team.router)
     app.include_router(org.router)
     app.include_router(ai.router)
+    app.include_router(connections.router)
     app.include_router(audit.router)
     return app
 

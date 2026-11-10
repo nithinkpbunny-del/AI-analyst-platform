@@ -7,6 +7,7 @@ export type Permission =
   | 'org.manage'
   | 'members.manage'
   | 'connections.manage'
+  | 'connections.view'
   | 'dictionary.edit'
   | 'dictionary.suggest'
   | 'ask'
@@ -27,6 +28,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   analyst: [
     'ask',
     'audit.view_own',
+    'connections.view',
     'dashboard.edit',
     'dashboard.view',
     'dictionary.suggest',
@@ -42,6 +44,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'audit.view_all',
     'audit.view_own',
     'connections.manage',
+    'connections.view',
     'dashboard.edit',
     'dashboard.view',
     'dictionary.edit',

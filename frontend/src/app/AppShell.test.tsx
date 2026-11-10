@@ -45,10 +45,10 @@ describe('app shell', () => {
   })
 
   it('every placeholder screen has one sentence and one primary action', () => {
-    renderApp('/connections')
+    renderApp('/briefings')
     const main = screen.getByRole('main')
     expect(
-      within(main).getByText('Connect your first data source to start asking questions.'),
+      within(main).getByText('Your first briefing arrives the morning after you connect data.'),
     ).toBeInTheDocument()
     expect(within(main).getByRole('link', { name: 'Connect data' })).toHaveAttribute(
       'href',

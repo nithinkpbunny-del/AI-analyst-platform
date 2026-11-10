@@ -37,6 +37,10 @@ for (const screen of screens) {
         await expect(page.getByText('meera@urbancart.in')).toBeVisible()
         await expect(page.getByText('Lata Menon')).toBeVisible()
       }
+      if (screen === 'connections') {
+        await expect(page.getByText('1 table · 28,540 rows')).toBeVisible()
+        await expect(page.getByText('1 of 3 connections')).toBeVisible()
+      }
       if (screen === 'activity') {
         await expect(page.getByText('Turned on two-step verification')).toBeVisible()
       }
@@ -191,7 +195,27 @@ const teamScreens = {
   },
 }
 
-for (const [name, reach] of Object.entries(teamScreens)) {
+// M6: one connection with its tables (columns and preview open), the access dialog and an Analyst's list.
+const connectionScreens = {
+  'connection-detail': async (page: Page) => {
+    await open(page, '/connections/c1')
+    await page.getByRole('button', { name: 'Columns and preview' }).click()
+    await page.getByRole('table', { name: /First 4 of 28,540 rows/ }).waitFor()
+  },
+  'connections-access-dialog': async (page: Page) => {
+    await open(page, '/connections')
+    await page.getByRole('button', { name: 'Change what Ravi Kumar can see' }).click()
+    await page.getByRole('dialog', { name: 'What Ravi Kumar can see' }).waitFor()
+    // The button is low on the page; a full-page capture of a scrolled page misplaces the sticky sidebar.
+    await page.evaluate(() => window.scrollTo(0, 0))
+  },
+  'connections-analyst': async (page: Page) => {
+    await open(page, '/connections', { refresh: analystSession })
+    await page.getByRole('article', { name: 'UrbanCart orders' }).waitFor()
+  },
+}
+
+for (const [name, reach] of Object.entries({ ...teamScreens, ...connectionScreens })) {
   test.describe(name, () => {
     test('looks right', async ({ page }) => {
       await reach(page)
@@ -211,4 +235,6 @@ test('Analysts do not get the Team screen in their menu', async ({ page }, testI
   const nav = page.getByTestId('side-nav')
   await expect(nav.getByRole('link', { name: 'Activity' })).toBeVisible()
   await expect(nav.getByRole('link', { name: 'Team' })).toHaveCount(0)
+  // M6: Analysts see the connections they may ask about (read-only).
+  await expect(nav.getByRole('link', { name: 'Connections' })).toBeVisible()
 })

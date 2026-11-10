@@ -59,12 +59,17 @@ from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 
 from alembic import command  # noqa: E402
 from app.auth import passwords  # noqa: E402
+from app.connectors.google_sheets import GoogleSheetsSetup  # noqa: E402
+from app.connectors.registry import ConnectorRuntime  # noqa: E402
+from app.data.objects import MemoryObjectStore  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import make_engine, make_session_factory  # noqa: E402
 from app.email.sender import MemoryEmailSender  # noqa: E402
 from app.llm.fake import FakeLLMFactory  # noqa: E402
 from app.llm.models import CATALOG  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.security.secrets import SecretStore, key_wrapper  # noqa: E402
+from tests.recorded_google import RecordedGoogle, recorded_setup  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -172,6 +177,44 @@ def llm_factory() -> Iterator[FakeLLMFactory]:
 
 
 @pytest.fixture
+def object_store() -> MemoryObjectStore:
+    """Uploaded files and snapshots, in memory (no S3 in tests)."""
+    return MemoryObjectStore()
+
+
+@pytest.fixture
+def google_transport() -> RecordedGoogle:
+    """Google's OAuth, Sheets and Drive APIs, answered from recorded fixtures (no live calls)."""
+    return RecordedGoogle()
+
+
+@pytest.fixture
+def google_setup(google_transport: RecordedGoogle) -> GoogleSheetsSetup:
+    return recorded_setup(google_transport)
+
+
+@pytest.fixture
+def runtime(
+    settings: Settings,
+    session_factory: sessionmaker[Session],
+    fake_redis: fakeredis.FakeRedis,
+    object_store: MemoryObjectStore,
+    google_setup: GoogleSheetsSetup,
+    clock: FakeClock,
+) -> ConnectorRuntime:
+    """What connectors, the cache and background jobs use, outside the API."""
+    return ConnectorRuntime(
+        settings=settings,
+        session_factory=session_factory,
+        objects=object_store,
+        redis=fake_redis,
+        secrets=SecretStore(key_wrapper(settings)),
+        google=google_setup,
+        clock=clock,
+    )
+
+
+@pytest.fixture
 def client(
     settings: Settings,
     session_factory: sessionmaker[Session],
@@ -179,6 +222,8 @@ def client(
     outbox: MemoryEmailSender,
     clock: FakeClock,
     llm_factory: FakeLLMFactory,
+    object_store: MemoryObjectStore,
+    google_setup: GoogleSheetsSetup,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings,
@@ -188,6 +233,9 @@ def client(
         email_sender=outbox,
         clock=clock,
         llm_factory=llm_factory,
+        object_store=object_store,
+        google_sheets=google_setup,
+        inline_jobs=True,  # background jobs run at once, in the test
     )
     with TestClient(app, base_url="http://localhost:8000") as test_client:
         yield test_client

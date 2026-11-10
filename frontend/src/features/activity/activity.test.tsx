@@ -151,4 +151,23 @@ describe('describeEntry', () => {
   it('falls back to the action name for actions it does not know', () => {
     expect(describeEntry(t, entry('connections.added'))).toBe('connections.added')
   })
+
+  it('names connections, files and people (M6)', () => {
+    expect(describeEntry(t, entry('connection.added', { name: 'Sales', type: 'file' }))).toBe(
+      'Added the connection Sales',
+    )
+    expect(describeEntry(t, entry('connection.file_uploaded', { name: 'Sales', version: 3 }))).toBe(
+      'Uploaded version 3 of Sales',
+    )
+    // Names are shown as they are, never looked up as roles.
+    expect(
+      describeEntry(t, entry('connection.renamed', { from: 'owner', to: 'Orders v2.0' })),
+    ).toBe('Renamed the connection owner to Orders v2.0')
+    expect(describeEntry(t, entry('connection.version_used', { name: 'Sales', version: 1 }))).toBe(
+      'Switched Sales to version 1',
+    )
+    expect(describeEntry(t, entry('connection.access_changed', { user_name: 'Ravi Kumar' }))).toBe(
+      'Changed which connections Ravi Kumar sees',
+    )
+  })
 })

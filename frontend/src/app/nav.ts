@@ -47,7 +47,8 @@ export const mainNav: NavItem[] = [
 ]
 
 export const adminNav: NavItem[] = [
-  { path: '/connections', key: 'connections', icon: Plug, permission: 'connections.manage' },
+  // Analysts see the connections they may ask about, read-only (DECISIONS D49).
+  { path: '/connections', key: 'connections', icon: Plug, permission: 'connections.view' },
   { path: '/team', key: 'team', icon: Users, permission: 'members.manage' },
   // Analysts see their own entries (BUILD_SPEC 6.2), so Activity is not Owner-only.
   { path: '/activity', key: 'activity', icon: Activity, permission: 'audit.view_own' },

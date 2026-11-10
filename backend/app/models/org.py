@@ -25,6 +25,8 @@ from app.models.mixins import IdMixin, TimestampMixin
 Role = Literal["owner", "analyst", "viewer"]
 ROLES: tuple[Role, ...] = ("owner", "analyst", "viewer")
 MembershipStatus = Literal["active", "removed"]
+# Which connections a non-Owner sees (DECISIONS D50): every one, or only those in ``connection_grants``.
+ConnectionAccess = Literal["all", "selected"]
 
 
 class Organization(IdMixin, TimestampMixin, Base):
@@ -53,6 +55,7 @@ class Membership(IdMixin, TimestampMixin, Base):
         UniqueConstraint("org_id", "user_id", name="uq_memberships_org_id_user_id"),
         CheckConstraint("role IN ('owner', 'analyst', 'viewer')", name="role"),
         CheckConstraint("status IN ('active', 'removed')", name="status"),
+        CheckConstraint("connection_access IN ('all', 'selected')", name="connection_access"),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -66,3 +69,6 @@ class Membership(IdMixin, TimestampMixin, Base):
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    connection_access: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="all", server_default="all"
+    )

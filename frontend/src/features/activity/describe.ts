@@ -10,17 +10,26 @@ function roleWord(t: TFunction, role: unknown): string {
   return typeof role === 'string' ? t(`account.roles.${role}`, { defaultValue: role }) : ''
 }
 
+function text(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+
 /** "Changed ravi@urbancart.in from Analyst to Viewer", "Sign-in failed (wrong password)", … */
 export function describeEntry(t: TFunction, entry: AuditEntry): string {
   const details = entry.details
-  const text = t(`activity.actions.${asKey(entry.action)}`, {
+  // Connection entries name things (a file, a connection), not roles.
+  const names = entry.action.startsWith('connection.')
+  const sentence = t(`activity.actions.${asKey(entry.action)}`, {
     defaultValue: entry.action,
     email: typeof details.email === 'string' ? details.email : '',
     role: roleWord(t, details.role),
-    from: roleWord(t, details.from),
-    to: roleWord(t, details.to),
+    from: names ? text(details.from) : roleWord(t, details.from),
+    to: names ? text(details.to) : roleWord(t, details.to),
+    name: text(details.name),
+    version: text(details.version),
+    person: text(details.user_name),
     plan:
-      typeof details.to === 'string'
+      typeof details.to === 'string' && !names
         ? t(`ai.plans.${details.to}`, { defaultValue: details.to })
         : '',
     provider:
@@ -31,7 +40,7 @@ export function describeEntry(t: TFunction, entry: AuditEntry): string {
   })
   const reason = details.reason
   if (entry.action === 'auth.login.failure' && typeof reason === 'string') {
-    return `${text} (${t(`activity.failureReasons.${reason}`, { defaultValue: reason })})`
+    return `${sentence} (${t(`activity.failureReasons.${reason}`, { defaultValue: reason })})`
   }
-  return text
+  return sentence
 }

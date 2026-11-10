@@ -46,6 +46,17 @@ export const NeedsSignIn: Story = {
     actions: <Button size="sm">Reconnect Google Sheets</Button>,
   },
 }
+export const Reading: Story = {
+  args: {
+    name: 'UrbanCart orders',
+    sourceType: 'Excel or CSV file',
+    status: 'active',
+    lastSuccessAt: null,
+    reading: true,
+    summary: '1 table · 28,540 rows',
+    warnings: 2,
+  },
+}
 export const Failing: Story = {
   args: {
     name: 'Payments',

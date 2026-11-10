@@ -579,3 +579,157 @@ a missing one.
 - The log redactor now also recognises Google's newer `AQ.`-style API keys, not only `AIza…` keys.
 - The two SDKs install `httpx2`, and Starlette's `TestClient` now uses it. Its stricter cookie types needed small
   fixes in three test helpers. The "httpx is deprecated" warning noted in M1 is gone.
+
+## M6: Connections framework, Excel/CSV, Google Sheets
+
+### D49. Analysts see connections, read-only (`connections.view`)
+- BUILD_SPEC 6.2 gives connection management to Owners only and says nothing about seeing them. Analysts ask
+  questions about this data, so they need to know which sources exist, how fresh they are and what the columns
+  mean. A new permission `connections.view` (Owners and Analysts) allows the list, a connection's details and a
+  preview of the first 20 rows. Viewers do not get it: they cannot ask questions.
+- The Connections item in the menu now follows `connections.view`. Analysts see the screen without "Add data",
+  actions or the access editor.
+
+### D50. Per-connection grants: an explicit "selected" mode (safer than the spec's "no rows = all")
+- BUILD_SPEC 5 says: a person with no `connection_grants` rows sees every connection. Taken literally, removing
+  the only connection someone was limited to would leave them with no rows, and so give them **every**
+  connection. It would also make "this person sees nothing" impossible.
+- Closest safe version: `memberships.connection_access` is `all` (the default, which is the spec's behaviour) or
+  `selected`. With `selected`, the person sees exactly their grant rows, which may be none. Removing a connection
+  never widens anyone's access (tested).
+- Owners always see everything; trying to limit an Owner answers 409. Granting another workspace's connection
+  answers 404.
+- `app.connectors.access` is the one place that decides visibility; M8's agent tools will use the same function,
+  so the agent never reads a connection the asking person could not see.
+
+### D51. Reading files: types, dates, amounts
+- The header row is the first of the top 20 rows that is mostly text, unique, and wider than half the table
+  (title rows such as "UrbanCart sales report" are skipped). No such row: columns are "Column 1", "Column 2", ...
+- A final "Total" / "Grand total" row is left out (it would double sums) and reported as an info note.
+- A column gets a type when at least 95% of its non-empty values fit. Values that do not fit are left empty and
+  counted (a data note says how many, with up to three short examples).
+- Dates are read **day first** (Indian convention) unless the values prove month first. Times with a UTC offset,
+  and Unix timestamps in a column whose name says it is a time (`created_at`, `*_date`), are converted to the
+  workspace's time zone and stored as local wall-clock time, so days and weeks fall where the business sees them.
+- Amounts: ₹ / Rs / INR, Indian (12,34,567) and Western (1,234,567) grouping, `(1,200)` negatives, `%`,
+  `L`/`lakh`/`Cr`/`crore`. Grouping that is neither (e.g. `1,2`) is not a number. A column with ₹ and another
+  currency keeps both values and gets a "mixes currencies" warning; it is not converted.
+- Digits that are identifiers stay text: leading zeros (pincodes), names such as phone/mobile/pincode/GSTIN, and
+  more than 15 digits. Razorpay's `amount` stays an integer in paise: converting units is the business
+  dictionary's job (M7).
+- Hidden sheets/tabs and chart sheets are not datasets. Excel formulas are never evaluated: the values Excel saved
+  are read (`data_only`). Old `.xls` and password-protected workbooks get a message asking for a plain `.xlsx`.
+- Files are checked before opening: type from the content, ZIP parts and unpacked size limited (no "zip bombs"),
+  XML parsed by `defusedxml`. The stored object key never contains the uploaded name.
+
+### D52. Reading runs in the background; previews read live
+- Reading a whole source (after an upload, choosing spreadsheets, signing in again, "Refresh now") is a Celery job
+  (`app.tasks.jobs.sync_connection`). The connection shows `sync_state` `queued`/`running`, and the web app polls
+  every 2 s until it is `idle`. A job lost by a restarted worker may be started again after 15 minutes.
+- A crash inside the job still leaves the connection in a clear state (`error`, "Reading the data failed
+  unexpectedly"), never stuck on "reading".
+- The upload request itself only stores the file and does a quick check (it opens, it has sheets). Parsing every
+  sheet happens in the job.
+- A new file version that cannot be read is marked `failed` and **never replaces** a working version; the
+  connection stays live on the previous one and says so.
+- The dataset preview (first 20 rows) reads through the cache inside the request, like the agent will (R1).
+- The API uses a `JobQueue` interface: Celery in the app, inline in tests (`create_app(inline_jobs=True)`).
+
+### D53. The cache: reuse, "unchanged", incremental, full
+- Order of decisions for one dataset: (1) reuse the newest snapshot if it was read **or confirmed** within
+  `CACHE_TTL_SECONDS`; (2) ask the source for its version (file version id; Drive's `version` for a
+  spreadsheet) and, if unchanged, keep the snapshot and record `checked_at` (no download); (3) for sources that
+  support it, fetch only rows changed since the snapshot's cursor and merge them by key; (4) otherwise read
+  everything.
+- Snapshots keep two times: `fetched_at` (when rows were read) and `checked_at` (when the source last confirmed
+  them), so provenance stays honest.
+- One snapshot per dataset is kept; older ones are deleted when a new one is written. Every snapshot expires
+  after `SNAPSHOT_MAX_AGE_HOURS` from `fetched_at` and a beat job purges expired ones every 15 minutes (DPDP data
+  minimisation). An "unchanged" check does not extend the expiry.
+- A Redis lock per dataset stops duplicate concurrent reads. It is a small `SET NX EX` lock with a
+  check-and-delete release (`app.data.locks`), because redis-py's Lua-based lock does not run on fakeredis.
+- No database transaction is held open while a source is being read.
+- Incremental merging is built and tested with a fake source; files and Sheets have no row cursor, so they use
+  steps 1, 2 and 4. Razorpay, Shopify and Zoho (M11-M13) will use step 3.
+
+### D54. Data-quality checks
+- Run on every new snapshot; findings are stored on the snapshot and the dataset, with `kind`, `details` and an
+  English `message`. The web app writes its own sentence from `kind` + `details` (`locales/en.ts`, D41); the
+  agent and emails will use `message`.
+- Period completeness compares each inner week (or month, for monthly data) with the median of up to four periods
+  on each side. A period is flagged below 60% of that **and** when the shortfall is more than three standard
+  deviations of a Poisson count, so small, noisy tables raise no false alarms.
+- "Missing segment" does the same per value of up to four small category columns (2-12 values), flagging a value
+  below 25% of its usual weekly count. On the demo data this finds exactly planted finding 7 (Website orders,
+  week of 9 Mar 2026) and nothing else.
+- Stale: the newest row is older than max(7 days, 3 × the data's usual gap between dates).
+- Also: columns ≥ 20% empty, empty columns, an id-like column that is almost unique, exact duplicate rows, mixed
+  currencies, values that did not fit the type, row cap reached, Total row dropped.
+
+### D55. Google Sheets: one connection per Google account; Picker; stand-in
+- A Google Sheets connection is one Google sign-in (one refresh token) with the spreadsheets chosen in the Picker;
+  each visible tab is a dataset `<spreadsheet id>/<tab id>` (the tab id survives renames). Choosing more
+  spreadsheets later reuses the sign-in. Removing the connection revokes the token at Google.
+- Scopes: `spreadsheets.readonly`, `drive.file`, plus `openid email` to show which Google account a connection
+  uses. Granted scopes are checked after every token exchange and refresh: a write scope is refused (and the new
+  token revoked); a missing read scope asks the person to allow it.
+- Signing in again for a connection must use the same Google account; another account answers 409 and its token
+  is revoked.
+- The OAuth state is bound to the Owner who started it (Redis, 10 minutes, single use). Google returns to the
+  API, which forwards the code to the web app in the URL **fragment**; the web app removes it from the address at
+  once and finishes the sign-in with its own access token.
+- The Picker needs a short-lived Google access token in the browser. Only Owners receive it
+  (`/connections/google/finish` and `/picker-token`); it is never logged (the redactor knows `ya29.`, `1//` and
+  `4/` Google tokens).
+- `spreadsheets.readonly` technically allows reading any spreadsheet of the account. The server only ever reads
+  the spreadsheet ids the Owner picked (stored in the connection's config).
+- Without Google credentials, development uses a **stand-in**: an httpx transport that answers Google's token,
+  Sheets and Drive URLs from demo workbooks, a consent page served by the API and a Picker dialog in the web
+  app. The real connector code runs unchanged on top of it. It is never used outside `APP_ENV=development`.
+- Tests replay Google answers from a VCR-style JSON file written in Google's documented formats (no real Google
+  account was available to record from). Re-record it against a real account when credentials exist (M19).
+
+### D56. Uploads
+- `POST /connections/files` (new connection) and `POST /connections/{id}/files` (new version), multipart, at most
+  `UPLOAD_MAX_MB` (50). The request must say its size (`Content-Length`, else 411); larger answers 413 before the
+  body is read. 60 uploads per hour per workspace.
+- The file name is reduced to its last path part without control characters, and is only shown, never used in
+  storage keys (`orgs/<org>/files/<connection>/<version id>`). The stored original is never changed (tested by
+  hash).
+- Storage encryption at rest relies on the bucket's default encryption (S3 default SSE in production); checked in
+  M19.
+
+### D57. Other details
+- Connector error messages (e.g. "Google stopped sharing data. Sign in to Google again to reconnect.") come from
+  the API, because they name the source's own things (a spreadsheet, a tab). The web app shows them as sent.
+  Data notes, column types, statuses and every other label are in `locales/en.ts`.
+- New activity-log entries: `connection.added`, `.file_uploaded`, `.renamed`, `.paused`, `.resumed`, `.removed`,
+  `.reauthorized`, `.spreadsheets_changed`, `.access_changed`. They name connections, files and spreadsheets,
+  never data rows.
+- "Replace a connection" (R2) is done for files by uploading a new version. Moving a connection to another kind
+  of source and keeping the dictionary mappings needs the business dictionary, so it comes with M7.
+- `datasets.position` keeps sheet/tab order (all datasets of one job share `created_at`).
+- New dependencies: `pyarrow` (Parquet), `python-multipart` (uploads), `defusedxml` (safe XML for openpyxl).
+
+### D58. A new file version never silently replaces the one in use (fix found in the human's live check)
+- **What went wrong in M6:** a one-line text file uploaded as a new version of a 28,540-row file became "In use".
+  The reader correctly took the line as a header with one column and no rows; that is not an error, and M6 only
+  refused versions that could not be opened. "In use" also meant "the newest readable version", so nothing
+  compared the new file with the working one.
+- **Now** a new version is read completely before anything changes, then:
+  - **no data rows at all** (a one-line file, a header only, blank lines) -> `failed` with "This file has no data
+    rows …"; the version in use stays. A first upload without data marks the connection `error` with that reason.
+  - **different structure** -> `needs_confirmation`, with the differences stored (`file_versions.review_json`):
+    a sheet gone, a sheet that had rows now empty, columns gone, or a column's type changed (whole number and
+    number count as the same; so do date and date and time). The version in use stays until an Owner presses
+    **Use this version**.
+  - otherwise (same sheets and columns with new rows, or only added sheets/columns, which are safe) -> it
+    becomes the version in use at once, as before.
+- The version in use is now recorded explicitly (`connections.config["file_version_id"]`), not inferred.
+  Connections from before this change fall back to their newest readable version until a version is chosen.
+- **Switching back:** `POST /connections/{id}/versions/{version_id}/use` makes any readable version the one in use
+  (a reviewed upload, or an earlier version), re-reading its stored file. "Refresh now" reads the version in use,
+  not the newest one. `DELETE /connections/{id}/versions/{version_id}` discards a version that is not in use and
+  deletes its stored file. Both are Owner-only and logged (`connection.version_used`,
+  `connection.version_discarded`). The version in use cannot be discarded, and an unreadable version cannot be used.
+- Migration `0007` adds the status and `review_json` (reversible; going back turns waiting versions into `failed`).

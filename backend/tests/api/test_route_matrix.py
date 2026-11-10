@@ -8,24 +8,30 @@ as later milestones add routes.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
+import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from app.api.connections import _GOOGLE_STATE as GOOGLE_STATE_PREFIX
 from app.auth.permissions import ROLE_PERMISSIONS, Permission
 from app.config import Settings
+from app.connectors.registry import ConnectorRuntime
 from app.llm import keys, usage
 from app.llm.base import Usage
-from app.models import AuditLog, Invitation, Membership
+from app.models import AuditLog, Dataset, FileVersion, Invitation, Membership
 from app.security.secrets import SecretStore, key_wrapper
 from tests.conftest import FakeClock
+from tests.datasources import csv_bytes, make_file_connection, make_sheets_connection
+from tests.recorded_google import NO_ACCESS_ID, SHEET_ID
 from tests.tenancy import World, add_member, build_world, token_for
 
 P = Permission
@@ -57,6 +63,8 @@ PUBLIC = {
     ("POST", "/invitations/preview"),
     ("POST", "/invitations/accept"),
     ("POST", "/invitations/accept-sign-in"),
+    # The browser returns from Google; nothing is exchanged here (tested in test_connections_google).
+    ("GET", "/connections/google/callback"),
 }
 
 # Signed in, but about the person rather than a workspace: tested in test_auth/test_two_factor/test_devices,
@@ -86,6 +94,22 @@ class Fixtures:
     member_b: str
     invitation_a: str
     invitation_b: str
+    connection_a: str = ""
+    connection_b: str = ""
+    dataset_a: str = ""
+    dataset_b: str = ""
+    sheets_a: str = ""
+    sheets_b: str = ""
+    version_a: str = ""  # a readable file version that is not in use
+    version_b: str = ""
+    google_state: str = ""
+
+    def placeholders(self, *, theirs: bool) -> dict[str, str]:
+        side = "b" if theirs else "a"
+        return {
+            name: getattr(self, f"{name}_{side}")
+            for name in ("member", "invitation", "connection", "dataset", "sheets", "version")
+        }
 
 
 @dataclass(frozen=True)
@@ -101,16 +125,17 @@ class Case:
     # Strings from org A that must never appear in org B's answer (for routes without ids).
     check_leak: bool = False
     params: dict[str, str] = field(default_factory=dict)
+    # A file upload (multipart): the success call sends a small CSV, the validation call sends no file.
+    upload: bool = False
+    # A body that depends on the fixtures (e.g. a Google sign-in started by owner_a).
+    body_from: Callable[[Fixtures], dict[str, Any]] | None = None
 
     @property
     def has_id(self) -> bool:
         return "{" in self.path
 
     def url(self, ids: Fixtures, *, theirs: bool = False) -> str:
-        return self.path.format(
-            member=ids.member_b if theirs else ids.member_a,
-            invitation=ids.invitation_b if theirs else ids.invitation_a,
-        )
+        return self.path.format(**ids.placeholders(theirs=theirs))
 
 
 CASES: dict[tuple[str, str], Case] = {
@@ -185,6 +210,86 @@ CASES: dict[tuple[str, str], Case] = {
         invalid_query="?from=yesterday",
         check_leak=True,
     ),
+    ("GET", "/connections"): Case("GET", "/connections", P.CONNECTIONS_VIEW, 200, check_leak=True),
+    ("GET", "/connections/access"): Case(
+        "GET", "/connections/access", P.CONNECTIONS_MANAGE, 200, check_leak=True
+    ),
+    ("PUT", "/connections/access/{membership_id}"): Case(
+        "PUT",
+        "/connections/access/{member}",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={"access": "all"},
+        invalid_body={"access": "some"},
+    ),
+    ("POST", "/connections/files"): Case(
+        "POST", "/connections/files", P.CONNECTIONS_MANAGE, 201, upload=True
+    ),
+    ("POST", "/connections/{connection_id}/files"): Case(
+        "POST", "/connections/{connection}/files", P.CONNECTIONS_MANAGE, 200, upload=True
+    ),
+    ("GET", "/connections/{connection_id}"): Case(
+        "GET", "/connections/{connection}", P.CONNECTIONS_VIEW, 200
+    ),
+    ("PATCH", "/connections/{connection_id}"): Case(
+        "PATCH",
+        "/connections/{connection}",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={"name": "Outlet sales 2026"},
+        invalid_body={"name": ""},
+    ),
+    ("DELETE", "/connections/{connection_id}"): Case(
+        "DELETE", "/connections/{connection}", P.CONNECTIONS_MANAGE, 204
+    ),
+    ("POST", "/connections/{connection_id}/test"): Case(
+        "POST", "/connections/{connection}/test", P.CONNECTIONS_MANAGE, 200
+    ),
+    ("POST", "/connections/{connection_id}/refresh"): Case(
+        "POST", "/connections/{connection}/refresh", P.CONNECTIONS_MANAGE, 200
+    ),
+    ("GET", "/connections/{connection_id}/datasets/{dataset_id}/preview"): Case(
+        "GET",
+        "/connections/{connection}/datasets/{dataset}/preview",
+        P.CONNECTIONS_VIEW,
+        200,
+    ),
+    ("POST", "/connections/{connection_id}/versions/{version_id}/use"): Case(
+        "POST",
+        "/connections/{connection}/versions/{version}/use",
+        P.CONNECTIONS_MANAGE,
+        200,
+    ),
+    ("DELETE", "/connections/{connection_id}/versions/{version_id}"): Case(
+        "DELETE", "/connections/{connection}/versions/{version}", P.CONNECTIONS_MANAGE, 204
+    ),
+    ("POST", "/connections/google/start"): Case(
+        "POST",
+        "/connections/google/start",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={},
+        invalid_body={"connection_id": "not-a-uuid"},
+    ),
+    ("POST", "/connections/google/finish"): Case(
+        "POST",
+        "/connections/google/finish",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body_from=lambda ids: {"state": ids.google_state, "code": "4/test-code"},
+        invalid_body={"state": "short", "code": ""},
+    ),
+    ("POST", "/connections/{connection_id}/google/picker-token"): Case(
+        "POST", "/connections/{sheets}/google/picker-token", P.CONNECTIONS_MANAGE, 200
+    ),
+    ("PUT", "/connections/{connection_id}/google/spreadsheets"): Case(
+        "PUT",
+        "/connections/{sheets}/google/spreadsheets",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={"spreadsheet_ids": [SHEET_ID]},
+        invalid_body={"spreadsheet_ids": ["not a spreadsheet id!"]},
+    ),
 }
 
 
@@ -203,7 +308,13 @@ def test_every_route_is_classified(client: TestClient) -> None:
 
 
 @pytest.fixture
-def ids(db: DbSession, settings: Settings, clock: FakeClock) -> Fixtures:
+def ids(
+    db: DbSession,
+    settings: Settings,
+    clock: FakeClock,
+    runtime: ConnectorRuntime,
+    fake_redis: fakeredis.FakeRedis,
+) -> Fixtures:
     world = build_world(db, settings, clock.now)
     # An Owner who never turned 2FA on (e.g. promoted later): every workspace route must refuse them.
     nisha = add_member(db, world.org_a.id, email="nisha@urbancart.in", role="owner", name="Nisha")
@@ -249,12 +360,74 @@ def ids(db: DbSession, settings: Settings, clock: FakeClock) -> Fixtures:
     def membership(user_id: Any) -> str:
         return str(db.scalars(select(Membership.id).where(Membership.user_id == user_id)).one())
 
+    # Connections in both workspaces: a file (with a dataset) and Google Sheets.
+    files = {
+        org.id: make_file_connection(db, runtime, org.id, name=f"{org.name} outlet sales")
+        for org in (world.org_a, world.org_b)
+    }
+    sheets = {
+        world.org_a.id: make_sheets_connection(db, runtime, world.org_a.id),
+        world.org_b.id: make_sheets_connection(
+            db,
+            runtime,
+            world.org_b.id,
+            spreadsheet_ids=[NO_ACCESS_ID],
+            spreadsheet_name="Chaiwala menu",
+            sync=False,
+        ),
+    }
+
+    def spare_version(org_id: Any) -> str:
+        """A second, readable version of the file that is not in use (to use or discard)."""
+        connection = files[org_id]
+        version = FileVersion(
+            org_id=org_id,
+            connection_id=connection.id,
+            storage_key=f"orgs/{org_id}/files/{connection.id}/spare",
+            original_name="older.csv",
+            sha256="0" * 64,
+            size_bytes=10,
+            version=2,
+            status="ready",
+        )
+        db.add(version)
+        db.commit()
+        runtime.objects.put(version.storage_key, csv_bytes())
+        return str(version.id)
+
+    def dataset(org_id: Any) -> str:
+        return str(
+            db.scalars(select(Dataset.id).where(Dataset.connection_id == files[org_id].id)).one()
+        )
+
+    # A Google sign-in started by owner_a, which finish() completes.
+    state = "matrix-state-0000000000000000"
+    fake_redis.set(
+        f"{GOOGLE_STATE_PREFIX}{state}",
+        json.dumps(
+            {
+                "org_id": str(world.org_a.id),
+                "user_id": str(world.owner_a.id),
+                "verifier": "v" * 64,
+                "connection_id": None,
+            }
+        ),
+    )
     return Fixtures(
         world=world,
         member_a=membership(world.analyst_a.id),
         member_b=membership(world.analyst_b.id),
         invitation_a=invitations[world.org_a.id],
         invitation_b=invitations[world.org_b.id],
+        connection_a=str(files[world.org_a.id].id),
+        connection_b=str(files[world.org_b.id].id),
+        dataset_a=dataset(world.org_a.id),
+        dataset_b=dataset(world.org_b.id),
+        sheets_a=str(sheets[world.org_a.id].id),
+        sheets_b=str(sheets[world.org_b.id].id),
+        version_a=spare_version(world.org_a.id),
+        version_b=spare_version(world.org_b.id),
+        google_state=state,
     )
 
 
@@ -264,8 +437,22 @@ def call(
     url: str,
     headers: dict[str, str] | None,
     body: dict[str, Any] | None = None,
+    *,
+    ids: Fixtures | None = None,
+    invalid: bool = False,
 ) -> Any:
+    if case.upload:
+        files = (
+            None
+            if invalid
+            else {"file": ("sales.csv", b"Date,Sales\n01/01/2026,100\n", "text/csv")}
+        )
+        return client.request(
+            case.method, url, headers=headers or {}, files=files, data={"name": "Sales"}
+        )
     payload = body if body is not None else case.body
+    if payload is None and case.body_from is not None and ids is not None:
+        payload = case.body_from(ids)
     return client.request(case.method, url, headers=headers or {}, json=payload)
 
 
@@ -294,7 +481,7 @@ def test_a_bad_token_is_401(client: TestClient, ids: Fixtures, case: Case) -> No
 @pytest.mark.parametrize("who", ROLES)
 @pytest.mark.parametrize("case", ROUTES, ids=ROUTE_IDS)
 def test_roles(client: TestClient, ids: Fixtures, case: Case, who: str) -> None:
-    response = call(client, case, case.url(ids), ids.world.headers(who))
+    response = call(client, case, case.url(ids), ids.world.headers(who), ids=ids)
     if case.permission in ROLE_PERMISSIONS[_role(who)]:
         assert response.status_code == case.success, response.text
     else:
@@ -313,7 +500,7 @@ def test_owner_without_2fa_is_403(client: TestClient, ids: Fixtures, case: Case)
     "case", [c for c in ROUTES if c.has_id], ids=lambda c: f"{c.method} {c.path}"
 )
 def test_another_workspaces_id_is_404(client: TestClient, ids: Fixtures, case: Case) -> None:
-    response = call(client, case, case.url(ids, theirs=True), ids.world.headers("owner_a"))
+    response = call(client, case, case.url(ids, theirs=True), ids.world.headers("owner_a"), ids=ids)
     assert response.status_code == 404, response.text
     assert response.json() == {"error": {"code": "not_found", "message": "Not found."}}
 
@@ -322,11 +509,9 @@ def test_another_workspaces_id_is_404(client: TestClient, ids: Fixtures, case: C
     "case", [c for c in ROUTES if c.has_id], ids=lambda c: f"{c.method} {c.path}"
 )
 def test_a_missing_id_looks_the_same(client: TestClient, ids: Fixtures, case: Case) -> None:
-    url = case.path.format(
-        member="0190c0de-0000-7000-8000-000000000000",
-        invitation="0190c0de-0000-7000-8000-000000000000",
-    )
-    response = call(client, case, url, ids.world.headers("owner_a"))
+    missing = "0190c0de-0000-7000-8000-000000000000"
+    url = case.path.format(**dict.fromkeys(ids.placeholders(theirs=False), missing))
+    response = call(client, case, url, ids.world.headers("owner_a"), ids=ids)
     assert response.status_code == 404
     assert response.json() == {"error": {"code": "not_found", "message": "Not found."}}
 
@@ -335,18 +520,22 @@ def test_a_missing_id_looks_the_same(client: TestClient, ids: Fixtures, case: Ca
     "case", [c for c in ROUTES if c.has_id], ids=lambda c: f"{c.method} {c.path}"
 )
 def test_a_malformed_id_is_422(client: TestClient, ids: Fixtures, case: Case) -> None:
-    url = case.path.format(member="not-a-uuid", invitation="not-a-uuid")
-    response = call(client, case, url, ids.world.headers("owner_a"))
+    url = case.path.format(**dict.fromkeys(ids.placeholders(theirs=False), "not-a-uuid"))
+    response = call(client, case, url, ids.world.headers("owner_a"), ids=ids)
     assert response.status_code == 422
 
 
-VALIDATED = [c for c in ROUTES if c.invalid_body is not None or c.invalid_query is not None]
+VALIDATED = [
+    c for c in ROUTES if c.invalid_body is not None or c.invalid_query is not None or c.upload
+]
 
 
 @pytest.mark.parametrize("case", VALIDATED, ids=lambda c: f"{c.method} {c.path}")
 def test_validation_error(client: TestClient, ids: Fixtures, case: Case) -> None:
     url = case.url(ids) + (case.invalid_query or "")
-    response = call(client, case, url, ids.world.headers("owner_a"), case.invalid_body)
+    response = call(
+        client, case, url, ids.world.headers("owner_a"), case.invalid_body, ids=ids, invalid=True
+    )
     assert response.status_code == 422, response.text
     assert response.json()["error"]["code"] == "validation_error"
 
@@ -359,7 +548,7 @@ LEAKY = [c for c in ROUTES if c.check_leak]
 def test_nothing_from_another_workspace_appears(
     client: TestClient, ids: Fixtures, case: Case, who: str
 ) -> None:
-    response = call(client, case, case.url(ids), ids.world.headers(who))
+    response = call(client, case, case.url(ids), ids.world.headers(who), ids=ids)
     text = response.text
     for marker in (
         "UrbanCart",

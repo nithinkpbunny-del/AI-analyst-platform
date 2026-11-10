@@ -69,10 +69,12 @@ class Settings(BaseSettings):
     smtp_password: SecretStr = SecretStr("")
     email_from: str = "Analyst Agent <no-reply@localhost>"
 
-    # --- Google (filled in when the Google connector milestone needs it) ---
+    # --- Google (sign-in, and the Google Sheets connector; docs/SETUP_GOOGLE.md) ---
     google_oauth_client_id: str = ""
     google_oauth_client_secret: SecretStr = SecretStr("")
     google_picker_api_key: SecretStr = SecretStr("")
+    # The Google Cloud project *number* (not its id): the Picker needs it to grant access to picked files.
+    google_cloud_project_number: str = ""
 
     # --- AI ---
     llm_default_provider: Literal["gemini", "claude"] = "gemini"

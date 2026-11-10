@@ -16,6 +16,7 @@ x-backend: &backend
     SMTP_HOST: mailpit
   volumes:
     - ./backend:/app
+    - ./eval:/eval:ro # demo workbooks for the Google Sheets stand-in (development only)
   depends_on:
     postgres:
       condition: service_healthy

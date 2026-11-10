@@ -28,6 +28,7 @@ class Permission(StrEnum):
     ORG_MANAGE = "org.manage"  # org settings, plan, BYOK key
     MEMBERS_MANAGE = "members.manage"  # invite/remove people, change roles
     CONNECTIONS_MANAGE = "connections.manage"  # add/edit/remove connections and grants
+    CONNECTIONS_VIEW = "connections.view"  # see the connections one may use (DECISIONS D49)
     DICTIONARY_EDIT = "dictionary.edit"  # confirm/edit the business dictionary
     DICTIONARY_SUGGEST = "dictionary.suggest"
     ASK = "ask"  # questions, what-if, long tasks
@@ -47,6 +48,7 @@ P = Permission
 _EVERYONE = {P.GOALS_VIEW, P.DASHBOARD_VIEW, P.SHARED_VIEW, P.EXPORT}
 _ANALYST = _EVERYONE | {
     P.DICTIONARY_SUGGEST,
+    P.CONNECTIONS_VIEW,
     P.ASK,
     P.SAVED_QUESTIONS,
     P.SHARE,

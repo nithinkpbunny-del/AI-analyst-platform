@@ -1,15 +1,10 @@
+import { LoaderCircle, TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
 import { formatRelativeTime } from '../lib/format'
 
 export type ConnectionStatus = 'active' | 'needs_reauth' | 'error' | 'disabled'
-
-const statusLabel: Record<ConnectionStatus, string> = {
-  active: 'Live',
-  needs_reauth: 'Needs sign-in',
-  error: 'Error',
-  disabled: 'Paused',
-}
 
 const statusStyle: Record<ConnectionStatus, string> = {
   active: 'bg-gain-soft text-gain',
@@ -23,9 +18,17 @@ export interface ConnectionCardProps {
   /** e.g. "Google Sheets" */
   sourceType: string
   status: ConnectionStatus
-  lastSuccessAt?: Date | string
+  lastSuccessAt?: Date | string | null
+  /** The source is being read in the background right now. */
+  reading?: boolean
+  /** e.g. "3 tables · 28,540 rows" */
+  summary?: string
+  /** Data-quality warnings across the connection's tables. */
+  warnings?: number
   /** What happened and how to fix it, shown for errors. */
-  message?: string
+  message?: string | null
+  /** The card's title becomes this (a link to the connection). */
+  title?: ReactNode
   actions?: ReactNode
   now?: Date
   className?: string
@@ -37,11 +40,16 @@ export function ConnectionCard({
   sourceType,
   status,
   lastSuccessAt,
+  reading = false,
+  summary,
+  warnings = 0,
   message,
+  title,
   actions,
   now,
   className,
 }: ConnectionCardProps) {
+  const { t } = useTranslation()
   return (
     <article
       aria-label={name}
@@ -58,7 +66,9 @@ export function ConnectionCard({
           {sourceType.charAt(0).toUpperCase()}
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-sans text-body font-semibold tracking-normal">{name}</h3>
+          <h3 className="truncate font-sans text-body font-semibold tracking-normal">
+            {title ?? name}
+          </h3>
           <p className="m-0 text-small text-ink-muted">{sourceType}</p>
         </div>
         <span
@@ -67,12 +77,30 @@ export function ConnectionCard({
             statusStyle[status],
           )}
         >
-          {statusLabel[status]}
+          {t(`connections.status.${status}`)}
         </span>
       </div>
-      <p className="m-0 text-small text-ink-muted tabular">
-        {lastSuccessAt ? `Updated ${formatRelativeTime(lastSuccessAt, now)}` : 'Not fetched yet'}
-      </p>
+      <div className="flex flex-col gap-1 text-small text-ink-muted tabular">
+        {reading ? (
+          <p role="status" className="m-0 flex items-center gap-2 text-ink">
+            <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden />
+            {t('connections.reading')}
+          </p>
+        ) : (
+          <p className="m-0">
+            {lastSuccessAt
+              ? t('connections.updated', { when: formatRelativeTime(lastSuccessAt, now) })
+              : t('connections.notFetched')}
+          </p>
+        )}
+        {summary ? <p className="m-0">{summary}</p> : null}
+        {warnings > 0 ? (
+          <p className="m-0 flex items-center gap-1.5 text-ink">
+            <TriangleAlert className="size-4 text-caution" aria-hidden />
+            {t('connections.notes', { count: warnings })}
+          </p>
+        ) : null}
+      </div>
       {message ? <p className="m-0 text-small text-ink">{message}</p> : null}
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </article>

@@ -30,6 +30,10 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\brzp_(?:live|test)_[A-Za-z0-9]{8,}\b"), REDACTED),
     (re.compile(r"\bshp(?:at|ss|ca|pa)_[A-Za-z0-9]{16,}\b"), REDACTED),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), REDACTED),
+    # Google OAuth: access tokens (ya29.), refresh tokens (1//) and authorization codes (4/).
+    (re.compile(r"\bya29\.[0-9A-Za-z_.-]{10,}"), REDACTED),
+    (re.compile(r"\b1//[0-9A-Za-z_-]{20,}"), REDACTED),
+    (re.compile(r"\b4/[0-9A-Za-z_-]{20,}"), REDACTED),
     # Credentials embedded in URLs: scheme://user:password@host
     (
         re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<user>[^/\s:@]+):(?P<pw>[^/\s@]+)@"),

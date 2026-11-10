@@ -1,6 +1,12 @@
 import type { Page } from '@playwright/test'
 import { ROLE_PERMISSIONS } from '../src/lib/permissions'
 import { demoAiSettings, demoUsage } from '../src/testing/aiFixtures'
+import {
+  demoAccess,
+  demoConnectionList,
+  demoOrdersDetail,
+  demoDatasetPreview,
+} from '../src/testing/connectionFixtures'
 import { demoAudit, demoInvitations, demoMembers, demoPreview } from '../src/testing/teamFixtures'
 
 export const screens = [
@@ -159,6 +165,14 @@ export async function mockApi(
   await page.route(`${API}/invitations/preview`, (route) => route.fulfill({ json: demoPreview }))
   await page.route(`${API}/org/ai`, (route) => route.fulfill({ json: demoAiSettings }))
   await page.route(`${API}/org/usage*`, (route) => route.fulfill({ json: demoUsage }))
+  await page.route(`${API}/connections`, (route) => route.fulfill({ json: demoConnectionList }))
+  await page.route(`${API}/connections/access`, (route) =>
+    route.fulfill({ json: { people: demoAccess } }),
+  )
+  await page.route(`${API}/connections/c1`, (route) => route.fulfill({ json: demoOrdersDetail }))
+  await page.route(`${API}/connections/c1/datasets/d1/preview`, (route) =>
+    route.fulfill({ json: demoDatasetPreview }),
+  )
   await page.route('http://localhost:8000/health', (route) =>
     route.fulfill({
       json: { status: 'ok', service: 'analyst-api', version: '0.1.0', env: 'development' },

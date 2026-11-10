@@ -3,6 +3,13 @@
 from app.models.ai import LlmKey, Secret, UsageEvent
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken, Session, UserToken
+from app.models.connection import (
+    Connection,
+    ConnectionGrant,
+    Dataset,
+    FileVersion,
+    Snapshot,
+)
 from app.models.consent import Consent
 from app.models.invitation import Invitation
 from app.models.org import Membership, Organization
@@ -11,7 +18,11 @@ from app.models.user import User
 
 __all__ = [
     "AuditLog",
+    "Connection",
+    "ConnectionGrant",
     "Consent",
+    "Dataset",
+    "FileVersion",
     "Invitation",
     "KnownDevice",
     "LlmKey",
@@ -21,6 +32,7 @@ __all__ = [
     "RefreshToken",
     "Secret",
     "Session",
+    "Snapshot",
     "TwoFactor",
     "TwoFactorCode",
     "UsageEvent",

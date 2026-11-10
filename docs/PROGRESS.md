@@ -1,12 +1,21 @@
 # Progress
 
-**Next milestone: M6: Connections framework + Excel/CSV + Google Sheets** (start when the human says "continue").
-**Unfinished work:** none for M5. Carry into M6 and later:
+**Next milestone: M7: Zero setup: profiler + business dictionary** (start when the human says "continue").
+**Unfinished work:** none for M6. **First step of M7 (agreed with the human):** make the demo connection data
+(`frontend/src/testing/connectionFixtures.ts`) match what the real reader gives for `shopify_orders.csv`:
+`total_price` has no unit (the CSV has no ₹ marker, only a `currency` column with `INR`). Then re-record the
+affected Playwright screenshots (`make e2e-update`), review them, and check Storybook. Carry into M7 and later:
 - Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants in its migration. The
   schema test in `tests/security/test_rls.py` enforces it.
-- Every new route must be classified in `tests/api/test_route_matrix.py`.
-- Connection credentials go through `app.security.secrets.SecretStore` (purpose per connector).
-- Every LLM call goes through `keys.resolve(...)` and `usage.MeteredLLM` (D42).
+- Every new route must be classified in `tests/api/test_route_matrix.py` (it now has `{connection}`, `{dataset}`
+  and `{sheets}` placeholders, multipart uploads and fixture-dependent bodies).
+- Connection credentials go through `app.security.secrets.SecretStore` (purpose per connector,
+  `app.connectors.registry.SECRET_PURPOSES`).
+- Every LLM call goes through `keys.resolve(...)` and `usage.MeteredLLM` (D42). **No real LLM calls during builds
+  or tests** (CLAUDE.md); M7's dictionary drafting must be tested with the fake LLM client only.
+- Read data only through `DatasetCache` and decide visibility only with `app.connectors.access` (D50, D53).
+- M7 takes over from M6: "replace a connection with another kind of source and keep the dictionary mappings"
+  (R2, D57), and turning Razorpay paise into rupees through the dictionary (D51).
 **Deferred:** multilingual answers (originally in M8) and UI translations (M15). Keep all user-visible text in
 `frontend/src/locales/en.ts` (DECISIONS D41).
 
@@ -19,7 +28,7 @@
 - [x] M3: 2FA, Google sign-in, devices
 - [x] M4: Orgs, roles, invites, RLS
 - [x] M5: Secrets, LLM layer, plans, usage
-- [ ] M6: Connections framework + Excel/CSV + Google Sheets
+- [x] M6: Connections framework + Excel/CSV + Google Sheets
 - [ ] M7: Zero setup: profiler + business dictionary
 - [ ] M8: Agent core + Ask UI (multilingual answers deferred, D41)
 - [ ] M9: What-if simulator
@@ -410,3 +419,112 @@ change their role or remove them; then look at Activity.
   progress messages.
 - `KmsKeyWrapper` is tested against a stand-in KMS client only; check it against real KMS in M19.
 - Plan changes have no billing rules yet (M18).
+
+
+---
+
+## M6: Connections framework + Excel/CSV + Google Sheets (done)
+
+**Built**
+- **Database** (migration `0006`, reversible): `connections`, `connection_grants`, `datasets`, `snapshots`,
+  `file_versions`, each with RLS, the `tenant_isolation` policy and least-privilege grants; plus
+  `memberships.connection_access` (`all`/`selected`, D50).
+- **Connector framework** (`app/connectors/`): the `Connector` interface (test, list datasets, fetch, source
+  version, incremental, push-down), a registry that builds a connector with its decrypted credentials, and
+  `ReadOnlyHttpClient`: GET only plus POST to allow-listed token endpoints, enforced twice (wrapper and httpx
+  request hook), retries on 429/5xx honouring `Retry-After`.
+- **Reading tables** (`connectors/tabular.py`, `file_formats.py`): header row detection (title rows skipped),
+  Total row left out, types per column, Indian day-first dates, offsets and Unix times converted to the
+  workspace's time zone, ₹/Rs/INR, Indian and Western digit grouping, `(1,200)`, `%`, lakh/crore; identifiers stay
+  text. Safe file opening: type from content, zip-bomb limits, `defusedxml`, formulas never evaluated (D51).
+- **Cache and snapshots** (`app/data/`): Parquet snapshots in object storage; reuse within `CACHE_TTL_SECONDS`,
+  then an "unchanged" check against the source's version, incremental merge where supported, else a full read;
+  a Redis lock against duplicate reads; `fetched_at` and `checked_at` kept apart; expiry after
+  `SNAPSHOT_MAX_AGE_HOURS` with a beat purge every 15 minutes (D53).
+- **Data quality** on every new snapshot: short weeks/months, a category value missing for a week, stale data,
+  empty columns, near-unique ids with repeats, duplicate rows, mixed currencies, unreadable values, row cap, Total
+  row (D54). On the demo orders it reports exactly planted finding 7.
+- **Excel/CSV connector**: each sheet is a dataset; re-upload makes a new version; the stored original is never
+  changed (D52, D56). A new version is checked before it is used (D58, see the fix below).
+- **Google Sheets connector**: OAuth with PKCE, read-only scopes checked after every token exchange/refresh (write
+  scopes refused and revoked), the Google Picker, one dataset per visible tab, Drive version for "unchanged",
+  token revoked on removal, same-account rule for signing in again (D55). Without credentials, development uses
+  a **stand-in** (consent page + Picker dialog + Google's APIs answered from the demo workbooks). Tests replay
+  recorded Google answers.
+- **Background jobs**: `sync_connection` (after upload, choosing spreadsheets, signing in again, refresh) and
+  `purge_snapshots`, behind a `JobQueue` interface; a crashed job never leaves a connection "reading".
+- **API** (`/connections`): list (with which sources can be added), detail (tables, columns, data notes, file
+  versions), preview of the first 20 rows (live, through the cache), upload and new version (50 MB, 411/413),
+  rename, pause/resume, remove (files, snapshots, secret and Google token deleted at once), test, refresh; access
+  list and per-person access; Google start / callback / finish / picker token / spreadsheets. Owners manage;
+  Analysts see their visible connections read-only (`connections.view`, D49); others' ids answer 404.
+- **Activity log**: `connection.added`, `.file_uploaded`, `.renamed`, `.paused`, `.resumed`, `.removed`,
+  `.reauthorized`, `.spreadsheets_changed`, `.access_changed`; a "Connections" filter on the Activity screen.
+- **Web app**:
+  - **Connections** screen: "Add data" (upload with drop zone and checks, "Connect Google Sheets"), connection
+    cards (status, freshness, "Reading the data…", tables and rows, data notes, fix-it message) and "Who sees which
+    connections" (all / only these / none).
+  - **Connection** page: status and actions (Refresh now, Test connection with its checks, Rename, Pause/Resume,
+    Remove, Reconnect Google Sheets), spreadsheets (choose with the Picker, stop reading one), tables with data
+    notes, columns (type, unit, how dates were read) and a preview of the first rows, file versions with "Upload
+    a new version".
+  - Google return page (finishes the sign-in, opens the Picker or its stand-in, saves the choice).
+  - Analysts get the read-only screens; the menu shows Connections to them.
+  - All text in `locales/en.ts`; data notes are written from their details there (D41, D54). ConnectionCard now
+    uses i18n too.
+- `docs/SETUP_GOOGLE.md` Part B (real Google Sheets credentials, scopes, Picker key, project number, verification
+  before launch); `docs/ARCHITECTURE.md` connections section; decisions D49-D57.
+- `docker-compose.yml` mounts `eval/` read-only into the backend containers for the stand-in's demo workbooks.
+
+**Test status:**
+- **Backend:** 1109 passed (770 in M5); ruff and mypy (strict) clean. New: the parser and file formats (incl. zip
+  bomb, XML entities, encodings, delimiters), quality checks (incl. planted finding 7 and no false alarms on noisy
+  data), the read-only HTTP client, the lock, object storage, the Google connector against recorded answers and
+  the stand-in, the cache (reuse, unchanged, incremental, force, lock, failures, purge), sync jobs, the API
+  flows, the route matrix for all 15 new routes (401/403/2FA/404 cross-tenant/422/leaks), security (writes blocked
+  through every connector, tokens never in responses/logs/audit/DB, storage keys, RLS on all new tables).
+- **Frontend:** vitest 256 passed (233 in M5); eslint, prettier, tsc and tokens:check clean. Build OK (shell
+  161.6 KB of 200 KB gzipped). Storybook builds (new "Screens/Connections" stories).
+- **Playwright:** 261 passed (31 skipped by design). New baselines: Connections (now a real screen), the connection
+  page with columns and preview open, the access dialog and an Analyst's list, in light/dark × desktop/phone, with
+  axe checks; the 375 px no-scroll check now also covers the connection page.
+- **Live check against `make dev`:** 15 of 15 passed: sign-up with two-step, upload of the demo orders CSV read
+  by the Celery worker (28,540 rows in 3 s) with finding 7 reported, preview from the snapshot, an Excel file with
+  Indian formats, a damaged file refused, the Google Sheets stand-in end to end (consent, callback, Picker, 10 tabs
+  read, test), activity log, removal. No AI calls.
+
+**How to try it:** see the testing steps given at the end of M6. In short: `make fixtures` (once), `make dev`,
+open http://localhost:5173/connections as an Owner, upload `eval/fixtures/shopify_orders.csv`, open it and look at
+its data notes and preview; then "Connect Google Sheets" (stand-in) and choose the demo spreadsheets.
+
+**Known gaps / notes**
+- Real Google Sheets is untested against Google itself (no credentials yet). Follow `docs/SETUP_GOOGLE.md` Part B;
+  then re-record `backend/tests/connectors/fixtures/google_sheets.json` from a real account (M19).
+- Moving a connection to another kind of source while keeping dictionary mappings needs the dictionary (M7).
+- Incremental fetching is built and tested with a fake source; the first real users are Razorpay, Shopify and Zoho
+  (M11-M13).
+- Full-page screenshots with a dialog open show the overlay over the first screen height only (same as the Team
+  dialog since M4); in a real browser the overlay covers everything.
+- Uploads are held in memory while checked (at most 50 MB per request); fine for local use, revisit with the
+  load test in M19.
+
+### M6 fix after the human's live check: new file versions (D58)
+- **Problem:** a one-line text file (`broken.csv`) uploaded as a new version became "In use" and replaced the
+  working 28,540-row version.
+- **Fix:** a new version with no data rows is refused (`failed`); one with sheets or columns gone, an emptied sheet
+  or changed column types waits as **Needs your review** with the differences listed; the version in use stays.
+  Owners choose a version with **Use this version** (also to switch back to an earlier one) and can **Discard**
+  versions that are not in use. The version in use is recorded explicitly; "Refresh now" reads it.
+- Migration `0007`; routes `POST /connections/{id}/versions/{version_id}/use` and
+  `DELETE /connections/{id}/versions/{version_id}` (in the route matrix); activity entries
+  `connection.version_used` and `connection.version_discarded`.
+- Tests: `backend/tests/api/test_file_versions.py` (incl. the exact one-line file, header only, blank lines,
+  different columns, changed types, use, switch back and refresh, discard, refusals), sync-level tests for a
+  removed sheet and an added sheet, and web app tests for the review, use, switch-back and discard flows.
+- **Your existing workspace:** connections uploaded before this fix have no recorded version in use, so the
+  newest readable one is used. Open the connection and press **Use this version** on the version you want.
+- **Test status after the fix:** backend 1142 passed (ruff, mypy clean; route matrix 287 cases; migration round
+  trip incl. `0007`). Frontend vitest 260 passed; eslint, prettier, tsc clean; build 162.5 KB of 200 KB; Storybook
+  builds. Playwright 261 passed (the connection page baseline now shows a version waiting for review). Live check
+  against `make dev`: 10 of 10 for versions (the one-line `broken.csv` refused, review, use, switch back,
+  refresh, discard) and the original 15 of 15 again. No AI calls.

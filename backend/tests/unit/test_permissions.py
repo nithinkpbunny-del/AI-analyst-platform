@@ -26,6 +26,10 @@ SPEC: dict[Permission, set[str]] = {
     P.ORG_MANAGE: {OWN},  # Manage org settings, plan, BYOK key
     P.MEMBERS_MANAGE: {OWN},  # Invite/remove users, change roles
     P.CONNECTIONS_MANAGE: {OWN},  # Add/edit/remove connections, grants
+    P.CONNECTIONS_VIEW: {
+        OWN,
+        A,
+    },  # See usable connections (DECISIONS D49; grants filter which ones)
     P.DICTIONARY_EDIT: {OWN},  # Confirm/edit business dictionary
     P.DICTIONARY_SUGGEST: {OWN, A},  # Analyst "can suggest"
     P.ASK: {OWN, A},  # Ask questions, what-if, long tasks

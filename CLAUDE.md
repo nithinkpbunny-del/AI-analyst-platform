@@ -32,5 +32,7 @@ This project is built from `BUILD_SPEC.md` (the full specification). Progress li
 ## Other rules
 - This is a new project built from scratch. Do not look for or reuse code from any other folder.
 - No real LLM calls in tests (use the fake LLM client).
+- Never make real LLM calls (Gemini or Claude) during builds or tests. Use the FAKE LLM client only.
+  Do not run `make llm-check` or any other live AI check unless I ask for it by name.
 - If something needs my action (a credential, an account, approving a design), stop and ask clearly.
 - If you are unsure about a requirement, ask instead of guessing.

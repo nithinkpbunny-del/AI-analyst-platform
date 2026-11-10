@@ -27,6 +27,11 @@ for (const size of widths) {
       await open(page, `/${screen}`)
       expect(await hasNoHorizontalScroll(page), screen).toBe(true)
     }
+    // A connection with its columns and preview open: wide tables scroll inside their own box.
+    await open(page, '/connections/c1')
+    await page.getByRole('button', { name: 'Columns and preview' }).click()
+    await page.getByRole('table', { name: /First 4 of/ }).waitFor()
+    expect(await hasNoHorizontalScroll(page), 'connection detail').toBe(true)
     for (const screen of authScreens) {
       await open(page, `/${screen}`, { signedIn: false })
       expect(await hasNoHorizontalScroll(page), screen).toBe(true)

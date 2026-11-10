@@ -1,0 +1,372 @@
+{
+ "_comment": "Google OAuth, Sheets API v4 and Drive v3 answers in Google's documented formats; tokens are fake.",
+ "interactions": [
+  {
+   "request": {
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/token",
+    "form": {
+     "grant_type": "authorization_code",
+     "code": "4/test-code"
+    }
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "access_token": "ya29.test-access-token",
+     "expires_in": 3599,
+     "refresh_token": "1//test-refresh-token",
+     "scope": "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.file",
+     "token_type": "Bearer",
+     "id_token": "eyJhbGciOiAiUlMyNTYiLCAia2lkIjogInRlc3QifQ.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF1ZCI6ICJ0ZXN0LWNsaWVudC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsICJzdWIiOiAiMTE4MDAwMDAwMDAwMCIsICJlbWFpbCI6ICJhc2hhLnVyYmFuY2FydEBnbWFpbC5jb20iLCAiZW1haWxfdmVyaWZpZWQiOiB0cnVlLCAiZXhwIjogMTc5NDMwMDAwMCwgImlhdCI6IDE3OTQyOTY0MDB9.c2lnbmF0dXJl"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/token",
+    "form": {
+     "grant_type": "authorization_code",
+     "code": "4/other-account-code"
+    }
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "access_token": "ya29.test-access-token",
+     "expires_in": 3599,
+     "refresh_token": "1//other-refresh-token",
+     "scope": "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.file",
+     "token_type": "Bearer",
+     "id_token": "eyJhbGciOiAiUlMyNTYiLCAia2lkIjogInRlc3QifQ.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF1ZCI6ICJ0ZXN0LWNsaWVudC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsICJzdWIiOiAiMTE4MDAwMDAwMDAwMCIsICJlbWFpbCI6ICJzb21lb25lLmVsc2VAZ21haWwuY29tIiwgImVtYWlsX3ZlcmlmaWVkIjogdHJ1ZSwgImV4cCI6IDE3OTQzMDAwMDAsICJpYXQiOiAxNzk0Mjk2NDAwfQ.c2lnbmF0dXJl"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/token",
+    "form": {
+     "grant_type": "authorization_code",
+     "code": "4/write-scope-code"
+    }
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "access_token": "ya29.test-access-token",
+     "expires_in": 3599,
+     "refresh_token": "1//test-refresh-token",
+     "scope": "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive",
+     "token_type": "Bearer",
+     "id_token": "eyJhbGciOiAiUlMyNTYiLCAia2lkIjogInRlc3QifQ.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF1ZCI6ICJ0ZXN0LWNsaWVudC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsICJzdWIiOiAiMTE4MDAwMDAwMDAwMCIsICJlbWFpbCI6ICJhc2hhLnVyYmFuY2FydEBnbWFpbC5jb20iLCAiZW1haWxfdmVyaWZpZWQiOiB0cnVlLCAiZXhwIjogMTc5NDMwMDAwMCwgImlhdCI6IDE3OTQyOTY0MDB9.c2lnbmF0dXJl"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/token",
+    "form": {
+     "grant_type": "authorization_code",
+     "code": "4/no-sheets-scope-code"
+    }
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "access_token": "ya29.test-access-token",
+     "expires_in": 3599,
+     "refresh_token": "1//test-refresh-token",
+     "scope": "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.file",
+     "token_type": "Bearer",
+     "id_token": "eyJhbGciOiAiUlMyNTYiLCAia2lkIjogInRlc3QifQ.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF1ZCI6ICJ0ZXN0LWNsaWVudC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsICJzdWIiOiAiMTE4MDAwMDAwMDAwMCIsICJlbWFpbCI6ICJhc2hhLnVyYmFuY2FydEBnbWFpbC5jb20iLCAiZW1haWxfdmVyaWZpZWQiOiB0cnVlLCAiZXhwIjogMTc5NDMwMDAwMCwgImlhdCI6IDE3OTQyOTY0MDB9.c2lnbmF0dXJl"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/token",
+    "form": {
+     "grant_type": "authorization_code"
+    }
+   },
+   "response": {
+    "status": 400,
+    "json": {
+     "error": "invalid_grant",
+     "error_description": "Malformed auth code."
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/token",
+    "form": {
+     "grant_type": "refresh_token",
+     "refresh_token": "1//revoked-refresh-token"
+    }
+   },
+   "response": {
+    "status": 400,
+    "json": {
+     "error": "invalid_grant",
+     "error_description": "Token has been expired or revoked."
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/token",
+    "form": {
+     "grant_type": "refresh_token"
+    }
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "access_token": "ya29.test-access-token",
+     "expires_in": 3599,
+     "scope": "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.file",
+     "token_type": "Bearer",
+     "id_token": "eyJhbGciOiAiUlMyNTYiLCAia2lkIjogInRlc3QifQ.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF1ZCI6ICJ0ZXN0LWNsaWVudC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsICJzdWIiOiAiMTE4MDAwMDAwMDAwMCIsICJlbWFpbCI6ICJhc2hhLnVyYmFuY2FydEBnbWFpbC5jb20iLCAiZW1haWxfdmVyaWZpZWQiOiB0cnVlLCAiZXhwIjogMTc5NDMwMDAwMCwgImlhdCI6IDE3OTQyOTY0MDB9.c2lnbmF0dXJl"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/revoke"
+   },
+   "response": {
+    "status": 200,
+    "json": {}
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "https://sheets.googleapis.com/v4/spreadsheets/1UrbanCartTargets2026aBcDeFgHiJkLmNoPqRsTu"
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "spreadsheetId": "1UrbanCartTargets2026aBcDeFgHiJkLmNoPqRsTu",
+     "properties": {
+      "title": "UrbanCart targets 2026"
+     },
+     "sheets": [
+      {
+       "properties": {
+        "sheetId": 0,
+        "title": "Targets",
+        "index": 0,
+        "sheetType": "GRID"
+       }
+      },
+      {
+       "properties": {
+        "sheetId": 1702384,
+        "title": "Notes",
+        "index": 1,
+        "sheetType": "GRID"
+       }
+      },
+      {
+       "properties": {
+        "sheetId": 55,
+        "title": "Lookup",
+        "index": 2,
+        "sheetType": "GRID",
+        "hidden": true
+       }
+      },
+      {
+       "properties": {
+        "sheetId": 77,
+        "title": "Chart1",
+        "index": 3,
+        "sheetType": "OBJECT"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "https://sheets.googleapis.com/v4/spreadsheets/1UrbanCartTargets2026aBcDeFgHiJkLmNoPqRsTu/values/'Targets'"
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "range": "Targets!A1:Z1000",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "UrbanCart revenue targets"
+      ],
+      [],
+      [
+       "Month",
+       "Region",
+       "Revenue target (₹)",
+       "Owner"
+      ],
+      [
+       "01/07/2026",
+       "North",
+       650000,
+       "Meera"
+      ],
+      [
+       "01/07/2026",
+       "South",
+       675000,
+       "Meera"
+      ],
+      [
+       "01/07/2026",
+       "East",
+       700000,
+       "Meera"
+      ],
+      [
+       "01/07/2026",
+       "West",
+       725000,
+       "Meera"
+      ],
+      [
+       "01/08/2026",
+       "North",
+       650000,
+       "Meera"
+      ],
+      [
+       "01/08/2026",
+       "South",
+       675000,
+       "Meera"
+      ],
+      [
+       "01/08/2026",
+       "East",
+       700000,
+       "Meera"
+      ],
+      [
+       "01/08/2026",
+       "West",
+       725000,
+       "Meera"
+      ],
+      [
+       "01/09/2026",
+       "North",
+       655000,
+       "Meera"
+      ],
+      [
+       "01/09/2026",
+       "South",
+       680000,
+       "Meera"
+      ],
+      [
+       "01/09/2026",
+       "East",
+       705000,
+       "Meera"
+      ],
+      [
+       "01/09/2026",
+       "West",
+       730000,
+       "Meera"
+      ],
+      [
+       "Total",
+       "",
+       8270000,
+       ""
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "https://sheets.googleapis.com/v4/spreadsheets/1UrbanCartTargets2026aBcDeFgHiJkLmNoPqRsTu/values/'Notes'"
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "range": "Notes!A1:Z1000",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Note",
+       "Added on"
+      ],
+      [
+       "Targets agreed in the April review",
+       "12/04/2026"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "https://www.googleapis.com/drive/v3/files/1UrbanCartTargets2026aBcDeFgHiJkLmNoPqRsTu"
+   },
+   "response": {
+    "status": 200,
+    "json": {
+     "version": "41",
+     "modifiedTime": "2026-11-02T06:30:00.000Z"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "https://sheets.googleapis.com/v4/spreadsheets/1NoLongerSharedSheetxYz0123456789abcdefghij"
+   },
+   "response": {
+    "status": 403,
+    "json": {
+     "error": {
+      "code": 403,
+      "message": "The caller does not have permission",
+      "status": "PERMISSION_DENIED"
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "https://sheets.googleapis.com/v4/spreadsheets/1DeletedSpreadsheetQwErTy0123456789abcdefgh"
+   },
+   "response": {
+    "status": 404,
+    "json": {
+     "error": {
+      "code": 404,
+      "message": "Requested entity was not found.",
+      "status": "NOT_FOUND"
+     }
+    }
+   }
+  }
+ ]
+}

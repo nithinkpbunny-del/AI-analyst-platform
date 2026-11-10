@@ -78,6 +78,23 @@ flowchart LR
     AUTH --> MAIL
 ```
 
+## Connections and data (M6)
+
+- A **connector** (`app/connectors/`) is built per connection with its decrypted credentials, lists the source's
+  tables as datasets and fetches one as a typed table. Network access goes through `ReadOnlyHttpClient` (GET, plus
+  POST to allow-listed token endpoints only). Files and Google Sheets exist; Razorpay, Shopify, Zoho, databases
+  and Tally follow in Phase 2/3.
+- **Typed tables** (`connectors/tabular.py`): header detection, Indian dates and amounts, units, type per column.
+- **Cache** (`data/cache.py`): reuse a Parquet snapshot within `CACHE_TTL_SECONDS`; afterwards ask the source for
+  its version and keep the snapshot if unchanged; fetch incrementally where supported; otherwise read everything.
+  A Redis lock prevents duplicate reads. Snapshots live in object storage under `orgs/<org>/` and expire after
+  `SNAPSHOT_MAX_AGE_HOURS` (beat purge).
+- **Quality** (`data/quality.py`) runs on every new snapshot; findings travel with the dataset.
+- **Access** (`connectors/access.py`): Owners see every connection; others see all or only their grants. The agent
+  will use the same function.
+- Reading a whole source runs as a Celery job (`tasks/jobs.sync_connection`), queued by the API through a
+  `JobQueue` interface.
+
 ## Flow of one question
 
 1. Detect the language and load the last 8 turns, the confirmed business dictionary, industry template, lens and
