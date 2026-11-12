@@ -124,3 +124,17 @@ LLM per tool call · 30 s source timeout (120 s long tasks) · 1M rows per datas
 `backend/app` (api, auth, security, connectors, data, dictionary, analytics, agent, llm, briefings, tasks, exports,
 email, privacy) · `frontend/src` · `design/` · `site/` · `bridge/tally/` · `eval/` (fixtures + golden questions).
 Modules are added milestone by milestone; see `docs/PROGRESS.md`.
+
+## Business dictionary (M7)
+```
+connection read (Celery sync) ──▶ draft_dictionary job
+   profile each dataset from its newest stored copy (code, no AI) ──▶ datasets.profile_json
+   structure hash == the dictionary being continued?  ── yes ─▶ stop
+   draft in code (roles, units from evidence, time column, metrics) + carry over what is settled
+   AI: profile only, only what is new, one small call per 8 tables, cached by input hash (M5 layer, metered)
+   test joins on stored values, metrics in DuckDB on a 5,000-row sample (money in rupees)
+   ──▶ dictionary_versions (draft)  ──▶ Owner reviews, edits, ✓ each flagged item ──▶ Confirm ──▶ confirmed vN
+answers (M8) ──▶ dictionary.service.active(): newest confirmed, else the draft + "dictionary not confirmed"
+```
+Code: `app/dictionary/` (`profiler`, `draft`, `ai`, `links`, `validate`, `units`, `replace`, `edits`, `service`),
+API `app/api/dictionary.py`, web `frontend/src/features/dictionary/`. Decisions D59-D63.

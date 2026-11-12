@@ -7,6 +7,7 @@ import {
   demoOrdersDetail,
   demoDatasetPreview,
 } from '../src/testing/connectionFixtures'
+import { firstDraftState } from '../src/testing/dictionaryFixtures'
 import { demoAudit, demoInvitations, demoMembers, demoPreview } from '../src/testing/teamFixtures'
 
 export const screens = [
@@ -18,6 +19,7 @@ export const screens = [
   'briefings',
   'tasks',
   'connections',
+  'dictionary',
   'team',
   'activity',
   'settings',
@@ -173,6 +175,7 @@ export async function mockApi(
   await page.route(`${API}/connections/c1/datasets/d1/preview`, (route) =>
     route.fulfill({ json: demoDatasetPreview }),
   )
+  await page.route(`${API}/dictionary`, (route) => route.fulfill({ json: firstDraftState }))
   await page.route('http://localhost:8000/health', (route) =>
     route.fulfill({
       json: { status: 'ok', service: 'analyst-api', version: '0.1.0', env: 'development' },

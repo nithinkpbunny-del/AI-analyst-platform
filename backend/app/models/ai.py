@@ -30,7 +30,7 @@ from app.models.mixins import IdMixin, TimestampMixin
 
 Provider = Literal["gemini", "claude"]
 PROVIDERS: tuple[Provider, ...] = ("gemini", "claude")
-UsageKind = Literal["question", "task", "briefing", "check"]
+UsageKind = Literal["question", "task", "briefing", "check", "dictionary"]
 KeySource = Literal["managed", "byok"]
 # Runs of these kinds count towards the Managed plan's monthly question limit (DECISIONS D42).
 LIMITED_KINDS: tuple[UsageKind, ...] = ("question", "task")
@@ -77,7 +77,9 @@ class LlmKey(IdMixin, TimestampMixin, Base):
 class UsageEvent(IdMixin, TimestampMixin, Base):
     __tablename__ = "usage_events"
     __table_args__ = (
-        CheckConstraint("kind IN ('question', 'task', 'briefing', 'check')", name="kind"),
+        CheckConstraint(
+            "kind IN ('question', 'task', 'briefing', 'check', 'dictionary')", name="kind"
+        ),
         CheckConstraint("key_source IN ('managed', 'byok')", name="key_source"),
         CheckConstraint("provider IN ('gemini', 'claude')", name="provider"),
         Index("ix_usage_events_org_id_created_at", "org_id", "created_at"),

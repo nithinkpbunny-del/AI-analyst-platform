@@ -1,0 +1,305 @@
+import { CircleAlert, CircleCheck, CircleHelp, Trash2 } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Button } from '../../components/ui/button'
+import { Input } from '../../components/ui/input'
+import { Select } from '../../components/ui/select'
+import type { DictionaryContent, DictionaryMetric } from '../../lib/dictionaryApi'
+import { metricErrorText } from './text'
+
+const METRIC_NAME = /^[a-z][a-z0-9_]{0,59}$/i
+
+function MetricStatus({ metric }: { metric: DictionaryMetric }) {
+  const { t } = useTranslation()
+  if (metric.valid === true) {
+    return (
+      <span className="inline-flex items-center gap-1 text-caption text-gain">
+        <CircleCheck className="size-4" aria-hidden /> {t('dictionary.metrics.works')}
+      </span>
+    )
+  }
+  if (metric.valid === false) {
+    return (
+      <span className="inline-flex items-center gap-1 text-caption text-loss">
+        <CircleAlert className="size-4" aria-hidden /> {t('dictionary.metrics.broken')}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-caption text-ink-muted">
+      <CircleHelp className="size-4" aria-hidden /> {t('dictionary.metrics.unchecked')}
+    </span>
+  )
+}
+
+export function MetricsSection({
+  content,
+  onChange,
+}: {
+  content: DictionaryContent
+  onChange?: (next: DictionaryContent) => void
+}) {
+  const { t } = useTranslation()
+  const editable = onChange !== undefined
+  const entries = Object.entries(content.metrics)
+  const tables = Object.entries(content.datasets)
+  const [name, setName] = useState('')
+  const [formula, setFormula] = useState('')
+  const [table, setTable] = useState(tables[0]?.[0] ?? '')
+  const nameProblem = !name
+    ? null
+    : !METRIC_NAME.test(name)
+      ? t('dictionary.metrics.nameInvalid')
+      : content.metrics[name]
+        ? t('dictionary.metrics.nameTaken')
+        : null
+
+  const update = (key: string, patch: Partial<DictionaryMetric>) =>
+    onChange?.({
+      ...content,
+      metrics: {
+        ...content.metrics,
+        [key]: {
+          ...content.metrics[key]!,
+          ...patch,
+          valid: null,
+          error: null,
+          needs_review: false,
+        },
+      },
+    })
+
+  const add = (event: FormEvent) => {
+    event.preventDefault()
+    if (!name || nameProblem || !formula.trim()) return
+    onChange?.({
+      ...content,
+      metrics: {
+        ...content.metrics,
+        [name]: {
+          expr: formula.trim(),
+          dataset: table || null,
+          unit: null,
+          good_direction: null,
+          meaning: '',
+          source: 'owner',
+          valid: null,
+          error: null,
+          needs_review: false,
+        },
+      },
+    })
+    setName('')
+    setFormula('')
+  }
+
+  return (
+    <section
+      aria-labelledby="dictionary-metrics"
+      className="rounded-panel border border-line bg-surface p-4 tablet:p-6"
+    >
+      <h2 id="dictionary-metrics" className="text-h4">
+        {t('dictionary.metrics.title')}
+      </h2>
+      <p className="m-0 mt-2 max-w-prose text-small text-ink-muted">
+        {t('dictionary.metrics.intro')}
+      </p>
+      {entries.length === 0 ? (
+        <p className="m-0 mt-4 text-small text-ink-muted">{t('dictionary.metrics.none')}</p>
+      ) : (
+        <ul className="m-0 mt-4 list-none p-0">
+          {entries.map(([key, metric]) => {
+            const error = metricErrorText(t, metric.error)
+            return (
+              <li
+                key={key}
+                className="flex flex-col gap-2 border-b border-line py-4 last:border-b-0"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="m-0 text-small font-medium">
+                    <span className="font-mono">{key}</span>
+                    {metric.meaning ? (
+                      <span className="font-normal text-ink-muted"> · {metric.meaning}</span>
+                    ) : null}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <MetricStatus metric={metric} />
+                    {editable ? (
+                      <button
+                        type="button"
+                        aria-label={t('dictionary.metrics.remove', { name: key })}
+                        className="inline-flex size-11 items-center justify-center rounded-control hover:bg-loss-soft"
+                        onClick={() => {
+                          const rest = { ...content.metrics }
+                          delete rest[key]
+                          onChange({ ...content, metrics: rest })
+                        }}
+                      >
+                        <Trash2 className="size-4 text-loss" aria-hidden />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {editable ? (
+                  <Input
+                    value={metric.expr}
+                    maxLength={400}
+                    className="font-mono"
+                    aria-label={`${t('dictionary.metrics.formula')}: ${key}`}
+                    onChange={(event) => update(key, { expr: event.target.value })}
+                  />
+                ) : (
+                  <code className="text-small">{metric.expr}</code>
+                )}
+                {error.text ? (
+                  <p className="m-0 text-small text-loss">
+                    {error.text}
+                    {error.detail ? (
+                      <span className="block text-caption text-ink-muted">
+                        {t('dictionary.metrics.detail', { detail: error.detail })}
+                      </span>
+                    ) : null}
+                  </p>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {editable ? (
+        <form
+          onSubmit={add}
+          className="mt-4 grid gap-3 border-t border-line pt-4 tablet:grid-cols-[1fr_2fr_1fr_auto]"
+        >
+          <h3 className="m-0 text-small font-medium tablet:col-span-full">
+            {t('dictionary.metrics.addTitle')}
+          </h3>
+          <label className="flex flex-col gap-1.5 text-small">
+            {t('dictionary.metrics.addName')}
+            <Input
+              value={name}
+              maxLength={60}
+              aria-invalid={nameProblem ? true : undefined}
+              onChange={(event) => setName(event.target.value)}
+            />
+            {nameProblem ? <span className="text-caption text-loss">{nameProblem}</span> : null}
+          </label>
+          <label className="flex flex-col gap-1.5 text-small">
+            {t('dictionary.metrics.addFormula')}
+            <Input
+              value={formula}
+              maxLength={400}
+              className="font-mono"
+              onChange={(event) => setFormula(event.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5 text-small">
+            {t('dictionary.metrics.addTable')}
+            <Select value={table} onChange={(event) => setTable(event.target.value)}>
+              <option value="">{t('dictionary.metrics.anyTable')}</option>
+              {tables.map(([key, entry]) => (
+                <option key={key} value={key}>
+                  {entry.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <Button
+            type="submit"
+            variant="secondary"
+            className="self-end"
+            disabled={!name || !!nameProblem || !formula.trim()}
+          >
+            {t('dictionary.metrics.addButton')}
+          </Button>
+        </form>
+      ) : null}
+    </section>
+  )
+}
+
+export function JoinsSection({
+  content,
+  onChange,
+}: {
+  content: DictionaryContent
+  onChange?: (next: DictionaryContent) => void
+}) {
+  const { t } = useTranslation()
+  const joins = content.relationships
+  return (
+    <section
+      aria-labelledby="dictionary-joins"
+      className="rounded-panel border border-line bg-surface p-4 tablet:p-6"
+    >
+      <h2 id="dictionary-joins" className="text-h4">
+        {t('dictionary.joins.title')}
+      </h2>
+      <p className="m-0 mt-2 max-w-prose text-small text-ink-muted">
+        {t('dictionary.joins.intro')}
+      </p>
+      {joins.length === 0 ? (
+        <p className="m-0 mt-4 text-small text-ink-muted">{t('dictionary.joins.none')}</p>
+      ) : (
+        <ul className="m-0 mt-4 list-none p-0">
+          {joins.map((join, index) => (
+            <li
+              key={`${join.left}-${join.right}`}
+              className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3 last:border-b-0"
+            >
+              <div>
+                <p className="m-0 text-small">
+                  <span className="font-mono">{join.left}</span> →{' '}
+                  <span className="font-mono">{join.right}</span>
+                </p>
+                <p className="m-0 text-caption text-ink-muted">
+                  {t(`dictionary.joins.types.${join.type}`)}
+                  {join.match_rate !== null
+                    ? ` · ${t('dictionary.joins.match', { rate: Math.round(join.match_rate * 100) })}`
+                    : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {join.needs_review && onChange ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label={`${t('dictionary.column.check')}: ${join.left}`}
+                    onClick={() =>
+                      onChange({
+                        ...content,
+                        relationships: content.relationships.map((item, i) =>
+                          i === index ? { ...item, needs_review: false } : item,
+                        ),
+                      })
+                    }
+                  >
+                    {t('dictionary.column.check')}
+                  </Button>
+                ) : null}
+                {onChange ? (
+                  <button
+                    type="button"
+                    aria-label={t('dictionary.joins.remove', {
+                      left: join.left,
+                      right: join.right,
+                    })}
+                    className="inline-flex size-11 items-center justify-center rounded-control hover:bg-loss-soft"
+                    onClick={() =>
+                      onChange({
+                        ...content,
+                        relationships: content.relationships.filter((_, i) => i !== index),
+                      })
+                    }
+                  >
+                    <Trash2 className="size-4 text-loss" aria-hidden />
+                  </button>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}

@@ -66,6 +66,7 @@ from app.connectors.registry import (
 from app.connectors.service import remove_connection
 from app.data.cache import DatasetCache, DatasetMissing
 from app.data.objects import file_key
+from app.dictionary import service as dictionary_service
 from app.models import (
     Connection,
     ConnectionGrant,
@@ -1040,6 +1041,9 @@ def delete_connection(
     )
     remove_connection(tenant.db, _runtime(request), connection)
     tenant.db.commit()
+    # Its tables leave the business dictionary's draft (the confirmed version stays until an Owner confirms).
+    if dictionary_service.mark_queued(_runtime(request), tenant.org_id):
+        _jobs(request).draft_dictionary(org_id=tenant.org_id, user_id=tenant.auth.user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

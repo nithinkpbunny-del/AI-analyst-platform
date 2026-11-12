@@ -145,7 +145,7 @@ export const demoOrdersDetail: ConnectionDetail = {
           name: 'total_price',
           label: 'total_price',
           type: 'number',
-          unit: 'INR',
+          unit: null,
           date_format: null,
         },
         {

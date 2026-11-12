@@ -21,6 +21,7 @@ const GROUPS = [
   'org',
   'llm',
   'connection',
+  'dictionary',
   'audit',
 ] as const
 

@@ -17,8 +17,11 @@ from typing import Any, Protocol
 
 from app.connectors import service
 from app.connectors.registry import ConnectorRuntime
+from app.dictionary import service as dictionary_service
+from app.llm.base import LLMFactory
 
 SYNC_CONNECTION = "app.tasks.jobs.sync_connection"
+DRAFT_DICTIONARY = "app.tasks.jobs.draft_dictionary"
 
 
 class JobQueue(Protocol):
@@ -31,6 +34,29 @@ class JobQueue(Protocol):
         file_version_id: uuid.UUID | None = None,
         accept_changes: bool = False,
     ) -> None: ...
+
+    def draft_dictionary(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        force: bool = False,
+        fresh_ai: bool = False,
+    ) -> None:
+        """Draft or update the workspace's business dictionary (the caller reserved the slot with
+        ``dictionary.service.mark_queued``)."""
+        ...
+
+
+def _draft_kwargs(
+    org_id: uuid.UUID, user_id: uuid.UUID | None, force: bool, fresh_ai: bool
+) -> dict[str, Any]:
+    return {
+        "org_id": str(org_id),
+        "user_id": str(user_id) if user_id else None,
+        "force": force,
+        "fresh_ai": fresh_ai,
+    }
 
 
 def _sync_kwargs(
@@ -66,10 +92,27 @@ class CeleryJobQueue:
             kwargs=_sync_kwargs(org_id, connection_id, force, file_version_id, accept_changes),
         )
 
+    def draft_dictionary(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        force: bool = False,
+        fresh_ai: bool = False,
+    ) -> None:
+        from app.tasks.celery_app import celery_app
+
+        celery_app.send_task(
+            DRAFT_DICTIONARY, kwargs=_draft_kwargs(org_id, user_id, force, fresh_ai)
+        )
+
 
 class InlineJobQueue:
-    def __init__(self, runtime: ConnectorRuntime) -> None:
+    """Runs jobs at once, in this process. Like the worker, a finished sync leads to a dictionary update."""
+
+    def __init__(self, runtime: ConnectorRuntime, llm_factory: LLMFactory | None = None) -> None:
         self._runtime = runtime
+        self._llm_factory = llm_factory
 
     def sync_connection(
         self,
@@ -80,13 +123,35 @@ class InlineJobQueue:
         file_version_id: uuid.UUID | None = None,
         accept_changes: bool = False,
     ) -> None:
-        service.run_sync_job(
+        outcome = service.run_sync_job(
             self._runtime,
             org_id=org_id,
             connection_id=connection_id,
             force=force,
             file_version_id=file_version_id,
             accept_changes=accept_changes,
+        )
+        if outcome.status == "active" and dictionary_service.mark_queued(self._runtime, org_id):
+            self.draft_dictionary(org_id=org_id)
+
+    def draft_dictionary(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        force: bool = False,
+        fresh_ai: bool = False,
+    ) -> None:
+        if self._llm_factory is None:
+            dictionary_service.release(self._runtime, org_id)
+            return
+        dictionary_service.run_draft(
+            self._runtime,
+            self._llm_factory,
+            org_id=org_id,
+            user_id=user_id,
+            force=force,
+            fresh_ai=fresh_ai,
         )
 
 
@@ -109,3 +174,13 @@ class RecordingJobQueue:
                 _sync_kwargs(org_id, connection_id, force, file_version_id, accept_changes),
             )
         )
+
+    def draft_dictionary(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        force: bool = False,
+        fresh_ai: bool = False,
+    ) -> None:
+        self.jobs.append((DRAFT_DICTIONARY, _draft_kwargs(org_id, user_id, force, fresh_ai)))

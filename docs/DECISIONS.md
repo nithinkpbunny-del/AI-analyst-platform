@@ -733,3 +733,94 @@ a missing one.
   deletes its stored file. Both are Owner-only and logged (`connection.version_used`,
   `connection.version_discarded`). The version in use cannot be discarded, and an unreadable version cannot be used.
 - Migration `0007` adds the status and `review_json` (reversible; going back turns waiting versions into `failed`).
+
+### D59. Money and units: evidence in code, the dictionary decides (M7)
+- The profiler (`app/dictionary/profiler.py`, no AI) collects evidence per numeric column and the draft proposes a
+  unit from it: a ₹/Rs/INR marker in the values or heading (`rupee_marker`); a sibling `currency` column with one
+  value, INR (`currency_column`, needs a money-like name too); a money-like name such as price, amount, revenue,
+  discount, refund, total, fee, tax (`money_name`); whole numbers that are most likely paise.
+- **Paise** (D51 left this to the dictionary): `divide_by: 100` is proposed when the name says paise
+  (`paise_name`), in a Razorpay-style payments table (an `amount` + `currency` column and three more payment
+  columns, whole numbers: `paise_signature`), or for a whole-number `amount` next to INR with every value >= 100
+  (`paise_amount`, a weaker guess). A ₹ marker in the data always beats a paise guess.
+- Each proposal carries `evidence` (shown to the Owner in plain words) and, when it is a guess or consequential,
+  `needs_review` with a reason code: `paise`, `paise_guess`, `money_name_only` (named like money, no currency in the
+  data: rupees assumed, Owner asked), `other_currency` (one non-rupee currency: no unit), `ai_unit`, ...
+  Items with `needs_review` block **Confirm** until the Owner checks (✓) or edits them.
+- Names such as `discounts` are not mistaken for counts (the "not money" words are whole words: `orders_count`,
+  `discount_pct`, `quantity`).
+- **The AI never overrides evidence.** A unit the model adds where the data has none is applied but flagged
+  `ai_unit`; its roles are only taken among identifier/group/detail changes; it cannot alter paise.
+- **Rupees through the dictionary:** `units.to_units(frame, entry)` divides every `divide_by` column. Metric
+  formulas run on that, so `SUM(amount)` on Razorpay data is rupees. M8's tools must read tables through it.
+- The reader still gives `total_price` of `shopify_orders.csv` no unit (the CSV has no ₹); the demo fixture
+  `connectionFixtures.ts` now matches that (the M6 hand-over note), and the profiler finds INR from the
+  currency column.
+
+### D60. The dictionary: documents, versions, the draft job (M7)
+- **Storage:** `dictionary_versions` (RLS, `tenant_isolation`): one row per version with the whole dictionary as
+  JSON (`content`, validated by `app/dictionary/model.py`; BUILD_SPEC 9 shape plus `evidence`, `needs_review`,
+  `source` and bindings to datasets/connections). At most one `draft` per workspace; the newest `confirmed` one is
+  what answers use; older confirmed versions are `superseded` and kept. Profiles are kept on
+  `datasets.profile_json`. YAML export: `GET /dictionary/export.yaml`.
+- **Drafting** is a Celery job (`draft_dictionary`) that runs after every successful read of a connection, after
+  a connection is removed, and on "Draft again". Steps: profile -> compare the *structure hash* (tables, column
+  names, types, units; new rows do not change it) with the dictionary being continued -> if unchanged, stop ->
+  draft in code, carrying over everything settled -> AI for only what is new -> test joins and metrics -> save.
+  One job per workspace at a time (a Redis slot). A schema change updates the Owner's draft (or makes one from the
+  confirmed version) with a `diff`; the confirmed version is never changed.
+- **A removed and uploaded-again source** (same name, nearly the same columns) is the same table: the Owner's work
+  is kept without flags (`replace.rebind_orphans`).
+- **Notifying the Owner** of a new draft: a notice on the Connections page and the Dictionary screen. Email
+  notifications come with the briefing emails (M10).
+- **"Dictionary not confirmed":** `service.active(db, org_id)` returns the newest confirmed version, or the draft with
+  `confirmed=False` and `note == "dictionary not confirmed"`. M8 puts that note on every answer until an Owner
+  confirms. Analysts read the confirmed dictionary (or the working draft, labelled, before the first confirmation).
+- **Who:** `connections.view` reads; `dictionary.edit` (Owners) edits, confirms, redrafts, discards, replaces.
+  Tables of connections a person may not see are left out for them (D50). Analyst *suggestions*
+  (`dictionary.suggest`) are not built.
+- **Edits:** meanings, roles, units, synonyms, the date column, company, metrics (add, change, remove) and which
+  joins to keep. Tables, columns and types come from the data and cannot be edited; joins can be removed but not
+  added by hand (they are found by testing the data). Anything the Owner touches becomes theirs (`source: owner`)
+  and later drafts do not overwrite it.
+- **Validation:** metrics are DuckDB SQL expressions run on a sample (5,000 rows, money in rupees) in an in-memory
+  engine with external access off and the configuration locked; formulas with `;`, comments, `SELECT`, file or
+  extension functions are refused before they run. A metric must give one number. Metrics may use other metrics by
+  name. Joins are measured on the stored values: kept at >= 80% match, kept but flagged at 30-80%, dropped below.
+  A metric the AI suggested that does not run is dropped (and counted in the notes); one the Owner wrote stays and
+  blocks confirming until fixed.
+
+### D61. AI use in drafting (M7)
+- All calls go through the M5 layer (`keys.resolve`, usage recorded as kind `dictionary`; migration `0008` widens the
+  check). `check_limit=False`: drafting is not a question and does not count against the Managed limit (D42).
+- **The model sees the profile only**: column names, types, counts, ranges and at most five samples per column
+  (none for columns that look personal: e-mail, phone, names, addresses, GSTIN, cards, or values that look like
+  them). No rows. No tools. Money is shown to it in rupees.
+- **Few and small:** one call per `DICTIONARY_AI_TABLES_PER_CALL` (8) tables, and only for tables and columns the
+  dictionary has not described; an unchanged structure makes no call. The answer is kept on the version with a
+  hash of the input; the same input is never sent twice (`cached`). `fresh_ai` ("Draft again with AI") asks again.
+- **Retries** are the layer's (429/503 with backoff); an exhausted daily quota or an invalid key is not retried
+  and the draft is made in code, with the reason shown (`unavailable:<code>`, `failed:<kind>`, `unreadable`).
+- No transaction is held open while the model answers. Output budget: `DICTIONARY_AI_MAX_OUTPUT_TOKENS`
+  (6,000, includes thinking).
+- Tests use the fake client only; `make llm-check` was not run.
+
+### D62. Replacing a connection (R2, M7)
+- `POST /dictionary/replace {from, to, remove_old}` moves the dictionary's mappings to another connection of any
+  kind and saves the result as the draft. Tables are matched by column overlap and name (>= 0.34), columns by name,
+  label, then the synonyms the dictionary knows. Matched tables keep their key, meaning, roles, units, synonyms,
+  metrics (formulas are renamed with the columns) and joins.
+- **Flagged for the Owner:** new columns of the new source (`new_column`), a unit the new data contradicts
+  (`unit_differs`); **listed in the draft's diff:** old columns and tables with no match. Nothing is guessed.
+- No AI is used (the mappings exist). The new connection must have been read (`not_read` otherwise) and a
+  dictionary must exist (`no_dictionary`). The old connection is removed afterwards by default (stored copies and
+  credentials deleted, logged as `connection.removed` with `replaced: true`); with "keep it" its tables will be
+  drafted again as new tables.
+- UI: "Replace with another source" on the connection page (Owners).
+
+### D63. Other details (M7)
+- New dependencies: `duckdb` (metric checks) and `pyyaml` (export; dev: `types-pyyaml`).
+- New activity entries: `dictionary.edited`, `.confirmed`, `.draft_requested`, `.draft_discarded`, `.replaced`.
+- All user-visible text is in `locales/en.ts` (D41). Metric errors, review reasons, evidence and AI notes are codes
+  from the API, written as sentences by the web app.
+- The Dictionary screen is in the menu for Owners and Analysts (`connections.view`).

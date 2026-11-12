@@ -11,6 +11,7 @@ from app.models.connection import (
     Snapshot,
 )
 from app.models.consent import Consent
+from app.models.dictionary import DictionaryVersion
 from app.models.invitation import Invitation
 from app.models.org import Membership, Organization
 from app.models.two_factor import KnownDevice, LoginChallenge, TwoFactor, TwoFactorCode
@@ -22,6 +23,7 @@ __all__ = [
     "ConnectionGrant",
     "Consent",
     "Dataset",
+    "DictionaryVersion",
     "FileVersion",
     "Invitation",
     "KnownDevice",

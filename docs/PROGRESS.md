@@ -1,23 +1,16 @@
-# Progress
-
-**Next milestone: M7: Zero setup: profiler + business dictionary** (start when the human says "continue").
-**Unfinished work:** none for M6. **First step of M7 (agreed with the human):** make the demo connection data
-(`frontend/src/testing/connectionFixtures.ts`) match what the real reader gives for `shopify_orders.csv`:
-`total_price` has no unit (the CSV has no ₹ marker, only a `currency` column with `INR`). Then re-record the
-affected Playwright screenshots (`make e2e-update`), review them, and check Storybook. Carry into M7 and later:
-- Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants in its migration. The
-  schema test in `tests/security/test_rls.py` enforces it.
-- Every new route must be classified in `tests/api/test_route_matrix.py` (it now has `{connection}`, `{dataset}`
-  and `{sheets}` placeholders, multipart uploads and fixture-dependent bodies).
-- Connection credentials go through `app.security.secrets.SecretStore` (purpose per connector,
-  `app.connectors.registry.SECRET_PURPOSES`).
-- Every LLM call goes through `keys.resolve(...)` and `usage.MeteredLLM` (D42). **No real LLM calls during builds
-  or tests** (CLAUDE.md); M7's dictionary drafting must be tested with the fake LLM client only.
+**Next milestone: M8: Agent core + Ask UI** (start when the human says "continue").
+**Unfinished work:** none for M7. Carry into M8 and later:
+- Read every table through `dictionary.units.to_units` (Razorpay paise -> rupees) and take the dictionary from
+  `dictionary.service.active(db, org_id)`; while `confirmed` is false every answer carries the note
+  `"dictionary not confirmed"` (D60). Metrics are DuckDB expressions over rupee-converted tables (D59, D60).
+- Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants in its migration
+  (`tests/security/test_rls.py`). Every new route must be classified in `tests/api/test_route_matrix.py`
+  (placeholders now include `{dict_version}`).
+- Every LLM call goes through `keys.resolve(...)` and metering (D42, D61). **No real LLM calls during builds or
+  tests** (CLAUDE.md): fake client only; never run `make llm-check` unless asked by name.
 - Read data only through `DatasetCache` and decide visibility only with `app.connectors.access` (D50, D53).
-- M7 takes over from M6: "replace a connection with another kind of source and keep the dictionary mappings"
-  (R2, D57), and turning Razorpay paise into rupees through the dictionary (D51).
-**Deferred:** multilingual answers (originally in M8) and UI translations (M15). Keep all user-visible text in
-`frontend/src/locales/en.ts` (DECISIONS D41).
+**Deferred:** multilingual answers (originally M8) and UI translations (M15); keep text in `locales/en.ts` (D41).
+Email notice of a new dictionary draft comes with briefing emails (M10).
 
 ## Milestone checklist (BUILD_SPEC §14)
 
@@ -29,7 +22,7 @@ affected Playwright screenshots (`make e2e-update`), review them, and check Stor
 - [x] M4: Orgs, roles, invites, RLS
 - [x] M5: Secrets, LLM layer, plans, usage
 - [x] M6: Connections framework + Excel/CSV + Google Sheets
-- [ ] M7: Zero setup: profiler + business dictionary
+- [x] M7: Zero setup: profiler + business dictionary
 - [ ] M8: Agent core + Ask UI (multilingual answers deferred, D41)
 - [ ] M9: What-if simulator
 - [ ] M10: Briefings, long tasks, exports, sharing, eval
@@ -528,3 +521,48 @@ its data notes and preview; then "Connect Google Sheets" (stand-in) and choose t
   builds. Playwright 261 passed (the connection page baseline now shows a version waiting for review). Live check
   against `make dev`: 10 of 10 for versions (the one-line `broken.csv` refused, review, use, switch back,
   refresh, discard) and the original 15 of 15 again. No AI calls.
+
+
+---
+
+## M7: Zero setup: profiler + business dictionary (done)
+
+**Built**
+- **Demo-data fix:** `connectionFixtures.ts` gives `total_price` no unit, like the real reader for
+  `shopify_orders.csv`. Baselines re-recorded and checked; Storybook builds.
+- **Profiler (code, no AI):** per column type, empty %, distinct, range, <= 5 samples (none for personal-looking
+  columns), role guess, time column. Money/unit **evidence**: ₹ markers, a single-value INR currency column,
+  money-like names, paise-like values (Razorpay-style tables, `*paise*`, integer `amount` beside INR). D59.
+- **Draft in code** (roles, units, time column, standard metrics, joins found and measured on the data), then the
+  **AI step**: profile only, only what is new, one small call per 8 tables, cached by input hash, through the M5
+  layer and metered as `dictionary` (not a question). Without a key, quota, or a bad answer the code draft stands
+  and says why. D61.
+- **Validation:** metrics tested in DuckDB on a sample (locked, no file access); joins by match rate; AI metrics
+  that do not run are dropped. **Versions:** draft / confirmed / superseded, history, YAML export, schema-change
+  drafts with a diff (Celery job after each read; unchanged structure = nothing). D60.
+- **Review screen** (Dictionary in the menu): summary, company, tables and columns (meaning, role, unit, paise,
+  synonyms, ✓ per flagged item), metrics, joins, version history, Save / Confirm / Discard / Draft again.
+  Confirm waits until every flagged item is checked and every metric runs. Until confirmed, `service.active`
+  carries "dictionary not confirmed" for M8. Analysts read it (tables of hidden connections left out).
+- **R2:** "Replace with another source" on the connection page: mappings, metrics and joins move to the new
+  connection (any kind) where tables/columns match; the rest is flagged or listed. D62.
+- Migration `0008` (reversible): `dictionary_versions` (RLS), `datasets.profile_json`, usage kind `dictionary`.
+  New deps: `duckdb`, `pyyaml`. New env (in `.env.example`): `DICTIONARY_AI_MAX_OUTPUT_TOKENS`,
+  `DICTIONARY_AI_TABLES_PER_CALL`.
+
+**Test status**
+- Backend: 1326 passed; ruff and mypy (strict) clean. New: profiler/evidence, drafting, joins, metrics, AI step,
+  replace (unit); the full API flow with the fake LLM (AI ok/cached/quota/invalid key/no key/unreadable,
+  prompt contains no rows, metering, confirm rules, schema-change drafts, access, export, replacing, cross-tenant
+  404); route matrix for the 8 new routes; security (RLS, read-only, formulas that cannot reach files).
+- Frontend: vitest 282 passed; eslint, prettier, tsc, tokens:check clean; build OK (171.3 KB of 200 KB gzipped);
+  Storybook builds (new Screens/Dictionary stories).
+- Playwright (one `make e2e-update` run): 269 passed, 31 skipped by design; all baselines re-recorded because the
+  menu gained Dictionary, plus new Dictionary baselines; axe clean.
+- No AI calls were made.
+
+**Known gaps / notes**
+- Not run against a real model; the AI prompt/answer format is only tested with the fake client.
+- Joins cannot be added by hand; analysts cannot suggest edits (`dictionary.suggest` unused).
+- After a replace without removing the old connection, its tables are drafted again as new tables.
+- A removed-then-re-uploaded file is matched to its old table by name and columns (>= 0.8), else it is new.

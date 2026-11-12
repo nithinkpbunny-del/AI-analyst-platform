@@ -25,8 +25,10 @@ from app.api.connections import _GOOGLE_STATE as GOOGLE_STATE_PREFIX
 from app.auth.permissions import ROLE_PERMISSIONS, Permission
 from app.config import Settings
 from app.connectors.registry import ConnectorRuntime
+from app.dictionary import service as dictionary_service
 from app.llm import keys, usage
 from app.llm.base import Usage
+from app.llm.fake import FakeLLMFactory
 from app.models import AuditLog, Dataset, FileVersion, Invitation, Membership
 from app.security.secrets import SecretStore, key_wrapper
 from tests.conftest import FakeClock
@@ -102,13 +104,24 @@ class Fixtures:
     sheets_b: str = ""
     version_a: str = ""  # a readable file version that is not in use
     version_b: str = ""
+    dict_version_a: str = ""  # a confirmed version of the business dictionary
+    dict_version_b: str = ""
+    draft_a: dict[str, Any] = field(default_factory=dict)  # org A's dictionary draft (content)
     google_state: str = ""
 
     def placeholders(self, *, theirs: bool) -> dict[str, str]:
         side = "b" if theirs else "a"
         return {
             name: getattr(self, f"{name}_{side}")
-            for name in ("member", "invitation", "connection", "dataset", "sheets", "version")
+            for name in (
+                "member",
+                "invitation",
+                "connection",
+                "dataset",
+                "sheets",
+                "version",
+                "dict_version",
+            )
         }
 
 
@@ -263,6 +276,50 @@ CASES: dict[tuple[str, str], Case] = {
     ("DELETE", "/connections/{connection_id}/versions/{version_id}"): Case(
         "DELETE", "/connections/{connection}/versions/{version}", P.CONNECTIONS_MANAGE, 204
     ),
+    ("GET", "/dictionary"): Case("GET", "/dictionary", P.CONNECTIONS_VIEW, 200, check_leak=True),
+    ("PUT", "/dictionary/draft"): Case(
+        "PUT",
+        "/dictionary/draft",
+        P.DICTIONARY_EDIT,
+        200,
+        body_from=lambda ids: ids.draft_a,
+        invalid_body={"datasets": 1},
+    ),
+    ("POST", "/dictionary/draft"): Case(
+        "POST",
+        "/dictionary/draft",
+        P.DICTIONARY_EDIT,
+        202,
+        body={},
+        invalid_body={"fresh_ai": "maybe"},
+    ),
+    ("DELETE", "/dictionary/draft"): Case("DELETE", "/dictionary/draft", P.DICTIONARY_EDIT, 204),
+    ("POST", "/dictionary/draft/confirm"): Case(
+        "POST", "/dictionary/draft/confirm", P.DICTIONARY_EDIT, 200
+    ),
+    ("GET", "/dictionary/versions/{version_id}"): Case(
+        "GET", "/dictionary/versions/{dict_version}", P.CONNECTIONS_VIEW, 200
+    ),
+    ("GET", "/dictionary/export.yaml"): Case(
+        "GET",
+        "/dictionary/export.yaml",
+        P.CONNECTIONS_VIEW,
+        200,
+        invalid_query="?version_id=nope",
+        check_leak=True,
+    ),
+    ("POST", "/dictionary/replace"): Case(
+        "POST",
+        "/dictionary/replace",
+        P.DICTIONARY_EDIT,
+        200,
+        body_from=lambda ids: {
+            "from_connection_id": ids.connection_a,
+            "to_connection_id": ids.sheets_a,
+            "remove_old": False,
+        },
+        invalid_body={"from_connection_id": "not-a-uuid"},
+    ),
     ("POST", "/connections/google/start"): Case(
         "POST",
         "/connections/google/start",
@@ -314,6 +371,7 @@ def ids(
     clock: FakeClock,
     runtime: ConnectorRuntime,
     fake_redis: fakeredis.FakeRedis,
+    llm_factory: FakeLLMFactory,
 ) -> Fixtures:
     world = build_world(db, settings, clock.now)
     # An Owner who never turned 2FA on (e.g. promoted later): every workspace route must refuse them.
@@ -400,6 +458,26 @@ def ids(
             db.scalars(select(Dataset.id).where(Dataset.connection_id == files[org_id].id)).one()
         )
 
+    # Each workspace gets a confirmed dictionary (version 1) and a draft (version 2) continuing it.
+    dictionaries: dict[Any, str] = {}
+    drafts: dict[Any, dict[str, Any]] = {}
+    for org, owner_user in ((world.org_a, world.owner_a), (world.org_b, world.owner_b)):
+        dictionary_service.run_draft(runtime, llm_factory, org_id=org.id)
+        with dictionary_service._session(runtime, org.id) as scoped:
+            confirmed = dictionary_service.confirm(
+                scoped, org.id, user_id=owner_user.id, at=clock.now
+            )
+            assert confirmed is not None
+            dictionaries[org.id] = str(confirmed.id)
+            scoped.commit()
+        dictionary_service.run_draft(runtime, llm_factory, org_id=org.id, force=True)
+        with dictionary_service._session(runtime, org.id) as scoped:
+            draft = dictionary_service.current_draft(scoped, org.id)
+            assert draft is not None
+            drafts[org.id] = draft.content
+            scoped.commit()
+    db.expire_all()
+
     # A Google sign-in started by owner_a, which finish() completes.
     state = "matrix-state-0000000000000000"
     fake_redis.set(
@@ -427,6 +505,9 @@ def ids(
         sheets_b=str(sheets[world.org_b.id].id),
         version_a=spare_version(world.org_a.id),
         version_b=spare_version(world.org_b.id),
+        dict_version_a=dictionaries[world.org_a.id],
+        dict_version_b=dictionaries[world.org_b.id],
+        draft_a=drafts[world.org_a.id],
         google_state=state,
     )
 

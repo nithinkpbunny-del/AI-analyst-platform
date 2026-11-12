@@ -22,6 +22,7 @@ import {
   type TestResult,
 } from '../../lib/connectionsApi'
 import { formatDate, formatNumber, formatRelativeTime } from '../../lib/format'
+import { ReplaceDialog } from '../dictionary/ReplaceDialog'
 import { FileDrop } from './AddData'
 import { CONNECTIONS, fileProblem } from './keys'
 import { useSpreadsheetPicker } from './useSpreadsheetPicker'
@@ -454,6 +455,7 @@ export function ConnectionDetailPage() {
   const [test, setTest] = useState<TestResult | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const [replacing, setReplacing] = useState(false)
   const [discarding, setDiscarding] = useState<FileVersion | null>(null)
   const picker = useSpreadsheetPicker()
   // Shares the list's cache; only the upload limit is needed from it here.
@@ -713,6 +715,9 @@ export function ConnectionDetailPage() {
               >
                 {paused ? t('connections.detail.resume') : t('connections.detail.pause')}
               </Button>
+              <Button variant="ghost" onClick={() => setReplacing(true)}>
+                {t('dictionary.replace.button')}
+              </Button>
               <Button variant="ghost" onClick={() => setRemoving(true)}>
                 {t('connections.detail.remove')}
               </Button>
@@ -830,6 +835,9 @@ export function ConnectionDetailPage() {
             void refresh()
           }}
         />
+      ) : null}
+      {replacing ? (
+        <ReplaceDialog connection={connection} open onOpenChange={setReplacing} />
       ) : null}
       <ConfirmDialog
         open={removing}

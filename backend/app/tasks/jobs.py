@@ -7,10 +7,15 @@ import uuid
 
 from app.connectors import service
 from app.data import snapshots
+from app.dictionary import service as dictionary_service
+from app.llm.keys import default_factory
 from app.tasks.celery_app import celery_app
 from app.tasks.runtime import worker_runtime
 
 logger = logging.getLogger(__name__)
+
+# Drafting may make a few AI calls of up to a few minutes each.
+DRAFT_TIME_LIMIT_SECONDS = 1500
 
 # A 50 MB workbook or a large spreadsheet can take a few minutes; nothing should run longer than this.
 SYNC_TIME_LIMIT_SECONDS = 900
@@ -40,6 +45,31 @@ def sync_connection(
         force=force,
         file_version_id=uuid.UUID(file_version_id) if file_version_id else None,
         accept_changes=accept_changes,
+    )
+    # A finished read may have changed the data's structure: update the business dictionary (M7).
+    if outcome.status == "active" and dictionary_service.mark_queued(
+        worker_runtime(), uuid.UUID(org_id)
+    ):
+        celery_app.send_task(
+            "app.tasks.jobs.draft_dictionary",
+            kwargs={"org_id": org_id, "user_id": None, "force": False, "fresh_ai": False},
+        )
+    return outcome.status
+
+
+@celery_app.task(name="app.tasks.jobs.draft_dictionary", time_limit=DRAFT_TIME_LIMIT_SECONDS)
+def draft_dictionary(
+    org_id: str, user_id: str | None = None, force: bool = False, fresh_ai: bool = False
+) -> str:  # pragma: no cover - the body is dictionary.service.run_draft, tested directly
+    """Profile the workspace's data and draft (or update) its business dictionary."""
+    runtime = worker_runtime()
+    outcome = dictionary_service.run_draft(
+        runtime,
+        default_factory(runtime.settings),
+        org_id=uuid.UUID(org_id),
+        user_id=uuid.UUID(user_id) if user_id else None,
+        force=force,
+        fresh_ai=fresh_ai,
     )
     return outcome.status
 

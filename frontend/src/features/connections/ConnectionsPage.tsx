@@ -1,3 +1,4 @@
+import { DraftNotice } from '../dictionary/DraftNotice'
 import { useQuery } from '@tanstack/react-query'
 import { Plug } from 'lucide-react'
 import { useEffect } from 'react'
@@ -41,6 +42,7 @@ export function ConnectionsPage() {
       />
       <div className="flex flex-col gap-6">
         {removedNotice ? <FormAlert tone="success">{removedNotice}</FormAlert> : null}
+        <DraftNotice />
         {canManage && list.data ? <AddData sources={list.data.sources} /> : null}
         {list.isPending ? (
           <p role="status" className="m-0 text-small text-ink-muted">

@@ -145,6 +145,18 @@ class DatasetCache:
         finally:
             lock.release()
 
+    def latest(self, dataset_id: uuid.UUID) -> CachedFrame | None:
+        """The newest stored copy, whatever its age (not expired), without reading the source. For work that
+        needs the table's shape, not fresh numbers (profiling a dataset for the business dictionary)."""
+        now = self._rt.clock()
+        with self._session() as db:
+            snapshot = self._newest(db, dataset_id, now)
+            db.commit()
+        if snapshot is None:
+            return None
+        frame = self._read(snapshot)
+        return None if frame is None else self._cached(snapshot, frame, "cache")
+
     def store(self, dataset_id: uuid.UUID, result: FetchResult) -> CachedFrame:
         """Write rows already read and checked by the caller (a new file version) as the dataset's snapshot."""
         now = self._rt.clock()

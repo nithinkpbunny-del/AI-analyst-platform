@@ -41,6 +41,10 @@ for (const screen of screens) {
         await expect(page.getByText('1 table · 28,540 rows')).toBeVisible()
         await expect(page.getByText('1 of 3 connections')).toBeVisible()
       }
+      if (screen === 'dictionary') {
+        await expect(page.getByText('We looked at 2 tables and 7 columns.')).toBeVisible()
+        await expect(page.getByText('Not confirmed yet')).toBeVisible()
+      }
       if (screen === 'activity') {
         await expect(page.getByText('Turned on two-step verification')).toBeVisible()
       }

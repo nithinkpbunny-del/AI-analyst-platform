@@ -16,6 +16,7 @@ import { LoginSetupPage, RequiredSetupPage, TwoFactorPage } from '../features/au
 import { ConnectionDetailPage } from '../features/connections/ConnectionDetailPage'
 import { ConnectionsPage } from '../features/connections/ConnectionsPage'
 import { GoogleReturnPage as SheetsReturnPage } from '../features/connections/GoogleReturnPage'
+import { DictionaryPage } from '../features/dictionary/DictionaryPage'
 import { PlaceholderPage } from '../features/placeholder/PlaceholderPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { TeamPage } from '../features/team/TeamPage'
@@ -24,7 +25,7 @@ import { adminNav, mainNav } from './nav'
 import { RedirectIfSignedIn, RequireAuth } from './RequireAuth'
 
 export function AppRoutes() {
-  const built = new Set(['settings', 'team', 'activity', 'connections'])
+  const built = new Set(['settings', 'team', 'activity', 'connections', 'dictionary'])
   const placeholders = [...mainNav, ...adminNav].filter((item) => !built.has(item.key))
   return (
     <Routes>
@@ -59,6 +60,7 @@ export function AppRoutes() {
           <Route path="/team" element={<TeamPage />} />
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/dictionary" element={<DictionaryPage />} />
           <Route path="/connections/google/return" element={<SheetsReturnPage />} />
           <Route path="/connections/:connectionId" element={<ConnectionDetailPage />} />
           <Route path="*" element={<Navigate to="/today" replace />} />

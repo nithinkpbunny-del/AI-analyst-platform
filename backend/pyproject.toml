@@ -32,6 +32,8 @@ dependencies = [
     "pyarrow>=18",
     "python-multipart>=0.0.20",
     "defusedxml>=0.7.1",
+    "duckdb>=2.0.0",
+    "pyyaml>=6",
 ]
 
 [dependency-groups]
@@ -46,6 +48,7 @@ dev = [
     "types-openpyxl",
     "testcontainers[postgres]>=4.8",
     "fakeredis>=2.26",
+    "types-pyyaml>=6.0.12.20261103",
 ]
 
 [tool.uv]

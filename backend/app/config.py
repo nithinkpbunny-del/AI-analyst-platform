@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     llm_request_timeout_seconds: int = Field(default=60, ge=5)
     # One ``generate`` call, retries and model fallbacks included: no new attempt starts after this.
     llm_call_budget_seconds: int = Field(default=150, ge=10)
+    # Dictionary drafting (M7): one call describes this many tables; a thinking model needs room for its answer.
+    dictionary_ai_max_output_tokens: int = Field(default=6000, ge=500)
+    dictionary_ai_tables_per_call: int = Field(default=8, ge=1)
     token_budget_per_question: int = Field(default=150_000, ge=1)
     rows_to_llm_per_tool_call: int = Field(default=200, ge=1)
     source_query_timeout_seconds: int = Field(default=30, ge=1)

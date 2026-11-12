@@ -117,6 +117,11 @@ class Dataset(IdMixin, TimestampMixin, Base):
     # Columns with types and units as detected on the last read (app.connectors.tabular.TableSchema).
     schema_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     row_count_estimate: Mapped[int | None] = mapped_column(BigInteger)
+    # What the profiler found (app.dictionary.profiler): types, null %, distinct counts, ranges, a few samples and
+    # money/unit evidence. Written by the dictionary job; empty until the dataset is first profiled.
+    profile_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
     last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # The data-quality findings of the last read (app.data.quality), shown before any snapshot is needed.
     quality_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)

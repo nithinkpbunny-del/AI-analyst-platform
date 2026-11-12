@@ -170,4 +170,16 @@ describe('describeEntry', () => {
       'Changed which connections Ravi Kumar sees',
     )
   })
+
+  it('describes business dictionary entries, naming sources as they are', () => {
+    expect(describeEntry(t, entry('dictionary.confirmed', { version: 2 }))).toBe(
+      'Confirmed version 2 of the business dictionary',
+    )
+    expect(describeEntry(t, entry('dictionary.draft_requested', { fresh_ai: true }))).toBe(
+      'Asked for a new draft of the business dictionary',
+    )
+    expect(
+      describeEntry(t, entry('dictionary.replaced', { from: 'owner', to: 'Zoho Books' })),
+    ).toBe('Moved the dictionary from owner to Zoho Books')
+  })
 })

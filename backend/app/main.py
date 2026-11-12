@@ -20,6 +20,7 @@ from app.api import (
     audit,
     auth,
     connections,
+    dictionary,
     google,
     health,
     invitations,
@@ -127,7 +128,9 @@ def create_app(
         clock=app.state.clock,
     )
     app.state.job_queue = job_queue or (
-        InlineJobQueue(app.state.connector_runtime) if inline_jobs else CeleryJobQueue()
+        InlineJobQueue(app.state.connector_runtime, app.state.llm_factory)
+        if inline_jobs
+        else CeleryJobQueue()
     )
     install_error_handlers(app)
 
@@ -175,6 +178,7 @@ def create_app(
     app.include_router(org.router)
     app.include_router(ai.router)
     app.include_router(connections.router)
+    app.include_router(dictionary.router)
     app.include_router(audit.router)
     return app
 

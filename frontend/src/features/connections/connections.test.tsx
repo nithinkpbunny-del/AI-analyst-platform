@@ -381,7 +381,9 @@ describe('A connection', () => {
     expect(within(rows[1]!).getByText('644.86')).toBeVisible()
     expect(within(rows[4]!).getByText('—')).toBeVisible() // empty, not zero
     expect(screen.getByText('Date and time')).toBeVisible()
-    expect(screen.getAllByText('₹')).toHaveLength(1)
+    // The file has no ₹ marker (only a currency column), so the reader gives total_price no unit; the
+    // business dictionary supplies it (M7).
+    expect(screen.queryByText('₹')).not.toBeInTheDocument()
   })
 
   it('refreshes, tests, renames and removes', async () => {

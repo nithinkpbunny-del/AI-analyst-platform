@@ -18,7 +18,7 @@ function text(value: unknown): string {
 export function describeEntry(t: TFunction, entry: AuditEntry): string {
   const details = entry.details
   // Connection entries name things (a file, a connection), not roles.
-  const names = entry.action.startsWith('connection.')
+  const names = entry.action.startsWith('connection.') || entry.action.startsWith('dictionary.')
   const sentence = t(`activity.actions.${asKey(entry.action)}`, {
     defaultValue: entry.action,
     email: typeof details.email === 'string' ? details.email : '',
