@@ -32,7 +32,13 @@ export function metricErrorText(
 }
 
 export function changeText(t: TFunction, item: DictionaryDiffItem): string {
-  return t(`dictionary.changes.${item.kind}`, {
+  const metrics = Array.isArray(item.metrics) ? item.metrics.map(String).filter(Boolean) : []
+  let kind = item.kind
+  if (kind === 'metrics_moved') {
+    if (metrics.length === 0) kind = 'metrics_moved_unnamed'
+    else if (item.from === item.to) kind = 'metrics_moved_same'
+  }
+  return t(`dictionary.changes.${kind}`, {
     defaultValue: '',
     dataset: item.dataset ?? '',
     column: item.column ?? '',
@@ -40,7 +46,7 @@ export function changeText(t: TFunction, item: DictionaryDiffItem): string {
     to: item.to ?? '',
     meaning: item.meaning ?? '',
     metric: item.metric ?? '',
-    metrics: (item.metrics ?? []).join(', '),
+    metrics: metrics.join(', '),
   })
 }
 

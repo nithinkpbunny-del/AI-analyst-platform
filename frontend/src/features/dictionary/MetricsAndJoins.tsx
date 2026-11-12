@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, CircleHelp, Trash2 } from 'lucide-react'
+import { Check, CircleAlert, CircleCheck, CircleHelp, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/ui/button'
@@ -151,6 +151,32 @@ export function MetricsSection({
                 ) : (
                   <code className="text-small">{metric.expr}</code>
                 )}
+                {metric.needs_review ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-control border-l-4 border-l-caution bg-caution-soft px-3 py-2">
+                    <p className="m-0 max-w-prose text-small text-caution">
+                      {t('dictionary.metrics.needsCheck')}
+                    </p>
+                    {editable ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onChange({
+                            ...content,
+                            metrics: {
+                              ...content.metrics,
+                              [key]: { ...metric, needs_review: false },
+                            },
+                          })
+                        }
+                        aria-label={`${t('dictionary.column.check')}: ${key}`}
+                        className="inline-flex min-h-11 items-center gap-2 rounded-control border border-line-strong bg-surface px-4 text-small font-medium hover:bg-neel-soft"
+                      >
+                        <Check className="size-4" aria-hidden />
+                        {t('dictionary.column.check')}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
                 {error.text ? (
                   <p className="m-0 text-small text-loss">
                     {error.text}

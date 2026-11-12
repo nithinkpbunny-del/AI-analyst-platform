@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import i18n from '../../lib/i18n'
+import { changeText } from './text'
 import type { DictionaryContent } from '../../lib/dictionaryApi'
 import { demoSession } from '../../lib/demoSession'
 import { ROLE_PERMISSIONS } from '../../lib/permissions'
@@ -399,5 +401,78 @@ describe('Replacing a connection (R2)', () => {
     expect((calls.body('POST /dictionary/replace') as { remove_old: boolean }).remove_old).toBe(
       false,
     )
+  })
+})
+
+describe('Dictionary: metrics that wait for a check', () => {
+  function stateWithFlaggedMetrics() {
+    const content = checkedDictionaryContent()
+    content.metrics.revenue = { ...content.metrics.revenue!, needs_review: true }
+    content.metrics.orders = { ...content.metrics.orders!, needs_review: true }
+    return {
+      ...firstDraftState,
+      draft: { ...firstDraftState.draft!, content, review_items: 2 },
+    }
+  }
+
+  it('shows each flagged metric with a strip and a check button, and counts them', async () => {
+    fakeApi({ 'GET /dictionary': { status: 200, body: stateWithFlaggedMetrics() } })
+    renderApp('/dictionary')
+    expect(await screen.findAllByText(/This metric waits for your check/)).toHaveLength(2)
+    expect(screen.getByText('2 items left to check.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm dictionary' })).toBeDisabled()
+  })
+
+  it('checking every flagged metric enables Confirm, without editing any formula', async () => {
+    fakeApi({ 'GET /dictionary': { status: 200, body: stateWithFlaggedMetrics() } })
+    renderApp('/dictionary')
+    await screen.findAllByText(/This metric waits for your check/)
+    await userEvent.click(screen.getByRole('button', { name: 'Looks right: revenue' }))
+    expect(screen.getByText('1 item left to check.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Looks right: orders' }))
+    expect(screen.queryByText(/This metric waits for your check/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm dictionary' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled()
+  })
+
+  it('says in words that a table came back and its metrics point at it again', () => {
+    const text = changeText(i18n.t.bind(i18n) as never, {
+      kind: 'metrics_restored',
+      dataset: 'shopify_orders',
+      metrics: ['revenue', 'orders'],
+    })
+    expect(text).toBe(
+      'The table shopify_orders is back, so its metrics (revenue, orders) point at it again. Check that they still make sense.',
+    )
+  })
+})
+
+describe('changeText for moved metrics', () => {
+  const t = i18n.t.bind(i18n) as never
+  it('names the metrics and does not repeat a shared name', () => {
+    const text = changeText(t, {
+      kind: 'metrics_moved',
+      dataset: 'shopify_orders',
+      from: 'shopify_orders',
+      to: 'shopify_orders',
+      metrics: ['revenue', 'orders'],
+    })
+    expect(text).toContain('revenue, orders')
+    expect(text).not.toContain('{{')
+    expect(text).not.toContain('shopify_orders in shopify_orders')
+  })
+  it('names both sources when they differ', () => {
+    const text = changeText(t, {
+      kind: 'metrics_moved',
+      dataset: 'orders',
+      from: 'Old file',
+      to: 'New file',
+      metrics: ['revenue'],
+    })
+    expect(text).toBe('The metrics revenue moved from orders in Old file to orders in New file.')
+  })
+  it('never shows a placeholder when no metric names arrive', () => {
+    const text = changeText(t, { kind: 'metrics_moved', dataset: 'orders', from: 'A', to: 'B' })
+    expect(text).not.toContain('{{')
   })
 })

@@ -213,6 +213,29 @@ class TestSameNamedTables:
         over = replace.take_over_orphans(both, live={"d2", "d3"})
         assert over.moves == [] and "orders" in over.dictionary.datasets
 
+    def test_the_same_file_uploaded_again_clears_the_flags_it_caused(self) -> None:
+        both = self.two_sources()
+        rest = [item("d2", "customers", CUSTOMERS, "c1")]
+        removed = build(rest, both, company_name="X").dictionary
+        assert removed.metrics["revenue"].needs_review is True
+        # The file comes back as a new dataset under the freed key: the metric points at a table again.
+        again = build([*rest, item("d9", "orders", ORDERS, "c9")], removed, company_name="X")
+        assert again.dictionary.metrics["revenue"].needs_review is False
+        assert again.dictionary.metrics["revenue"].dataset == "orders"
+        assert {
+            "kind": "metrics_restored",
+            "dataset": "orders",
+            "metrics": ["revenue"],
+        } in again.diff
+
+    def test_a_flag_on_a_metric_whose_table_is_still_gone_stays(self) -> None:
+        both = self.two_sources()
+        rest = [item("d2", "customers", CUSTOMERS, "c1")]
+        removed = build(rest, both, company_name="X").dictionary
+        later = build(rest, removed, company_name="X")
+        assert later.dictionary.metrics["revenue"].needs_review is True
+        assert all(d["kind"] != "metrics_restored" for d in later.diff)
+
     def test_with_no_partner_nothing_points_at_the_gone_table(self) -> None:
         both = self.two_sources()
         rest = [item("d2", "customers", CUSTOMERS, "c1")]

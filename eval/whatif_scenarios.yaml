@@ -1,0 +1,46 @@
+# Golden what-if scenarios on the UrbanCart demo data (BUILD_SPEC 12.2, M9). `make test` runs them with the fake AI;
+# the same file feeds `make eval` in M10. Ranges are what a sensible simulator must say on this data, not exact
+# numbers: signs, sources of the assumptions, and whether the range shows the uncertainty.
+scenarios:
+  - id: electronics_south_price_up
+    ask: "What if we raise Electronics prices by 10% in the South?"
+    args: {metric: revenue, lever: price, change: 10, scope: {product_type: Electronics, shipping_region: South}, horizon: 3}
+    expect:
+      assumption_source: history          # the South price rise of July 2026 is in the history
+      delta_pct_expected: [-8, 9]
+      confidence_in: [medium, high]
+      range_contains_expected: true
+
+  - id: fashion_discount_up
+    ask: "What if we add 5 points of discount on Fashion?"
+    args: {metric: revenue, lever: discount, change: 5, scope: {product_type: Fashion}, horizon: 3}
+    expect:
+      assumption_source: default          # discount depth only moves with the festive season: the history cannot tell
+      delta_pct_expected: [1, 10]
+      confidence_in: [low]
+      side_effect: discount_given
+
+  - id: youtube_spend_cut
+    ask: "What if we cut YouTube spend by 30%?"
+    args: {lever: marketing_spend, change: -30, scope: {channel: YouTube}, horizon: 3}
+    expect:
+      delta_pct_expected: [-40, -10]
+      net_after_spend_positive: true      # YouTube returns about 0.8 per rupee: the saving beats the lost revenue
+      confidence_in: [low]
+
+  - id: instagram_spend_up
+    ask: "What if we increase Instagram spend by 20%?"
+    args: {lever: marketing_spend, change: 20, scope: {channel: Instagram}, horizon: 3}
+    expect:
+      delta_pct_expected: [3, 20]
+      net_after_spend_positive: true      # Instagram returns about 4 per rupee
+      confidence_in: [low]
+
+  - id: whole_shop_price_cut
+    ask: "What if we cut all prices by 5%?"
+    args: {metric: revenue, lever: price, change: -5, horizon: 3}
+    expect:
+      assumption_source: default
+      delta_pct_expected: [-6, 6]
+      confidence_in: [low]
+      range_straddles_zero: true          # the honest answer is "we cannot tell the direction"

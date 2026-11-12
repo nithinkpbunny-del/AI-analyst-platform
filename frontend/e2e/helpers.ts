@@ -10,6 +10,7 @@ import {
 import { demoConversation, demoConversations, demoSaved } from '../src/testing/askFixtures'
 import { firstDraftState } from '../src/testing/dictionaryFixtures'
 import { demoAudit, demoInvitations, demoMembers, demoPreview } from '../src/testing/teamFixtures'
+import { demoOptions, demoResult } from '../src/testing/whatIfFixtures'
 
 export const screens = [
   'today',
@@ -183,6 +184,17 @@ export async function mockApi(
   await page.route(`${API}/conversations/conv1`, (route) =>
     route.fulfill({ json: demoConversation }),
   )
+  // M9: a fixed what-if (dates older than a week render as fixed dates, so screenshots stay stable).
+  const whatIf = demoResult()
+  whatIf.tables = whatIf.tables.map((table) => ({
+    ...table,
+    fetched_at: '2026-10-30T04:30:00+00:00',
+  }))
+  await page.route(`${API}/whatif/options`, (route) => route.fulfill({ json: demoOptions }))
+  await page.route(`${API}/whatif/values?*`, (route) =>
+    route.fulfill({ json: { values: ['Electronics', 'Fashion', 'Home & Kitchen'] } }),
+  )
+  await page.route(`${API}/whatif/run`, (route) => route.fulfill({ json: whatIf }))
   await page.route(`${API}/saved-questions`, (route) =>
     route.fulfill({ json: { questions: demoSaved } }),
   )

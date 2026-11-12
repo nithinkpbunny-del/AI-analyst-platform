@@ -28,6 +28,7 @@ from app.api import (
     org,
     team,
     two_factor,
+    whatif,
 )
 from app.api.errors import install_error_handlers
 from app.auth.google_oidc import AuthlibGoogleProvider, GoogleProvider, StandInGoogleProvider
@@ -181,6 +182,7 @@ def create_app(
     app.include_router(connections.router)
     app.include_router(dictionary.router)
     app.include_router(chat.router)
+    app.include_router(whatif.router)
     app.include_router(audit.router)
     return app
 

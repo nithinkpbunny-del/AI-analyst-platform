@@ -515,6 +515,12 @@ class TestVersionsAndChanges:
         assert {"metric_orphaned", "join_removed", "dataset_removed"} <= kinds
         # It cannot be confirmed while a metric points at nothing.
         assert client.post("/dictionary/draft/confirm", headers=owner(world)).status_code == 409
+        # The same file uploaded again gives the metric a table again: its flag goes, nothing is left to check.
+        put_file(client, world, "orders.csv", orders_csv())
+        again = draft_of(client, world)
+        assert again["content"]["metrics"]["revenue"]["needs_review"] is False
+        assert any(d["kind"] == "metrics_restored" for d in again["diff"])
+        assert again["content"]["metrics"]["revenue"]["dataset"] == "orders"
 
     def test_discarding_the_draft_keeps_the_confirmed_dictionary(
         self, client: TestClient, world: World

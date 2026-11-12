@@ -1,19 +1,23 @@
-**Next milestone: M9: What-if simulator** (start when the human says "continue").
-**Unfinished work:** none for M8. Carry into M9 and later:
+**Next milestone: M10: Briefings, long tasks, exports, sharing, eval** (start when the human says "continue").
+**Unfinished work:** none for M9. Carry into M10 and later:
 - New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`), get `AccessContext` through `ToolContext`, use
   only `ctx.dictionary` (the visible one) and `ctx.ensure()` to load tables, and return results through
-  `ctx.store.add(...)` so the number check and provenance see them (D65-D69). `what_if` replaces the M9 note in
-  `app/agent/playbooks/what_if.md`.
+  `ctx.store.add(...)` so the number check and provenance see them (D65-D69). `what_if` (M9) is the model.
 - Every number comes from code: the model cites result ids (`[r3]`), `give_answer` is the only way to answer (D67).
 - Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants; every new route goes in
-  `tests/api/test_route_matrix.py` (`CASES`, or `PERSONAL` for per-person ids, tested in its own file).
+  `tests/api/test_route_matrix.py` (`CASES`, `PERSONAL` for per-person ids, or `DATA_ROUTES` for routes that need
+  uploaded data, each tested in its own file).
 - Every LLM call goes through `keys.resolve(...)` and is metered (D42). **No real LLM calls during builds or
   tests** (CLAUDE.md): fake client only; never run `make llm-check` unless asked by name.
 - Read data only through `DatasetCache`; decide visibility with `app.agent.access` (agent) or
   `app.connectors.access` (API).
+- M10's golden questions (`eval/golden_questions.yaml`) should include the five what-ifs of
+  `eval/whatif_scenarios.yaml` (D75); briefings can call `what_if` for "suggested changes" only with the labelled
+  assumptions and range.
 **Deferred:** multilingual answers and UI translations (D41): answers are in English, all text in `locales/en.ts`.
 Pin/Export/Share on answers (M10, M15), the command palette Ctrl/Cmd+K (not built yet; suggest M10 with Today and
-onboarding). Email notice of a new dictionary draft comes with briefing emails (M10).
+onboarding). Email notice of a new dictionary draft comes with briefing emails (M10). What-if levers for stock,
+staffing and product mix (D71).
 
 ## Milestone checklist (BUILD_SPEC §14)
 
@@ -27,7 +31,7 @@ onboarding). Email notice of a new dictionary draft comes with briefing emails (
 - [x] M6: Connections framework + Excel/CSV + Google Sheets
 - [x] M7: Zero setup: profiler + business dictionary
 - [x] M8: Agent core + Ask UI (multilingual answers deferred, D41)
-- [ ] M9: What-if simulator
+- [x] M9: What-if simulator
 - [ ] M10: Briefings, long tasks, exports, sharing, eval
 - [ ] M10b: Public website (then Phase 1 review, stop)
 
@@ -654,3 +658,90 @@ its data notes and preview; then "Connect Google Sheets" (stand-in) and choose t
   in the dictionary.
 - The anomaly noise floor (0.8) was tuned on the demo data (D66); real data may need a per-workspace setting.
 - The shell grew to 181.2 KB of the 200 KB budget (171.3 KB in M7); later screens may need lazy loading.
+
+
+---
+
+## M9: What-if simulator (done)
+
+**First: two text fixes in the dictionary's "What changed" list**
+- "The metrics moved to another table" message: it now always names the metrics. The sentence has three forms: two
+  different sources ("The metrics revenue, orders moved from orders in Old file to orders in New file."), the same
+  name for both ("The metrics revenue, orders now use the table orders, because the removed source had a table with
+  the same name.", so "shopify_orders in shopify_orders" cannot appear), and no names ("The metrics of orders in A now
+  use orders in B."). `changeText` never lets a `{{...}}` placeholder through.
+- **I could not reproduce the raw `{{metrics}}` you saw.** The server sends the metric names and the screen filled
+  them in every time I tried (unit and component tests), so the likely cause is a draft saved before this field
+  existed or a stale web build. If you see it again after a hard refresh, send me the draft's "What changed" JSON
+  (`GET /dictionary`, field `draft.diff`) and I will trace it.
+
+**Built**
+- **Engine** (`app/analytics/whatif.py`, no AI): levers `price`, `discount` and `marketing_spend` (D71). Baseline =
+  the forecast for the scope; effect = driver model with an elasticity; **the elasticity is learned from the company's
+  own weekly history** (log-log with trend and month-of-year controls) and used only when the history moved enough
+  and is clear; otherwise an industry default is used and **labelled as an assumption** (D72). Output: baseline vs
+  scenario by month, low / expected / high (80%), assumptions (each marked history / typical figure / yours),
+  confidence with a reason, side effects (units, discount given away, extra spend, repeat-customer share) and the
+  weeks that informed it. A person can set their own figure.
+- **Agent tool `what_if`** with a rewritten playbook: turn words into one scenario, never state the expected change
+  without its range, name each assumption and its source, say when a result is surprising. Missing metric defaults to
+  `revenue`; stock, staffing and product-mix scenarios are refused with a hint. What-if questions now pick the what-if
+  playbook first.
+- **API** (`/whatif/options`, `/whatif/values`, `/whatif/run`): a run is the same tool with **no AI call and nothing
+  metered**, with the asking person's own permissions; 60 runs a minute per person (D74). No new table, no migration,
+  no new environment variable.
+- **What-if screen** (`/what-if`): form, headline with the haldi mark on the expected change and its range, the
+  ScenarioCard (slider re-runs on release; assumptions in words; "Edit assumptions" dialog), chart, side effects and a
+  month ledger with the data source and age (D75). Loads as its own chunk. "Describe it in words" opens Ask, and
+  `/ask?q=...` now opens the box with the question typed in.
+- **Golden scenarios** (`eval/whatif_scenarios.yaml`): five, with expected ranges, run directly and through the agent
+  with the fake model (the number check accepts every figure). They are the what-if part of `make eval` in M10.
+
+**What the demo data says** (so you can check it against `ANSWER_KEY.md`; 3 months, UrbanCart)
+- Price +10% on **South Electronics**: the history shows the July 2026 rise, so the estimate comes from history
+  (about -0.6, medium confidence): revenue about +4% (+1.5% to +7%). Customers barely reacted in Electronics itself;
+  the big South drop in the answer key is in orders from existing customers across categories.
+- Discount +5 points on **Fashion**: the history cannot separate discount depth from the festive season, so a typical
+  figure is used (low confidence, labelled). The discount given away rises sharply.
+- **YouTube** spend -30%: revenue about -25%, but the spend saved is larger than the revenue lost (ROAS about 0.8).
+- **Instagram** spend +20%: revenue about +16% and worth the extra spend (ROAS about 4). Marketing is never above
+  low confidence (D72).
+- **All prices -5%**: the range includes no change, and the screen says the direction is not clear.
+
+**Test status**
+- Backend: 1652 passed (1540 in M8); ruff and mypy (strict) clean. New: engine unit tests (arithmetic, scenario checks, what the
+  demo data can and cannot teach, marketing, estimation on synthetic data), the five golden scenarios (direct + agent),
+  agent tool tests (errors the model can act on, hidden tables, playbook choice, no raw rows), API tests with the real
+  demo orders (401, 403 for Viewers and Owners without 2FA, success, other workspace, 422, the limit, no AI used),
+  route matrix updated.
+- Frontend: vitest 312 passed (297 in M8); eslint, prettier, tsc, tokens:check clean. Build OK: shell 184.2 KB of 200 KB gzipped
+  (181.2 in M8); What-if is a separate 12.6 KB chunk. Storybook builds (new Screens/WhatIf).
+- Playwright: one full run: 287 passed, 31 skipped by design, plus 2 axe failures on phones (the month table scrolled without keyboard access); fixed (the table box is now focusable and labelled) and the what-if specs re-run: 16 passed. Only the four What-if baselines changed and four `what-if-result` baselines were added; no other baseline was touched. The full suite was not re-run after that fix.
+- **No AI calls were made.**
+
+**How to try it:** see the testing steps given at the end of M9.
+
+**Known gaps / notes**
+- Levers for stock, staffing and product mix are not built (D71). Marketing spend needs a table with spend, revenue
+  and a channel column; with fewer than 12 campaign rows a typical figure is used.
+- The range is wide on purpose (forecast range plus the elasticity's range): D73. A smaller business with a short
+  history will often see "the range includes no change".
+- A slider move recomputes on the server: the calculation takes about 15 ms on the demo orders once the table is
+  loaded; the first run also reads the table through the cache. Fitted elasticities are not cached.
+- The what-if view is not saved or pinned (Pin arrives in M15); sharing a what-if as an export arrives in M10.
+- The industry default elasticities are generic figures (D72), not researched benchmarks; M17 should replace them.
+- Never run against a real model: how well the model fills `{lever, change, scope}` from words is only tested with
+  the fake client.
+
+### M9 follow-up: dictionary review fixes (D76)
+Found by the human after M9: remove a source, upload the same file again, and the draft showed "12 items need your
+check" that could not be found or cleared, with Confirm disabled.
+- **Metrics can be checked on screen**: flagged metrics get a strip and a "Looks right" button.
+- **A returning table clears its metrics' flags** (`metrics_restored` in "What changed"); metrics whose table is still
+  gone stay flagged.
+- **The Remove dialog warns** that edits (paise unticks, meanings, formulas) go with the source and points to "Upload
+  a new version".
+- Tests: unit (flags cleared when the table returns, kept when it does not), API (remove then upload the same file),
+  web app (strip, button, Confirm enabled after checking, text of the change, dialog warning).
+- Not done on purpose: keeping a removed table's edits for a re-upload.
+

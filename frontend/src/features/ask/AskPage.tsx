@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, History, MessageSquareText, Plus, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { EmptyState } from '../../components/EmptyState'
 import { FormAlert } from '../../components/FormAlert'
 import { PageHeader } from '../../components/PageHeader'
@@ -176,6 +176,9 @@ function askError(t: ReturnType<typeof useTranslation>['t'], error: unknown): st
 export function AskPage() {
   const { t } = useTranslation()
   const { conversationId } = useParams()
+  // `/ask?q=...` opens the box with a question already typed (the What-if screen uses it).
+  const [searchParams] = useSearchParams()
+  const typed = conversationId ? undefined : (searchParams.get('q') ?? undefined)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const canAsk = useCan('ask')
@@ -447,6 +450,7 @@ export function AskPage() {
             busy={busy}
             disabled={working}
             placeholder={current ? t('ask.followUpPlaceholder') : undefined}
+            initial={typed}
           />
         </div>
       </div>

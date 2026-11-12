@@ -28,8 +28,14 @@ INDUSTRY_NAMES = {
     "other": "small or medium",
 }
 
-# Playbook file -> words that call for it. ``what_if`` and ``daily_briefing`` belong to M9/M10.
+# Playbook file -> words that call for it, most specific first (``choose_playbooks`` keeps the first few).
+# ``daily_briefing`` belongs to M10.
 PLAYBOOK_WORDS: dict[str, re.Pattern[str]] = {
+    "what_if": re.compile(
+        r"\b(what if|what would happen|if we|if i|suppose|simulat\w*|scenario|"
+        r"should (we|i) (raise|increase|cut|lower|reduce|drop|stop|double))\b",
+        re.I,
+    ),
     "why_changed": re.compile(
         r"\b(why|reason|cause|drop(ped)?|fell|fall(en|ing)?|declin\w*|decreas\w*|went (up|down)|increas\w*|"
         r"grew|spike|dip|explain)\b",
@@ -55,7 +61,6 @@ PLAYBOOK_WORDS: dict[str, re.Pattern[str]] = {
         r"\b(budget\w*|over ?spen\w*|variance|expenses?|overrun)\b", re.I
     ),
     "goal_tracking": re.compile(r"\b(targets?|goals?|on track|behind plan|ahead of plan)\b", re.I),
-    "what_if": re.compile(r"\b(what if|if we|suppose|simulat\w*|scenario)\b", re.I),
 }
 
 

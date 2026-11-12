@@ -1,4 +1,5 @@
 import { Pencil } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
 import { formatINR } from '../lib/format'
 import { Button } from './ui/button'
@@ -20,6 +21,8 @@ export interface ScenarioCardProps {
     format: (value: number) => string
   }
   onLeverChange: (value: number) => void
+  /** The slider was released (or a key press ended): the moment to work the scenario out again. */
+  onLeverCommit?: (value: number) => void
   baseline: number
   scenario: { expected: number; low: number; high: number }
   /** Amounts are rupees unless a formatter is given. */
@@ -42,6 +45,7 @@ export function ScenarioCard({
   horizon,
   lever,
   onLeverChange,
+  onLeverCommit,
   baseline,
   scenario,
   formatValue = formatINR,
@@ -50,6 +54,7 @@ export function ScenarioCard({
   confidence,
   className,
 }: ScenarioCardProps) {
+  const { t } = useTranslation()
   const scaleMax = Math.max(baseline, scenario.high) * 1.08 || 1
   const pct = (v: number) => `${Math.max(0, (v / scaleMax) * 100)}%`
 
@@ -61,7 +66,9 @@ export function ScenarioCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-h4">{title}</h3>
-          <p className="m-0 mt-1 text-small text-ink-muted">Projection for the {horizon}</p>
+          <p className="m-0 mt-1 text-small text-ink-muted">
+            {t('scenarioCard.projection', { horizon })}
+          </p>
         </div>
         <span
           className={cn(
@@ -69,7 +76,7 @@ export function ScenarioCard({
             confidenceStyle[confidence.level],
           )}
         >
-          {confidence.level[0]?.toUpperCase() + confidence.level.slice(1)} confidence
+          {t(`scenarioCard.confidence_${confidence.level}`)}
         </span>
       </div>
 
@@ -88,12 +95,16 @@ export function ScenarioCard({
             const next = values[0]
             if (next !== undefined) onLeverChange(next)
           }}
+          onValueCommit={(values) => {
+            const next = values[0]
+            if (next !== undefined) onLeverCommit?.(next)
+          }}
         />
       </div>
 
       <dl className="mt-2 space-y-4">
         <div>
-          <dt className="text-small text-ink-muted">Without the change</dt>
+          <dt className="text-small text-ink-muted">{t('scenarioCard.without')}</dt>
           <dd className="m-0 mt-1 flex items-center gap-3">
             <span className="relative h-3 flex-1 rounded-sheet bg-paper">
               <span
@@ -105,9 +116,7 @@ export function ScenarioCard({
           </dd>
         </div>
         <div>
-          <dt className="text-small text-ink-muted">
-            With the change (expected, with likely range)
-          </dt>
+          <dt className="text-small text-ink-muted">{t('scenarioCard.with')}</dt>
           <dd className="m-0 mt-1 flex items-center gap-3">
             <span className="relative h-3 flex-1 rounded-sheet bg-paper" data-testid="scenario-bar">
               <span
@@ -131,18 +140,23 @@ export function ScenarioCard({
             </span>
           </dd>
           <dd className="m-0 mt-1 text-caption text-ink-muted tabular">
-            Likely between {formatValue(scenario.low)} and {formatValue(scenario.high)}
+            {t('scenarioCard.between', {
+              low: formatValue(scenario.low),
+              high: formatValue(scenario.high),
+            })}
           </dd>
         </div>
       </dl>
 
       <div className="mt-4 border-t border-line pt-4">
         <div className="flex items-center justify-between gap-3">
-          <h4 className="font-sans text-small font-semibold tracking-normal">Assumptions</h4>
+          <h4 className="font-sans text-small font-semibold tracking-normal">
+            {t('scenarioCard.assumptions')}
+          </h4>
           {onEditAssumptions ? (
             <Button variant="ghost" size="sm" onClick={onEditAssumptions}>
               <Pencil aria-hidden />
-              Edit assumptions
+              {t('scenarioCard.editAssumptions')}
             </Button>
           ) : null}
         </div>

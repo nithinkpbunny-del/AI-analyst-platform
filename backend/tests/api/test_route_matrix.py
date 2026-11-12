@@ -107,6 +107,15 @@ PERSONAL = {
 }
 
 
+# What-if routes that read live data (M9): they need an uploaded connection and a dictionary, so the matrix cannot
+# give them a 200. Tested in test_whatif.py (TestAccess: 401, 403 for Viewers and Owners without 2FA; TestWithData:
+# success, another workspace gets 409/no data; TestValidation: 422).
+DATA_ROUTES = {
+    ("GET", "/whatif/values"),
+    ("POST", "/whatif/run"),
+}
+
+
 @dataclass
 class Fixtures:
     """Ids the cases fill into paths: ``mine`` belong to UrbanCart (org A), ``theirs`` to Chaiwala (org B)."""
@@ -349,6 +358,7 @@ CASES: dict[tuple[str, str], Case] = {
         body={"question": "How did sales do last month?"},
         invalid_body={"question": ""},
     ),
+    ("GET", "/whatif/options"): Case("GET", "/whatif/options", P.ASK, 200, check_leak=True),
     ("GET", "/saved-questions"): Case(
         "GET", "/saved-questions", P.SAVED_QUESTIONS, 200, check_leak=True
     ),
@@ -397,11 +407,11 @@ def _api_routes(client: TestClient) -> set[tuple[str, str]]:
 
 def test_every_route_is_classified(client: TestClient) -> None:
     routes = _api_routes(client)
-    unclassified = routes - PUBLIC - SELF - PERSONAL - set(CASES)
+    unclassified = routes - PUBLIC - SELF - PERSONAL - DATA_ROUTES - set(CASES)
     assert unclassified == set(), (
         "New routes need tests: add them to PUBLIC, SELF or CASES in tests/api/test_route_matrix.py"
     )
-    assert (PUBLIC | SELF | PERSONAL | set(CASES)) - routes == set(), "stale entries"
+    assert (PUBLIC | SELF | PERSONAL | DATA_ROUTES | set(CASES)) - routes == set(), "stale entries"
 
 
 @pytest.fixture

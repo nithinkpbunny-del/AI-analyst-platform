@@ -893,6 +893,7 @@ function RemoveImpact({ impact }: { impact: DictionaryImpact | null | undefined 
             })}
           </li>
         ) : null}
+        <li>{t('connections.detail.removeEdits')}</li>
         {impact.joins > 0 ? (
           <li>{t('connections.detail.removeJoins', { count: impact.joins })}</li>
         ) : null}

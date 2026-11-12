@@ -453,6 +453,11 @@ describe('A connection', () => {
     ).toBeVisible()
     expect(within(confirm).getByText(/The metric repeat_rate would have no table/)).toBeVisible()
     expect(within(confirm).getByText('1 join between tables goes with it.')).toBeVisible()
+    // Fix 3: removing loses the Owner's edits; the dialog says so and points to a new version.
+    expect(
+      within(confirm).getByText(/uploading the same file again starts from a new guess/),
+    ).toBeVisible()
+    expect(within(confirm).getByText(/upload a new version of the file/)).toBeVisible()
   })
 
   it('offers to reconnect Google when the sign-in stopped working', async () => {

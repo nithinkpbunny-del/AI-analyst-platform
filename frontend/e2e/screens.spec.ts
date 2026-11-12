@@ -51,6 +51,9 @@ for (const screen of screens) {
           page.getByRole('button', { name: /^Were there any unusual days/ }),
         ).toBeVisible()
       }
+      if (screen === 'what-if') {
+        await expect(page.getByRole('button', { name: 'Run scenario' })).toBeVisible()
+      }
       if (screen === 'activity') {
         await expect(page.getByText('Turned on two-step verification')).toBeVisible()
       }
@@ -90,6 +93,27 @@ test.describe('ask: an answer', () => {
     await page.getByRole('button', { name: 'Show my work' }).click()
     await expect(page.getByRole('dialog', { name: 'How this answer was made' })).toBeVisible()
     await expect(page).toHaveScreenshot('ask-work.png')
+  })
+})
+
+// M9: a worked-out scenario with its headline, range, assumptions and chart.
+test.describe('what-if: a scenario', () => {
+  async function run(page: Page) {
+    await open(page, '/what-if')
+    await page.getByRole('button', { name: 'Run scenario' }).click()
+    await expect(page.getByRole('region', { name: /^Prices \+10%/ })).toBeVisible()
+    await expect(page.getByRole('figure').locator('svg')).toBeVisible()
+  }
+
+  test('matches the baseline', async ({ page }) => {
+    await run(page)
+    await expect(page.getByText(/Based on shopify_orders/)).toBeVisible()
+    await expect(page).toHaveScreenshot('what-if-result.png', { fullPage: true })
+  })
+
+  test('has no accessibility violations', async ({ page }) => {
+    await run(page)
+    await noAxeViolations(page)
   })
 })
 

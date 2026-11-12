@@ -15,7 +15,7 @@ import logging
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
@@ -23,7 +23,17 @@ import pandas as pd
 
 from app.agent.access import AccessContext, VisibleDictionary
 from app.agent.provenance import ResultStore
-from app.analytics import anomalies, cohorts, drivers, finance, forecast, kpis, marketing, rfm
+from app.analytics import (
+    anomalies,
+    cohorts,
+    drivers,
+    finance,
+    forecast,
+    kpis,
+    marketing,
+    rfm,
+    whatif,
+)
 from app.analytics.common import (
     GRAINS,
     Analysis,
@@ -332,6 +342,29 @@ SPECS: dict[str, ToolSpec] = {
                 "filters": _FILTERS,
             },
             ["metric"],
+        ),
+        _spec(
+            "what_if",
+            "Simulate a decision from the company's own history: baseline vs scenario for the next months with a "
+            "low/expected/high range, the assumptions used (history or default, labelled), side effects and "
+            "confidence. Levers: 'price' (change = percent), 'discount' (change = percentage points of the "
+            "discount rate), 'marketing_spend' (change = percent; scope {'channel': name}). Other levers "
+            "(stock, staffing, product mix) are not supported: say so. Always report the range and say which "
+            "assumptions are defaults.",
+            {
+                "metric": _METRIC,
+                "lever": {"type": "string", "enum": list(whatif.LEVERS)},
+                "change": {"type": "number"},
+                "scope": _FILTERS,
+                "horizon": {"type": "integer", "minimum": 1, "maximum": whatif.MAX_HORIZON},
+                "assumptions": {
+                    "type": "object",
+                    "description": "Only when the person gave one: price_elasticity, discount_elasticity "
+                    "(negative numbers) or spend_elasticity (positive).",
+                    "additionalProperties": {"type": "number"},
+                },
+            },
+            ["lever", "change"],
         ),
         _spec(
             "segment_customers",
@@ -647,6 +680,44 @@ def run_forecast(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return _result(ctx, "forecast", args, result)
 
 
+def run_what_if(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    scenario = scenario_from(args)
+    if not scenario.metric and scenario.lever != "marketing_spend":
+        # People say "revenue" without naming it: use the dictionary's revenue, else ask which metric.
+        if "revenue" not in ctx.dictionary.metrics:
+            raise AnalyticsError("needs_metric", "name the metric to simulate")
+        scenario = replace(scenario, metric="revenue")
+    _computing(ctx, "what_if", scenario.metric or None)
+    result = whatif.what_if(ctx.analysis(), scenario, ctx.access.industry)
+    return _result(ctx, "what_if", args, result)
+
+
+def scenario_from(args: dict[str, Any]) -> whatif.Scenario:
+    """A scenario from tool arguments or API fields. Unusable numbers are refused, never guessed."""
+    change = args.get("change")
+    horizon = args.get("horizon", 3)
+    if isinstance(change, bool) or not isinstance(change, int | float):
+        raise AnalyticsError("bad_change", str(change))
+    if isinstance(horizon, bool) or not isinstance(horizon, int | float):
+        raise AnalyticsError("bad_horizon", str(horizon))
+    overrides_in = args.get("assumptions")
+    overrides: dict[str, float] = {}
+    if isinstance(overrides_in, dict):
+        for key, value in overrides_in.items():
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise AnalyticsError("bad_assumption", str(key))
+            overrides[str(key)] = float(value)
+    scope = _obj(args, "scope") or {}
+    return whatif.Scenario(
+        metric=_str(args, "metric") or "",
+        lever=_str(args, "lever") or "",
+        change=float(change),
+        scope=scope,
+        horizon=int(horizon),
+        overrides=overrides,
+    )
+
+
 def segment_customers(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     metric = _str(args, "metric") or ""
     _computing(ctx, "segment_customers", metric)
@@ -746,6 +817,7 @@ HANDLERS: dict[str, Callable[[ToolContext, dict[str, Any]], dict[str, Any]]] = {
     "driver_analysis": driver_analysis,
     "detect_anomalies": detect_anomalies,
     "forecast": run_forecast,
+    "what_if": run_what_if,
     "segment_customers": segment_customers,
     "marketing_efficiency": marketing_efficiency,
     "finance_summary": finance_summary,
@@ -765,6 +837,17 @@ HINTS = {
     "needs_accounting_data": "This needs accounting data (Zoho Books or Tally), which is not connected.",
     "no_marketing_data": "No table with spend by channel or campaign is connected.",
     "no_budget_data": "No table with budget and actual columns is connected.",
+    "needs_metric": "Name the metric to simulate, e.g. revenue or orders (list_sources shows them).",
+    "bad_lever": "Levers are price, discount and marketing_spend.",
+    "bad_change": "change is a number: percent for price and spend, percentage points for discount.",
+    "bad_horizon": "horizon is 1 to 6 months.",
+    "bad_assumption": "An assumption is price_elasticity or discount_elasticity (negative), or spend_elasticity "
+    "(positive), matching the lever.",
+    "lever_not_supported": "The table has no price or discount columns for this lever; say what is missing.",
+    "metric_not_supported": "Use a revenue (INR) or count metric that is a plain sum, e.g. revenue or orders.",
+    "needs_channel": "For marketing_spend give scope {'channel': <name>}.",
+    "unknown_channel": "That channel is not in the marketing data; check the names with marketing_efficiency.",
+    "no_gross_sales": "Gross sales could not be read from the table, so the discount rate is unknown.",
     "no_customer_column": "No customer column was found in this metric's table.",
 }
 

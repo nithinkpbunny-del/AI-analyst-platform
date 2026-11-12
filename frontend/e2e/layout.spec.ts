@@ -30,6 +30,11 @@ for (const size of widths) {
     await open(page, '/ask/conv1')
     await page.getByRole('article', { name: 'Answer' }).waitFor()
     expect(await hasNoHorizontalScroll(page), 'ask answer').toBe(true)
+    // A worked-out what-if: the month table scrolls inside its own box.
+    await open(page, '/what-if')
+    await page.getByRole('button', { name: 'Run scenario' }).click()
+    await page.getByRole('table').waitFor()
+    expect(await hasNoHorizontalScroll(page), 'what-if result').toBe(true)
     // A connection with its columns and preview open: wide tables scroll inside their own box.
     await open(page, '/connections/c1')
     await page.getByRole('button', { name: 'Columns and preview' }).click()

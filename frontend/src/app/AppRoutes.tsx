@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
 import { ActivityPage } from '../features/activity/ActivityPage'
 import { AskPage } from '../features/ask/AskPage'
@@ -25,8 +26,21 @@ import { AppShell } from './AppShell'
 import { adminNav, mainNav } from './nav'
 import { RedirectIfSignedIn, RequireAuth } from './RequireAuth'
 
+// The What-if screen loads on first visit: it brings the chart code and keeps the shell under its budget.
+const WhatIfPage = lazy(() =>
+  import('../features/whatif/WhatIfPage').then((m) => ({ default: m.WhatIfPage })),
+)
+
 export function AppRoutes() {
-  const built = new Set(['settings', 'team', 'activity', 'connections', 'dictionary', 'ask'])
+  const built = new Set([
+    'settings',
+    'team',
+    'activity',
+    'connections',
+    'dictionary',
+    'ask',
+    'whatIf',
+  ])
   const placeholders = [...mainNav, ...adminNav].filter((item) => !built.has(item.key))
   return (
     <Routes>
@@ -57,6 +71,14 @@ export function AppRoutes() {
           {placeholders.map((item) => (
             <Route key={item.key} path={item.path} element={<PlaceholderPage item={item} />} />
           ))}
+          <Route
+            path="/what-if"
+            element={
+              <Suspense fallback={null}>
+                <WhatIfPage />
+              </Suspense>
+            }
+          />
           <Route path="/ask" element={<AskPage />} />
           <Route path="/ask/:conversationId" element={<AskPage />} />
           <Route path="/settings" element={<SettingsPage />} />

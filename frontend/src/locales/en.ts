@@ -503,6 +503,8 @@ const en = {
         'The metric {{names}} would have no table. You will need to point it at another table before you confirm the dictionary again.',
       removeOrphaned_other:
         'The metrics {{names}} would have no table. You will need to point them at another table before you confirm the dictionary again.',
+      removeEdits:
+        'What you changed for its tables (meanings, units such as paise, formulas) goes with it, and uploading the same file again starts from a new guess. To keep your changes, upload a new version of the file on this connection instead.',
       removeJoins_one: '{{count}} join between tables goes with it.',
       removeJoins_other: '{{count}} joins between tables go with it.',
       removed: '{{name}} was removed.',
@@ -688,8 +690,14 @@ const en = {
       column_unmatched:
         '{{column}} in {{dataset}} has no match in the new source (was: {{meaning}})',
       dataset_unmatched: 'The table {{dataset}} has no partner in the new source',
+      metrics_restored:
+        'The table {{dataset}} is back, so its metrics ({{metrics}}) point at it again. Check that they still make sense.',
       metrics_moved:
-        '{{dataset}} in {{to}} now holds the metrics of the removed {{dataset}} in {{from}}: {{metrics}}',
+        'The metrics {{metrics}} moved from {{dataset}} in {{from}} to {{dataset}} in {{to}}.',
+      metrics_moved_same:
+        'The metrics {{metrics}} now use the table {{dataset}}, because the removed source had a table with the same name.',
+      metrics_moved_unnamed:
+        'The metrics of {{dataset}} in {{from}} now use {{dataset}} in {{to}}.',
       metric_orphaned:
         'The metric {{metric}} used {{dataset}}, which is gone. Point it at another table or remove it.',
       join_removed: 'The join {{from}} = {{to}} went with {{dataset}}',
@@ -791,6 +799,8 @@ const en = {
       works: 'Works',
       broken: 'Does not work',
       unchecked: 'Not tested yet',
+      needsCheck:
+        'This metric waits for your check. Make sure its formula means what you want, then mark it as checked.',
       remove: 'Remove {{name}}',
       addTitle: 'Add a metric',
       addName: 'Metric name',
@@ -1136,6 +1146,7 @@ const en = {
       driver_analysis: 'Driver analysis',
       detect_anomalies: 'Unusual values',
       forecast: 'Forecast',
+      what_if: 'What-if scenario',
       segment_customers: 'Customer segments',
       marketing_efficiency: 'Marketing efficiency',
       finance_summary: 'Finance summary',
@@ -1173,6 +1184,10 @@ const en = {
       not_additive: 'This metric is a ratio, so its parts do not add up to the total.',
       attribution_limits:
         'Campaign revenue is as each platform reports it; platforms count the same sale differently.',
+      what_if_assumptions:
+        'This is a projection from your past, not a promise. It assumes nothing else changes.',
+      what_if_default_assumption:
+        'Part of this simulation uses a typical figure for your kind of business, because your own history could not settle it.',
       nothing_to_check: 'There was not enough history to look for unusual values.',
       no_revenue_column: 'No revenue column was found in the campaign data, so ROAS is not shown.',
       skipped: 'A table could not be used: {{detail}}.',
@@ -1217,6 +1232,195 @@ const en = {
     connectFirst: 'Connect a data source first, then ask your first question here.',
     viewerNote:
       'Your role does not include asking questions. An Owner can make you an Analyst in Team.',
+  },
+  scenarioCard: {
+    projection: 'Projection for the {{horizon}}',
+    without: 'Without the change',
+    with: 'With the change (expected, with likely range)',
+    between: 'Likely between {{low}} and {{high}}',
+    assumptions: 'Assumptions',
+    editAssumptions: 'Edit assumptions',
+    confidence_high: 'High confidence',
+    confidence_medium: 'Medium confidence',
+    confidence_low: 'Low confidence',
+  },
+  whatIfPage: {
+    title: 'What-if',
+    intro:
+      'Try a decision before you make it. The effect is worked out from your own history, with a range and the assumptions behind it.',
+    viewerNote:
+      'Your role does not include running what-ifs. An Owner can make you an Analyst in Team.',
+    noData: 'Connect your data and confirm the dictionary to try a decision here.',
+    noDataAction: 'Connect data',
+    nothingToSimulate:
+      'Connect your order data and confirm the dictionary to try a decision here. Price and discount changes need orders with prices; marketing changes need spend and revenue by channel.',
+    loadFailed: 'The options could not be loaded. Try again.',
+    form: {
+      title: 'Describe the change',
+      lever: 'What do you want to change?',
+      metric: 'What do you want to see?',
+      scope: 'Where',
+      scopeAll: 'Everything',
+      scopeValue: 'Which one',
+      channel: 'Channel',
+      horizon: 'For how long',
+      horizonMonths_one: 'Next {{count}} month',
+      horizonMonths_other: 'Next {{count}} months',
+      change: 'How much',
+      run: 'Run scenario',
+      running: 'Working it out',
+      ready: 'Scenario ready',
+      words: 'Prefer to describe it in words?',
+      ask: 'Ask the analyst',
+    },
+    levers: {
+      price: 'Prices',
+      discount: 'Discount',
+      marketing_spend: 'Marketing spend',
+    },
+    changeLabel: {
+      price: 'Price change',
+      discount: 'Discount change',
+      marketing_spend: 'Spend change',
+    },
+    changeValue: {
+      price: '{{value}} on prices',
+      discount: '{{value}} points of discount',
+      marketing_spend: '{{value}} on spend',
+    },
+    title_scenario: {
+      price: 'Prices {{change}}',
+      discount: 'Discount {{change}} points',
+      marketing_spend: '{{channel}} spend {{change}}',
+    },
+    in: 'in {{scope}}',
+    headline: {
+      lead: 'Expected change over the next {{months}}:',
+      months_one: '{{count}} month',
+      months_other: '{{count}} months',
+      range: 'Likely between {{low}} and {{high}} ({{range}} range).',
+      straddles: 'The range includes no change, so the direction is not clear from your history.',
+      of: 'Compared with {{baseline}} without the change.',
+    },
+    assumptionsTitle: 'What this assumes',
+    assumption: {
+      price_elasticity: {
+        history:
+          'Customers react to price as they did before: 1% on the price moves the units sold by about {{value}}% (likely {{low}}% to {{high}}%). Learned from {{weeks}} weeks, {{start}} to {{end}}.',
+        default:
+          'A typical figure is used: 1% on the price moves the units sold by about {{value}}%. {{why}}',
+        you: 'Your figure: 1% on the price moves the units sold by {{value}}%.',
+      },
+      discount_elasticity: {
+        history:
+          'Customers react to discounts as they did before: 1% off the price paid moves the units sold by about {{value}}% (likely {{low}}% to {{high}}%). Learned from {{weeks}} weeks, {{start}} to {{end}}.',
+        default:
+          'A typical figure is used: 1% off the price paid moves the units sold by about {{value}}%. {{why}}',
+        you: 'Your figure: 1% off the price paid moves the units sold by {{value}}%.',
+      },
+      spend_elasticity: {
+        history:
+          'Revenue follows spend as it did across your campaigns: 1% more spend brings about {{value}}% more revenue (likely {{low}}% to {{high}}%), from {{rows}} campaign rows.',
+        default:
+          'A typical figure is used: 1% more spend brings about {{value}}% more revenue, with diminishing returns. {{why}}',
+        you: 'Your figure: 1% more spend brings {{value}}% more revenue.',
+      },
+      current_discount_rate: 'Today the discount is about {{value}}% of the list price.',
+      baseline_method: 'Without the change, sales follow the {{method}} forecast of your history.',
+      change_starts_now: 'The change starts at the beginning of the first month.',
+      nothing_else_changes: 'Nothing else changes: other prices, spend, stock and competitors.',
+      attribution_limits:
+        'Revenue by channel is as each platform reports it; platforms count the same sale differently.',
+    },
+    why: {
+      too_little_history: 'Your history is too short to learn it.',
+      history_did_not_move: 'The price has not changed enough in your history to learn from.',
+      history_inconclusive: 'Your history was too mixed to give a clear answer.',
+      default_assumption: 'Your history does not settle it.',
+    },
+    method: {
+      holt_winters: 'seasonal',
+      trend_x_seasonal_index: 'trend and season',
+      linear_trend: 'trend',
+      latest_period_run_rate: 'latest period',
+    },
+    confidenceReason: {
+      clear_history: 'The history shows a clear response.',
+      some_history: 'The history shows some response, with room for error.',
+      weak_history: 'The history shows only a weak response.',
+      your_assumption: 'It depends on the figure you set.',
+      too_little_history: 'Your history is too short, so a typical figure is used.',
+      history_did_not_move:
+        'Prices have not moved enough to learn from, so a typical figure is used.',
+      history_inconclusive: 'Your history is too mixed, so a typical figure is used.',
+      default_assumption: 'A typical figure is used.',
+      uncertain_baseline: 'Past forecasts of this series were off by a lot.',
+      attribution_estimate: 'Revenue by channel is not an experiment, so treat it as a guide.',
+    },
+    effects: {
+      title: 'Side effects',
+      units_change: 'Units sold change by about {{pct}}.',
+      discount_given: 'Discount given away goes from {{before}} to {{after}}.',
+      repeat_exposure:
+        '{{share}} of this revenue comes from customers who ordered more than once. They are the first to react to a price or discount change.',
+      extra_spend: 'The change in spend is {{amount}} over the period.',
+      netAfterSpend: 'After the change in spend, the net effect is {{amount}}.',
+    },
+    table: {
+      title: 'Month by month',
+      month: 'Month',
+      without: 'Without the change',
+      with: 'With the change',
+      range: 'Likely range',
+    },
+    chart: {
+      title: 'With the change, {{metric}} is expected to be {{direction}}',
+      up: 'higher',
+      down: 'lower',
+      same: 'about the same',
+      without: 'Without the change',
+      with: 'With the change',
+    },
+    source: 'Based on {{tables}}, read {{when}}.',
+    quality:
+      'Some of the data has quality warnings. Open the connection to see them before you rely on this.',
+    edit: {
+      title: 'Edit the assumption',
+      intro:
+        'Set your own figure and the scenario is worked out again. The range then comes only from the forecast.',
+      price_elasticity: 'Change in units sold for 1% on the price (negative)',
+      discount_elasticity: 'Change in units sold for 1% off the price paid (negative)',
+      spend_elasticity: 'Change in revenue for 1% more spend (positive)',
+      apply: 'Use my figure',
+      reset: 'Use the estimate again',
+      invalidNegative: 'Enter a number between −10 and 0.',
+      invalidPositive: 'Enter a number between 0 and 10.',
+    },
+    errors: {
+      whatif_unknown_metric: 'That metric is not in your dictionary.',
+      whatif_metric_not_supported:
+        'Pick a revenue or order-count metric that is a plain sum, not a ratio.',
+      whatif_metric_unavailable: 'That metric’s table cannot be used right now.',
+      whatif_needs_metric: 'Pick the metric to simulate.',
+      whatif_too_little_history:
+        'There is not enough history to project this. At least six months of data are needed.',
+      whatif_no_data: 'There is no data for that part of the business.',
+      whatif_no_gross_sales: 'Gross sales could not be read, so the discount rate is not known.',
+      whatif_lever_not_supported:
+        'This data has no price or discount columns, so this change cannot be simulated.',
+      whatif_no_marketing_data: 'Connect a table with spend and revenue by channel first.',
+      whatif_unknown_channel: 'That channel is not in your marketing data.',
+      whatif_needs_channel: 'Pick the channel.',
+      whatif_unknown_column: 'That part of the business is not in your data.',
+      whatif_bad_change: 'That change is outside what can be simulated. Try a smaller step.',
+      whatif_bad_assumption: 'That figure is outside the allowed range.',
+      whatif_bad_horizon: 'Pick one to six months.',
+      too_many_runs: 'Too many scenarios in the last minute. Wait a moment and try again.',
+      no_dictionary: 'Connect data and confirm the dictionary first.',
+      no_sources: 'There is no data you can use yet.',
+      source_error: 'The data could not be read right now. Try again in a moment.',
+      generic: 'The scenario could not be worked out. Try again.',
+    },
   },
   comingSoon: 'Coming in a later milestone',
 } as const

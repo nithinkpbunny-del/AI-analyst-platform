@@ -215,6 +215,19 @@ def _carry_dataset(
     )
 
 
+def _restore_metrics(built: Built) -> None:
+    """A table came back under the key of a removed one (the same file uploaded again): metrics that were flagged
+    because their table was gone point at it again, so the flag goes. Whether they still run is tested as for every
+    draft, and a metric that does not run still blocks confirming."""
+    restored: dict[str, list[str]] = {}
+    for name, metric in built.dictionary.metrics.items():
+        if metric.needs_review and metric.dataset in built.new_datasets:
+            metric.needs_review = False
+            restored.setdefault(built.dictionary.datasets[metric.dataset].name, []).append(name)
+    for table, names in restored.items():
+        built.diff.append({"kind": "metrics_restored", "dataset": table, "metrics": names})
+
+
 def _drop_references(built: Built, gone: dict[str, DatasetEntry]) -> None:
     """Nothing may point at a table that is gone (D64): its automatic metrics and its joins go; metrics the Owner
     or the AI wrote stay, flagged, so the Owner points them at another table or removes them."""
@@ -306,6 +319,7 @@ def build(
         built.dictionary.relationships = [r.model_copy(deep=True) for r in baseline.relationships]
         gone = {key: old for did, (key, old) in old_by_id.items() if did not in fresh_ids}
         _drop_references(built, gone)
+        _restore_metrics(built)
     names = set(built.dictionary.metrics)
     for key in built.new_datasets:
         added = standard_metrics(key, built.dictionary.datasets[key], names)

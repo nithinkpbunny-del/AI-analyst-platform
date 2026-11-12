@@ -164,11 +164,8 @@ class TestTools:
     def test_every_tool_has_a_schema(self) -> None:
         for spec in SPECS.values():
             assert spec.parameters["type"] == "object" and spec.description
-        assert (
-            "what_if" not in SPECS
-            and "goal_progress" not in SPECS
-            and "growth_signals" not in SPECS
-        )
+        assert "what_if" in SPECS  # M9
+        assert "goal_progress" not in SPECS and "growth_signals" not in SPECS
 
 
 # ------------------------------------------------------------------------------------------------- loop
@@ -436,3 +433,83 @@ def test_the_system_prompt_has_the_lens_dictionary_rules_and_playbooks(ctx: Tool
     assert chosen == ["why_changed", "campaign_efficiency"]
     assert "Playbook: why did a metric change?" in text
     assert "$" not in text.replace("₹", "")  # every placeholder was filled
+
+
+# ------------------------------------------------------------------------------------------------ what-if
+class TestWhatIfTool:
+    def test_is_offered_to_the_model_and_the_old_note_is_gone(self) -> None:
+        assert "what_if" in SPECS
+        schema = SPECS["what_if"].parameters
+        assert schema["required"] == ["lever", "change"]
+        assert schema["properties"]["lever"]["enum"] == ["price", "discount", "marketing_spend"]
+        playbook = prompts.playbook_text("what_if")
+        assert "not available yet" not in playbook and "what_if" in playbook
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "What if we raise prices by 10%?",
+            "What would happen if we cut YouTube spend?",
+            "Should we increase the discount on Fashion?",
+            "Simulate a 5% price cut",
+        ],
+    )
+    def test_what_if_questions_get_the_what_if_playbook_first(self, question: str) -> None:
+        assert prompts.choose_playbooks(question)[0] == "what_if"
+
+    def test_a_result_carries_provenance_and_no_raw_rows(self, ctx: ToolContext) -> None:
+        content = run_tool(
+            ctx, "what_if", lever="price", change=10, scope={"product_type": "Electronics"}
+        )
+        assert content["result_id"] == "r1" and content["facts"]["delta_low"] is not None
+        assert len(content["rows"]) == 3 and set(content["columns"]) >= {
+            "bucket",
+            "baseline",
+            "scenario",
+        }
+        prov = ctx.store.provenance["r1"]
+        assert prov.tool == "what_if" and [t["table"] for t in prov.tables] == ["shopify_orders"]
+        assert prov.inputs["lever"] == "price" and prov.sql
+
+    @pytest.mark.parametrize(
+        ("args", "error"),
+        [
+            ({"lever": "stock", "change": 5}, "bad_lever"),
+            ({"lever": "price", "change": "ten"}, "bad_change"),
+            ({"lever": "price", "change": 500}, "bad_change"),
+            ({"lever": "price", "change": 5, "horizon": 12}, "bad_horizon"),
+            (
+                {"lever": "price", "change": 5, "assumptions": {"price_elasticity": 2}},
+                "bad_assumption",
+            ),
+            ({"lever": "price", "change": 5, "assumptions": {"x": "a"}}, "bad_assumption"),
+            ({"lever": "marketing_spend", "change": 5}, "needs_channel"),
+            (
+                {"lever": "marketing_spend", "change": 5, "scope": {"channel": "Radio"}},
+                "unknown_channel",
+            ),
+            ({"lever": "price", "change": 5, "metric": "nope"}, "unknown_metric"),
+        ],
+    )
+    def test_unusable_requests_come_back_as_errors_the_model_can_act_on(
+        self, ctx: ToolContext, args: dict[str, Any], error: str
+    ) -> None:
+        content = run_tool(ctx, "what_if", **args)
+        assert content["error"] == error and content["hint"], content
+
+    def test_a_table_the_person_cannot_see_cannot_be_simulated_or_used_as_scope(self) -> None:
+        hidden = agent_context(hidden=("shopify_orders",))
+        assert run_tool(hidden, "what_if", lever="price", change=5)["error"] == "needs_metric"
+        named = run_tool(hidden, "what_if", lever="price", change=5, metric="revenue")
+        assert named["error"] in ("unknown_metric", "metric_unavailable")
+        assert not hidden.workspace.has("shopify_orders")
+
+    def test_marketing_tables_that_are_hidden_leave_no_marketing_data(self) -> None:
+        quarters = tuple(
+            f"q{q}_{y}" for y in (2025, 2026) for q in (1, 2, 3, 4) if (y, q) != (2026, 4)
+        )
+        ctx = agent_context(hidden=quarters)
+        content = run_tool(
+            ctx, "what_if", lever="marketing_spend", change=10, scope={"channel": "Email"}
+        )
+        assert content["error"] == "no_marketing_data"

@@ -949,3 +949,98 @@ a missing one.
 - Pin, Export and Share are not on the answer yet (M10, M15). The command palette (Ctrl/Cmd+K) is not built yet.
 - Multilingual answers stay deferred (D41): the prompt asks for English; all text is in `locales/en.ts`. The
   existing `AnswerSheet` labels moved there too.
+
+### D71. What the what-if simulator can simulate (M9, BUILD_SPEC 10.4, R12)
+- **Levers built:** `price` (percent), `discount` (percentage points of the discount rate) and `marketing_spend`
+  (percent, one channel). BUILD_SPEC 10.4 also lists staffing/cost line, product mix and stock. They are **not**
+  built: they need a cost or inventory model that no connected source can supply yet (accounting data arrives with
+  M13/M16, industry defaults with M17). The `what_if` tool and its playbook tell the model to say so and to offer
+  the nearest lever. This is a deliberate narrowing, not an oversight.
+- **Metrics:** a plain-sum metric in rupees (revenue) or a count (orders), over a table that has a price column
+  (`unit_price` or `total_line_items_price`) and, for the discount lever, a discount column. Ratios (AOV) are refused
+  (`metric_not_supported`): their parts do not add up. Columns are found by name, label and synonym, like the
+  marketing columns (D66).
+- **Driver model:** revenue = units x net price. A price change `x` moves revenue by `(1 + x) * (1 + x) ** e`; a
+  discount change moves the net price paid by `(1 - d') / (1 - d)` and units by that ratio to the power `e`; spend
+  moves a channel's revenue by `(1 + x) ** beta` (diminishing returns). The discount rate is capped at 90%.
+- **No AI in the numbers (P4).** The model only turns words into `{lever, change, scope, horizon}`; every figure is
+  computed in `app/analytics/whatif.py`. A missing metric defaults to `revenue` when the dictionary has it.
+
+### D72. Where the response comes from: history first, a labelled default second (M9)
+- **Estimate:** weekly units of the scope against the average list price (price lever) or the average share of
+  the price paid (discount lever), log-log, with a trend and **month-of-year controls** (smooth annual harmonics if a
+  year of weeks cannot separate the months). It is used only when the price moved at least 4% (discount: 3%) over
+  the history, there are at least 26 weeks, the sign is negative within [-6, -0.05] and |t| >= 1.5.
+- **Why month controls:** the demo data raises discounts 8 points in Oct-Nov, exactly when demand peaks. With two
+  smooth harmonics the regression read that season as a response (elasticity -3.1, "high confidence"); with month
+  controls it correctly says the history cannot tell and falls back to the default. A wrongly confident answer is the
+  worse failure, so the stricter control stays.
+- **Default:** industry figures in `DEFAULTS` (price, discount, spend), shown as a range of 1.5x to 0.5x of the value
+  and always labelled `default` with the reason (`too_little_history`, `history_did_not_move`,
+  `history_inconclusive`). The industry templates of M17 may refine them.
+- **The person's own figure** (`assumptions` on the request) replaces the estimate and is labelled `you`; the range
+  then comes from the forecast alone. Signs are checked: price and discount responses must be negative, spend's
+  positive, all within [-10, 10].
+- **Marketing:** the response is fitted across all campaign rows with a fixed effect per channel (needs 12 rows).
+  Attributed revenue per quarter is not an experiment (spend and revenue move together by construction), so marketing
+  confidence is **never above low** (`attribution_estimate`), and the note on platform attribution always shows.
+
+### D73. Range, confidence and side effects (M9, R14)
+- **Baseline** is the metric's own forecast for the scope (`forecast.forecast`, monthly, 1 to 6 months); the
+  scenario is the baseline times the effect. The 80% range combines the forecast range with the elasticity's own 80%
+  range (lowest and highest effect over the three elasticities); `delta_low <= delta_expected <= delta_high` always.
+  The range is deliberately wide: it is better to show that a decision's direction is unclear than to hide it
+  (the screen says "the range includes no change" when it does).
+- **Confidence:** `high` needs |t| >= 3, a year of weeks and R^2 >= 0.5; `medium` |t| >= 2, or the person's own
+  figure; everything else, and every default, is `low`. A poor baseline (backtest MAPE above 25%) lowers it a step.
+- **Side effects** (code, written in words on the screen): the change in units sold; for a discount, the discount
+  given away before and after; the share of the last 12 months' revenue from customers who ordered more than once
+  (the ones who react first); for spend, the extra spend and the net effect after it. All from code.
+- **Surprising results are shown, not hidden.** On the demo data a 10% rise on South Electronics is estimated
+  as inelastic (elasticity about -0.6, medium confidence), so revenue rises about 4%. The playbook asks the model to
+  say that this comes from the past and may not hold for a bigger change.
+
+### D74. The What-if API: the same tool, no AI (M9)
+- `GET /whatif/options` (what can be simulated, from the dictionary only, no data read), `GET /whatif/values`
+  (up to 50 values of a dimension column, to pick a scope) and `POST /whatif/run`. A run calls the agent's
+  `what_if` tool directly: same code, same numbers, **no model call and nothing metered**, so moving a slider costs
+  nothing and counts as no question (BUILD_SPEC 10.4 "no LLM call for slider moves").
+- Permission `ask` (Owners and Analysts). The context is the asking person's own visible dictionary (P6): hidden
+  connections' tables are not there. No dictionary -> 409 `no_dictionary`; no visible tables -> 409 `no_sources`;
+  a scenario that cannot be worked out -> 422 `whatif_<code>` (the web app writes the sentence, D41). 60 runs per
+  person per minute (429 `too_many_runs`).
+- The database transaction is released before data is fetched. A slider move recomputes on the server (cache-aware
+  reads, a fraction of a second on the demo data) rather than duplicating the model in the browser.
+- No new table: results are not stored. The activity log is not written for a run (no model, no stored answer); a
+  question that uses the tool is logged as any question (D69).
+- Route matrix: `GET /whatif/options` is a normal case; `values` and `run` need a connection with data, so they are
+  in `DATA_ROUTES` and tested in `tests/api/test_whatif.py` (401, 403 for Viewers and Owners without 2FA, success,
+  other workspaces, 422, the limit).
+
+### D75. The What-if screen (M9)
+- `/what-if` (Owners, Analysts; Viewers are told their role cannot run what-ifs): a form (lever, metric, scope,
+  how long, how much) and, after "Run scenario", the headline with the haldi mark on the expected change **and its
+  range**, the `ScenarioCard` (the lever slider re-runs on release; baseline vs scenario bars with the range
+  whisker; the assumptions in words, each labelled history / typical figure / your figure; confidence with its
+  reason; "Edit assumptions"), a chart, the side effects and a month-by-month ledger with the data source and age.
+- `ScenarioCard` text moved to `locales/en.ts` and it gained `onLeverCommit`. The page loads on first visit (its
+  own 12.6 KB chunk); the shell grew from 181.2 to 184.2 KB of 200 KB.
+- "Describe it in words" opens Ask, where the `what_if` tool and its playbook do the translation. `/ask?q=...` opens
+  the box with a question typed in.
+- Golden scenarios: `eval/whatif_scenarios.yaml` (five, with expected ranges), run in `tests/eval/` directly and
+  through the agent with the fake model. The same file feeds `make eval` in M10.
+
+### D76. Dictionary review fixes after removing and re-uploading a source (M9)
+- **Flagged metrics are visible and can be cleared.** A metric flagged `needs_review` (today only when its table was
+  removed, D64) counted towards "items left to check" but showed only "Works", with no way to clear it except editing
+  its formula. It now has the same caution strip and "Looks right" button as a column or join; checking it keeps the
+  formula and its test result.
+- **A table that comes back clears the flags it caused.** When a dataset is added under the key of a removed one (the
+  same file uploaded again), metrics that point at that key lose the flag and the draft's change list says so
+  (`metrics_restored`). They are tested like every metric, so one that no longer runs still blocks confirming. A flag
+  on a metric whose table is still gone stays.
+- **Removing a source warns that edits go with it.** The Remove dialog says that meanings, units (paise) and formulas
+  for its tables are lost and that uploading the same file again starts from a new guess; it points to "Upload a new
+  version" on the connection, which keeps them. Keeping a removed table's edits for a re-upload was considered and
+  not built (the Owner asked for the small fix).
+
