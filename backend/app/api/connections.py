@@ -66,7 +66,9 @@ from app.connectors.registry import (
 from app.connectors.service import remove_connection
 from app.data.cache import DatasetCache, DatasetMissing
 from app.data.objects import file_key
+from app.dictionary import replace as dictionary_replace
 from app.dictionary import service as dictionary_service
+from app.dictionary.model import parse as parse_dictionary
 from app.models import (
     Connection,
     ConnectionGrant,
@@ -84,6 +86,7 @@ from app.schemas.connections import (
     ConnectionOut,
     ConnectionPatch,
     DatasetOut,
+    DictionaryImpactOut,
     FileOut,
     FileVersionOut,
     GoogleFinishOut,
@@ -359,7 +362,22 @@ def _detail(tenant: Tenant, connection: Connection) -> ConnectionDetailOut:
             )
             for v in versions
         ],
+        dictionary_impact=_dictionary_impact(tenant, connection),
     )
+
+
+def _dictionary_impact(tenant: Tenant, connection: Connection) -> DictionaryImpactOut | None:
+    """For the warning before removal: which metrics move to another source's same-named table and which would
+    point at nothing (D64). ``None`` when no dictionary uses this connection."""
+    base = dictionary_service.current_draft(
+        tenant.db, tenant.org_id
+    ) or dictionary_service.latest_confirmed(tenant.db, tenant.org_id)
+    if base is None:
+        return None
+    impact = dictionary_replace.removal_impact(parse_dictionary(base.content), str(connection.id))
+    if not (impact["moves"] or impact["orphaned_metrics"] or impact["joins"]):
+        return None
+    return DictionaryImpactOut.model_validate(impact)
 
 
 def _json_cell(value: Any) -> Any:

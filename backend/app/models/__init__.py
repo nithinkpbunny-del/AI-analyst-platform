@@ -3,6 +3,7 @@
 from app.models.ai import LlmKey, Secret, UsageEvent
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken, Session, UserToken
+from app.models.chat import Conversation, Message, SavedQuestion
 from app.models.connection import (
     Connection,
     ConnectionGrant,
@@ -22,6 +23,7 @@ __all__ = [
     "Connection",
     "ConnectionGrant",
     "Consent",
+    "Conversation",
     "Dataset",
     "DictionaryVersion",
     "FileVersion",
@@ -30,8 +32,10 @@ __all__ = [
     "LlmKey",
     "LoginChallenge",
     "Membership",
+    "Message",
     "Organization",
     "RefreshToken",
+    "SavedQuestion",
     "Secret",
     "Session",
     "Snapshot",

@@ -215,6 +215,43 @@ def _carry_dataset(
     )
 
 
+def _drop_references(built: Built, gone: dict[str, DatasetEntry]) -> None:
+    """Nothing may point at a table that is gone (D64): its automatic metrics and its joins go; metrics the Owner
+    or the AI wrote stay, flagged, so the Owner points them at another table or removes them."""
+    if not gone:
+        return
+    dictionary = built.dictionary
+    for name, metric in list(dictionary.metrics.items()):
+        if metric.dataset not in gone:
+            continue
+        if metric.source == "code":
+            del dictionary.metrics[name]
+            continue
+        metric.needs_review = True
+        built.diff.append(
+            {"kind": "metric_orphaned", "metric": name, "dataset": gone[metric.dataset].name}
+        )
+    kept = []
+    for relationship in dictionary.relationships:
+        tables = {relationship.left.partition(".")[0], relationship.right.partition(".")[0]}
+        lost = tables & set(gone)
+        if not lost:
+            kept.append(relationship)
+            continue
+        built.diff.append(
+            {
+                "kind": "join_removed",
+                "dataset": gone[sorted(lost)[0]].name,
+                "from": relationship.left,
+                "to": relationship.right,
+            }
+        )
+    dictionary.relationships = kept
+    for entry in dictionary.datasets.values():
+        for column in entry.columns.values():
+            column.joins = [j for j in column.joins if j.partition(".")[0] not in gone]
+
+
 def build(
     inputs: list[DatasetInput],
     baseline: Dictionary | None,
@@ -267,6 +304,8 @@ def build(
     if baseline is not None:
         built.dictionary.metrics = {k: m.model_copy(deep=True) for k, m in baseline.metrics.items()}
         built.dictionary.relationships = [r.model_copy(deep=True) for r in baseline.relationships]
+        gone = {key: old for did, (key, old) in old_by_id.items() if did not in fresh_ids}
+        _drop_references(built, gone)
     names = set(built.dictionary.metrics)
     for key in built.new_datasets:
         added = standard_metrics(key, built.dictionary.datasets[key], names)

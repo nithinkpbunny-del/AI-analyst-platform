@@ -27,6 +27,9 @@ for (const size of widths) {
       await open(page, `/${screen}`)
       expect(await hasNoHorizontalScroll(page), screen).toBe(true)
     }
+    await open(page, '/ask/conv1')
+    await page.getByRole('article', { name: 'Answer' }).waitFor()
+    expect(await hasNoHorizontalScroll(page), 'ask answer').toBe(true)
     // A connection with its columns and preview open: wide tables scroll inside their own box.
     await open(page, '/connections/c1')
     await page.getByRole('button', { name: 'Columns and preview' }).click()

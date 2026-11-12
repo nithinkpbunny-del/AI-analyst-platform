@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
+from app.agent import service as agent_service
 from app.connectors import service
 from app.data import snapshots
 from app.dictionary import service as dictionary_service
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Drafting may make a few AI calls of up to a few minutes each.
 DRAFT_TIME_LIMIT_SECONDS = 1500
+
+# A question: up to 12 model calls of at most a few minutes each, plus reading the sources.
+ANSWER_TIME_LIMIT_SECONDS = 1500
 
 # A 50 MB workbook or a large spreadsheet can take a few minutes; nothing should run longer than this.
 SYNC_TIME_LIMIT_SECONDS = 900
@@ -72,6 +76,19 @@ def draft_dictionary(
         fresh_ai=fresh_ai,
     )
     return outcome.status
+
+
+@celery_app.task(name="app.tasks.jobs.answer_question", time_limit=ANSWER_TIME_LIMIT_SECONDS)
+def answer_question(
+    org_id: str, message_id: str, ip: str | None = None, user_agent: str | None = None
+) -> str:  # pragma: no cover - the body is agent.service.answer_question, tested directly
+    """Answer one question with the agent (M8)."""
+    runtime = worker_runtime()
+    return agent_service.answer_question(
+        runtime,
+        default_factory(runtime.settings),
+        agent_service.Asked(uuid.UUID(org_id), uuid.UUID(message_id), ip, user_agent),
+    )
 
 
 @celery_app.task(name="app.tasks.jobs.purge_snapshots")

@@ -1,5 +1,6 @@
 import { Bookmark, FileDown, ListTree, Pin, Share2 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
 import { Button } from './ui/button'
 import { TriangleAlert } from 'lucide-react'
@@ -40,17 +41,18 @@ export function AnswerSheet({
   onShowWork,
   className,
 }: AnswerSheetProps) {
+  const { t } = useTranslation()
   const actions = [
-    { label: 'Save', icon: Bookmark, onClick: onSave },
-    { label: 'Pin', icon: Pin, onClick: onPin },
-    { label: 'Export', icon: FileDown, onClick: onExport },
-    { label: 'Share', icon: Share2, onClick: onShare },
-    { label: 'Show my work', icon: ListTree, onClick: onShowWork },
+    { label: t('ask.actions.save'), icon: Bookmark, onClick: onSave },
+    { label: t('ask.actions.pin'), icon: Pin, onClick: onPin },
+    { label: t('ask.actions.export'), icon: FileDown, onClick: onExport },
+    { label: t('ask.actions.share'), icon: Share2, onClick: onShare },
+    { label: t('ask.work.open'), icon: ListTree, onClick: onShowWork },
   ].filter((a) => a.onClick)
 
   return (
     <article
-      aria-label="Answer"
+      aria-label={t('ask.answer.label')}
       className={cn(
         'max-w-conversation rounded-sheet border border-line bg-surface p-4 tablet:p-6',
         className,
@@ -61,8 +63,8 @@ export function AnswerSheet({
       </p>
 
       {evidence.length > 0 && (
-        <section aria-label="Evidence" className="mt-4">
-          <h3 className="sr-only">Evidence</h3>
+        <section aria-label={t('ask.answer.evidence')} className="mt-4">
+          <h3 className="sr-only">{t('ask.answer.evidence')}</h3>
           <ul className="m-0 list-none p-0">
             {evidence.map((row) => (
               <li
@@ -80,22 +82,26 @@ export function AnswerSheet({
 
       {whyItMatters ? (
         <section className="mt-4">
-          <h3 className="font-sans text-small font-semibold tracking-normal">Why it matters</h3>
+          <h3 className="font-sans text-small font-semibold tracking-normal">
+            {t('ask.answer.whyItMatters')}
+          </h3>
           <div className="mt-1 text-body">{whyItMatters}</div>
         </section>
       ) : null}
 
       {recommendation ? (
         <section className="mt-4">
-          <h3 className="font-sans text-small font-semibold tracking-normal">Recommendation</h3>
+          <h3 className="font-sans text-small font-semibold tracking-normal">
+            {t('ask.answer.recommendation')}
+          </h3>
           <div className="mt-1 text-body">{recommendation}</div>
         </section>
       ) : null}
 
       {dataNotes.length > 0 && (
-        <section aria-label="Data notes" className="mt-4">
+        <section aria-label={t('ask.answer.dataNotes')} className="mt-4">
           <h3 className="font-sans text-small font-semibold tracking-normal text-caution">
-            Data notes
+            {t('ask.answer.dataNotes')}
           </h3>
           <ul className="m-0 mt-1 list-none space-y-1 p-0">
             {dataNotes.map((note) => (
@@ -109,7 +115,7 @@ export function AnswerSheet({
       )}
 
       {nextQuestions.length > 0 && (
-        <section aria-label="Next questions" className="mt-4 flex flex-wrap gap-2">
+        <section aria-label={t('ask.answer.nextQuestions')} className="mt-4 flex flex-wrap gap-2">
           {nextQuestions.map((q) => (
             <button
               key={q}

@@ -429,6 +429,32 @@ describe('A connection', () => {
     expect(api.count('DELETE /connections/c1')).toBe(1)
   })
 
+  it('warns before removal what happens to the business dictionary', async () => {
+    routes({
+      'GET /connections/c1': {
+        status: 200,
+        body: {
+          ...demoOrdersDetail,
+          dictionary_impact: {
+            moves: [{ table: 'shopify_orders', to: 'Orders sheet', metrics: 4 }],
+            orphaned_metrics: ['repeat_rate'],
+            joins: 1,
+          },
+        },
+      },
+    })
+    renderApp('/connections/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    const confirm = await screen.findByRole('dialog', { name: 'Remove UrbanCart orders?' })
+    expect(
+      within(confirm).getByText(
+        'shopify_orders in Orders sheet has the same name and columns, so it takes over 4 metrics.',
+      ),
+    ).toBeVisible()
+    expect(within(confirm).getByText(/The metric repeat_rate would have no table/)).toBeVisible()
+    expect(within(confirm).getByText('1 join between tables goes with it.')).toBeVisible()
+  })
+
   it('offers to reconnect Google when the sign-in stopped working', async () => {
     routes({
       'GET /connections/c3': {

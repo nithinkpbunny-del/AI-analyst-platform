@@ -453,6 +453,69 @@ class TestVersionsAndChanges:
         assert {"kind": "dataset_removed", "dataset": "customers", "columns": 2} in draft["diff"]
         assert "customers" in state(client, world)["active"]["content"]["datasets"]
 
+    def test_removing_the_first_of_two_same_named_tables_moves_its_metrics(
+        self, client: TestClient, world: World, llm_factory: FakeLLMFactory
+    ) -> None:
+        """The M7 bug (D64): the second source's ``orders`` got a prefixed key; removing the first source must not
+        leave metrics pointing at a table that no longer exists."""
+        llm_factory.next_script = [answer()]
+        first = put_file(client, world, "orders.csv", orders_csv())
+        acknowledge(client, world)
+        assert client.post("/dictionary/draft/confirm", headers=owner(world)).status_code == 200
+        second = put_file(client, world, "orders.csv", orders_csv(30))
+        content = draft_of(client, world)["content"]
+        prefixed = [k for k, e in content["datasets"].items() if e["connection_id"] == second["id"]]
+        assert prefixed and prefixed[0] != "orders"
+        acknowledge(client, world)
+        assert client.post("/dictionary/draft/confirm", headers=owner(world)).status_code == 200
+        # The warning before removal says where the metrics go.
+        detail = client.get(f"/connections/{first['id']}", headers=owner(world)).json()
+        impact = detail["dictionary_impact"]
+        assert impact["moves"] == [
+            {"table": "orders", "to": second["name"], "metrics": impact["moves"][0]["metrics"]}
+        ]
+        assert impact["moves"][0]["metrics"] >= 3 and impact["orphaned_metrics"] == []
+        assert client.delete(f"/connections/{first['id']}", headers=owner(world)).status_code == 204
+        draft = draft_of(client, world)
+        content = draft["content"]
+        assert list(content["datasets"]) == ["orders"]
+        assert content["datasets"]["orders"]["connection_id"] == second["id"]
+        assert content["datasets"]["orders"]["meaning"] == "One row per customer order"
+        metrics = content["metrics"]
+        assert all(m["dataset"] in (None, "orders") for m in metrics.values())
+        assert metrics["revenue"]["dataset"] == "orders" and metrics["revenue"]["valid"] is True
+        assert all(m["valid"] is True for m in metrics.values())
+        assert any(d["kind"] == "metrics_moved" for d in draft["diff"])
+        assert client.post("/dictionary/draft/confirm", headers=owner(world)).status_code == 200
+
+    def test_removing_the_only_table_of_a_metric_flags_it(
+        self, client: TestClient, world: World, llm_factory: FakeLLMFactory
+    ) -> None:
+        llm_factory.next_script = [answer()]
+        put_file(client, world, "orders.csv", orders_csv())
+        other = put_file(client, world, "customers.csv", CUSTOMERS)
+        acknowledge(client, world)
+        assert client.post("/dictionary/draft/confirm", headers=owner(world)).status_code == 200
+        orders_id = next(
+            c["id"]
+            for c in client.get("/connections", headers=owner(world)).json()["connections"]
+            if c["id"] != other["id"]
+        )
+        impact = client.get(f"/connections/{orders_id}", headers=owner(world)).json()[
+            "dictionary_impact"
+        ]
+        assert impact["moves"] == [] and "revenue" in impact["orphaned_metrics"]
+        client.delete(f"/connections/{orders_id}", headers=owner(world))
+        draft = draft_of(client, world)
+        metrics = draft["content"]["metrics"]
+        assert "orders_count" not in metrics  # automatic metrics of the gone table go
+        assert metrics["revenue"]["needs_review"] is True
+        assert draft["content"]["relationships"] == []
+        kinds = {d["kind"] for d in draft["diff"]}
+        assert {"metric_orphaned", "join_removed", "dataset_removed"} <= kinds
+        # It cannot be confirmed while a metric points at nothing.
+        assert client.post("/dictionary/draft/confirm", headers=owner(world)).status_code == 409
+
     def test_discarding_the_draft_keeps_the_confirmed_dictionary(
         self, client: TestClient, world: World
     ) -> None:

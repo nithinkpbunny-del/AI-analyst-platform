@@ -39,6 +39,8 @@ export function changeText(t: TFunction, item: DictionaryDiffItem): string {
     from: item.from ?? '',
     to: item.to ?? '',
     meaning: item.meaning ?? '',
+    metric: item.metric ?? '',
+    metrics: (item.metrics ?? []).join(', '),
   })
 }
 

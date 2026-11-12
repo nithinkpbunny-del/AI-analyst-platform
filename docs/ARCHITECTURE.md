@@ -138,3 +138,25 @@ answers (M8) ──▶ dictionary.service.active(): newest confirmed, else the d
 ```
 Code: `app/dictionary/` (`profiler`, `draft`, `ai`, `links`, `validate`, `units`, `replace`, `edits`, `service`),
 API `app/api/dictionary.py`, web `frontend/src/features/dictionary/`. Decisions D59-D63.
+
+## The agent and the Ask screen (M8)
+```
+POST /conversations ── rate limit, monthly limit, key exists ── store question + empty answer (queued)
+        │                                                                   │
+        └── queue answer_question (Celery) ─────────────────────────────────┘
+worker: AccessContext (who may see what) → visible dictionary → keys.resolve (Managed/BYOK)
+        → per-question DuckDB workspace (copies only, no file/network access)
+        → loop: model call ⇄ tools (list_sources, describe/fetch_dataset, run_sql, kpi_summary, trend,
+                driver_analysis, detect_anomalies, forecast, segment_customers, marketing_efficiency,
+                finance_summary, make_chart) — each result gets r1, r2 … with provenance
+        → give_answer → number check (one repair turn) → ₹ impact rule → code data notes
+        → store answer, tool trace, provenance, quality warnings, usage; audit question.asked (hash only)
+web:    polls GET /conversations/{id} every second; ProgressSteps while running; AnswerSheet when done
+```
+- `app/agent/`: `access.py` (what the person may see), `tools.py`, `loop.py` (steps, budgets, repair, restart),
+  `provenance.py` (result ids, number check), `answer.py` (answer shape, ₹ impact), `prompts.py` + `prompts/`
+  (system prompt, lenses) + `playbooks/`, `service.py` (the job).
+- `app/analytics/`: kpis, drivers, anomalies, forecast, rfm, cohorts, marketing, finance; all exact code over the
+  workspace (P4), unit-tested against the planted findings of the demo data.
+- `app/data/workspace.py` (DuckDB per question) and `app/security/sql_guard.py` (sqlglot, SELECT only).
+- Decisions: D65-D70.

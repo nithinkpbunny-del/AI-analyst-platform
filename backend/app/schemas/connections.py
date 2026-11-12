@@ -103,9 +103,24 @@ class ConnectionOut(BaseModel):
     google: GoogleOut | None = None
 
 
+class DictionaryMoveOut(BaseModel):
+    table: str
+    to: str  # the connection whose same-named table takes the metrics over
+    metrics: int
+
+
+class DictionaryImpactOut(BaseModel):
+    """What removing this connection does to the business dictionary (warning before removal, D64)."""
+
+    moves: list[DictionaryMoveOut]
+    orphaned_metrics: list[str]
+    joins: int
+
+
 class ConnectionDetailOut(ConnectionOut):
     datasets: list[DatasetOut]
     versions: list[FileVersionOut]
+    dictionary_impact: DictionaryImpactOut | None = None
 
 
 class GoogleSourceOut(BaseModel):

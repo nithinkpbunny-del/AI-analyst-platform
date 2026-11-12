@@ -34,6 +34,9 @@ dependencies = [
     "defusedxml>=0.7.1",
     "duckdb>=2.0.0",
     "pyyaml>=6",
+    "statsmodels>=0.14",
+    "scipy>=1.13",
+    "sqlglot>=26",
 ]
 
 [dependency-groups]
@@ -99,6 +102,11 @@ module = ["app.tasks.*"]
 disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
+# statsmodels and scipy ship no type information.
+module = ["statsmodels.*", "scipy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # pandas/numpy-heavy scripts: the stubs return Any in many places; the code is checked by its tests instead.
-module = ["generate_fixtures", "answer_key", "app.connectors.tabular", "app.data.quality"]
+module = ["generate_fixtures", "answer_key", "app.connectors.tabular", "app.data.quality", "app.analytics.*"]
 warn_return_any = false

@@ -11,7 +11,7 @@ import yaml
 
 from app.dictionary import ai, links, replace, validate
 from app.dictionary.draft import DatasetInput, build, dataset_keys
-from app.dictionary.model import Dictionary, Metric, parse, slug, to_yaml
+from app.dictionary.model import Dictionary, Metric, Relationship, parse, slug, to_yaml
 from app.dictionary.profiler import profile_frame
 from app.dictionary.units import to_units
 from tests.unit.test_dictionary_profiler import infos
@@ -144,6 +144,109 @@ class TestDraftInCode:
         first.datasets["orders"].columns["total_refunds"].source = "owner"
         third = build(inputs, first, company_name="X")
         assert third.dictionary.datasets["orders"].columns["total_refunds"].unit is None
+
+
+class TestSameNamedTables:
+    """Two sources with a table of the same name; the first one is removed (D64, the M7 bug)."""
+
+    def two_sources(self) -> Dictionary:
+        first = build(
+            [item("d1", "orders", ORDERS, "c1"), item("d2", "customers", CUSTOMERS, "c1")],
+            None,
+            company_name="X",
+        ).dictionary
+        first.metrics["revenue"] = Metric(
+            expr="SUM(total_price) - SUM(total_refunds)", dataset="orders", source="owner"
+        )
+        first.datasets["orders"].columns["total_price"].meaning = "Order value incl. tax"
+        first.datasets["orders"].columns["total_price"].source = "owner"
+        first.relationships.append(
+            Relationship(left="orders.customer_id", right="customers.id", match_rate=1.0)
+        )
+        sheet = item("d3", "orders", ORDERS, "c2")
+        both = build(
+            [item("d1", "orders", ORDERS, "c1"), item("d2", "customers", CUSTOMERS, "c1"), sheet],
+            first,
+            company_name="X",
+        ).dictionary
+        assert both.datasets["orders_file_orders"].dataset_id == "d3"  # the second got a prefix
+        return both
+
+    def test_the_remaining_table_takes_over_the_metrics_under_the_plain_name(self) -> None:
+        both = self.two_sources()
+        over = replace.take_over_orphans(both, live={"d2", "d3"})
+        rest = [item("d2", "customers", CUSTOMERS, "c1"), item("d3", "orders", ORDERS, "c2")]
+        built = build(rest, over.dictionary, company_name="X")
+        dictionary = built.dictionary
+        assert set(dictionary.datasets) == {"orders", "customers"}
+        assert dictionary.datasets["orders"].dataset_id == "d3"
+        assert dictionary.metrics["revenue"].dataset == "orders"
+        counts = [k for k, m in dictionary.metrics.items() if m.expr == "COUNT(*)"]
+        assert sorted(counts) == ["customers_count", "orders_count"]  # no second COUNT(*) of orders
+        assert all(m.dataset in dictionary.datasets for m in dictionary.metrics.values())
+        assert [(r.left, r.right) for r in dictionary.relationships] == [
+            ("orders.customer_id", "customers.id")
+        ]
+        # What the Owner wrote about the removed table is kept on the remaining one.
+        price = dictionary.datasets["orders"].columns["total_price"]
+        assert price.meaning == "Order value incl. tax"
+        assert over.moves == [
+            {
+                "kind": "metrics_moved",
+                "dataset": "orders",
+                "from": "orders file",
+                "to": "orders file",
+                "metrics": ["orders_count", "revenue", "sum_total_price", "sum_total_refunds"],
+            }
+        ]
+        samples = {"orders": to_units(ORDERS, dictionary.datasets["orders"])}
+        samples["customers"] = CUSTOMERS
+        validate.check_metrics(dictionary, samples)
+        assert all(m.valid for m in dictionary.metrics.values())
+        assert dictionary.review_items() == 0
+
+    def test_a_table_with_other_columns_is_not_taken_for_the_same_table(self) -> None:
+        both = self.two_sources()
+        both.datasets["orders_file_orders"].columns = {
+            k: v for k, v in both.datasets["orders_file_orders"].columns.items() if k == "id"
+        }
+        over = replace.take_over_orphans(both, live={"d2", "d3"})
+        assert over.moves == [] and "orders" in over.dictionary.datasets
+
+    def test_with_no_partner_nothing_points_at_the_gone_table(self) -> None:
+        both = self.two_sources()
+        rest = [item("d2", "customers", CUSTOMERS, "c1")]
+        built = build(rest, both, company_name="X")
+        dictionary = built.dictionary
+        assert set(dictionary.datasets) == {"customers"}
+        # Automatic metrics of the gone tables go; the Owner's metric stays and waits for the Owner.
+        assert set(dictionary.metrics) == {"customers_count", "revenue"}
+        assert dictionary.metrics["revenue"].needs_review is True
+        assert dictionary.relationships == []
+        assert {"kind": "metric_orphaned", "metric": "revenue", "dataset": "orders"} in built.diff
+        assert {
+            "kind": "join_removed",
+            "dataset": "orders",
+            "from": "orders.customer_id",
+            "to": "customers.id",
+        } in built.diff
+        assert all(
+            j.partition(".")[0] in dictionary.datasets
+            for e in dictionary.datasets.values()
+            for c in e.columns.values()
+            for j in c.joins
+        )
+
+    def test_the_warning_before_removal(self) -> None:
+        both = self.two_sources()
+        impact = replace.removal_impact(both, "c1")
+        assert impact == {
+            "moves": [{"table": "orders", "to": "orders file", "metrics": 4}],
+            "orphaned_metrics": [],
+            "joins": 1,  # orders -> customers goes with the customers table
+        }
+        only = replace.removal_impact(both, "c2")
+        assert only == {"moves": [], "orphaned_metrics": [], "joins": 0}
 
 
 class TestJoins:

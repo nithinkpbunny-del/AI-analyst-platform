@@ -29,7 +29,15 @@ from app.dictionary import service as dictionary_service
 from app.llm import keys, usage
 from app.llm.base import Usage
 from app.llm.fake import FakeLLMFactory
-from app.models import AuditLog, Dataset, FileVersion, Invitation, Membership
+from app.models import (
+    AuditLog,
+    Conversation,
+    Dataset,
+    FileVersion,
+    Invitation,
+    Membership,
+    SavedQuestion,
+)
 from app.security.secrets import SecretStore, key_wrapper
 from tests.conftest import FakeClock
 from tests.datasources import csv_bytes, make_file_connection, make_sheets_connection
@@ -84,6 +92,18 @@ SELF = {
     ("POST", "/auth/sessions/revoke-others"),
     ("DELETE", "/auth/sessions/{session_id}"),
     ("POST", "/invitations/accept-signed-in"),
+}
+
+# A person's own conversations and saved questions by id (M8): someone else's in the same workspace is 404 too, so
+# one id cannot serve every role here. Tested in test_chat.py (TestPersonalRoutes): 401, 403 for Viewers, 404 for
+# another person's and another workspace's ids, 422 for malformed ids, success for one's own.
+PERSONAL = {
+    ("GET", "/conversations/{conversation_id}"),
+    ("PATCH", "/conversations/{conversation_id}"),
+    ("DELETE", "/conversations/{conversation_id}"),
+    ("POST", "/conversations/{conversation_id}/messages"),
+    ("GET", "/conversations/{conversation_id}/messages/{message_id}"),
+    ("DELETE", "/saved-questions/{question_id}"),
 }
 
 
@@ -320,6 +340,26 @@ CASES: dict[tuple[str, str], Case] = {
         },
         invalid_body={"from_connection_id": "not-a-uuid"},
     ),
+    ("GET", "/conversations"): Case("GET", "/conversations", P.ASK, 200, check_leak=True),
+    ("POST", "/conversations"): Case(
+        "POST",
+        "/conversations",
+        P.ASK,
+        201,
+        body={"question": "How did sales do last month?"},
+        invalid_body={"question": ""},
+    ),
+    ("GET", "/saved-questions"): Case(
+        "GET", "/saved-questions", P.SAVED_QUESTIONS, 200, check_leak=True
+    ),
+    ("POST", "/saved-questions"): Case(
+        "POST",
+        "/saved-questions",
+        P.SAVED_QUESTIONS,
+        201,
+        body={"text": "Why did South fall?"},
+        invalid_body={"text": ""},
+    ),
     ("POST", "/connections/google/start"): Case(
         "POST",
         "/connections/google/start",
@@ -357,11 +397,11 @@ def _api_routes(client: TestClient) -> set[tuple[str, str]]:
 
 def test_every_route_is_classified(client: TestClient) -> None:
     routes = _api_routes(client)
-    unclassified = routes - PUBLIC - SELF - set(CASES)
+    unclassified = routes - PUBLIC - SELF - PERSONAL - set(CASES)
     assert unclassified == set(), (
         "New routes need tests: add them to PUBLIC, SELF or CASES in tests/api/test_route_matrix.py"
     )
-    assert (PUBLIC | SELF | set(CASES)) - routes == set(), "stale entries"
+    assert (PUBLIC | SELF | PERSONAL | set(CASES)) - routes == set(), "stale entries"
 
 
 @pytest.fixture
@@ -413,6 +453,16 @@ def ids(
         key_source="managed",
         at=clock.now,
     )
+    # Org A has a conversation and a saved question, so the leak checks have something to find.
+    conversation = Conversation(
+        org_id=world.org_a.id,
+        user_id=world.owner_a.id,
+        title="UrbanCart Diwali plan",
+        lens="business",
+        last_message_at=clock.now,
+    )
+    db.add(conversation)
+    db.add(SavedQuestion(org_id=world.org_a.id, user_id=world.owner_a.id, text="UrbanCart Diwali?"))
     db.commit()
 
     def membership(user_id: Any) -> str:

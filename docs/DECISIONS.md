@@ -824,3 +824,128 @@ a missing one.
 - All user-visible text is in `locales/en.ts` (D41). Metric errors, review reasons, evidence and AI notes are codes
   from the API, written as sentences by the web app.
 - The Dictionary screen is in the menu for Owners and Analysts (`connections.view`).
+
+### D64. Two sources with a table of the same name (M7 bug, fixed at the start of M8)
+- **Problem:** the second source's table gets a prefixed key (`draft.dataset_keys`). Removing the first source
+  dropped its table from the draft, but metrics and joins kept pointing at it.
+- **Take-over:** when drafting finds a table whose source is gone and another source still has a table of the same
+  name with (nearly) the same columns (`replace.SAME_TABLE_SCORE`, 0.8), the remaining table takes over the removed
+  table's metrics and joins (columns renamed where they match) under the plain key (`orders`, not
+  `orders_csv_orders`). Of two identical automatic metrics (two `COUNT(*)`), the shorter name stays. The Owner's or
+  AI's descriptions of the removed table's columns are kept where the remaining table has only the code draft's;
+  units and roles follow the remaining table's data. The draft's diff lists it (`metrics_moved`).
+- **No partner:** the gone table's automatic metrics and its joins are removed (`join_removed` in the diff); metrics
+  the Owner or the AI wrote stay, flagged (`metric_orphaned`), and the draft cannot be confirmed until they point at
+  another table or are removed. Nothing in a draft points at a table that no longer exists.
+- **Warning before removal:** `GET /connections/{id}` returns `dictionary_impact` (which tables take over how many
+  metrics, which metrics would have no table, how many joins go); the Remove dialog shows it.
+- The confirmed version is never changed (D60). Until the Owner confirms the new draft, the agent (M8) treats a
+  metric whose table is gone or hidden as unavailable and says so in the data notes.
+
+### D65. How a question runs (M8)
+- **Background job, polled progress.** `POST /conversations` (or `/conversations/{id}/messages`) stores the question
+  and an empty answer (`queued`), then queues `app.tasks.jobs.answer_question` (Celery). The worker writes progress
+  steps (`progress_json`, codes such as `fetching` with the table and connection) as it goes; the Ask screen polls
+  the conversation every second until the answer is `done` or `failed`. Server-sent events were not used: the
+  access token lives in memory and `EventSource` cannot send it, and polling one small row is cheap.
+- **Before anything is queued:** the per-person rate limit (`QUESTIONS_PER_USER_PER_MINUTE`, 10), the Managed
+  monthly limit and whether a key exists (`keys.check_available`, no client is built, nothing is sent). AI not
+  available answers 409 like the AI settings do.
+- **Short transactions.** No database transaction is open while the model or a source works; each step (progress,
+  usage row, final answer) has its own short session.
+- **A job that died** (worker restart) would leave an answer `running`: after 30 minutes (longer than the job's
+  25-minute time limit) reading it reports `failed` / `timeout`.
+- **Reusing an answer:** an identical *first* question (same person, lens, dictionary version; spaces and case
+  ignored) within `CACHE_TTL_SECONDS` gets the answer just given, marked "reused": no AI call and nothing counted.
+  The data is inside its own reuse window anyway (R1). Follow-ups are never reused.
+- **Follow-ups** see the last 8 turns as plain text (questions and the answers' lead and evidence). Earlier tool
+  calls are not replayed: a new question fetches fresh data.
+
+### D66. The analytics library (M8, BUILD_SPEC 10)
+- Every function works on the DuckDB workspace through SQL built from dictionary names (each checked, then quoted)
+  with values as parameters; the workspace checks each statement with the SQL guard too.
+- **Dimensions of joined tables** (`customers.region` for orders) use the dictionary's joins; the joined side is
+  reduced to one row per key first, so a join can never multiply the metric's rows.
+- **New vs repeat customers:** a customer is *new* in a period when their first row in the whole table falls in
+  it. The customer column is a key named like a customer, or one joined to a customers table.
+- **Mix vs rate:** for metrics that add up (only `SUM`/`COUNT` terms), each value's change is split into a volume
+  effect (rows) and a rate effect (per row); they add up to the change exactly.
+- **Anomalies:** same weekday over the previous 8 weeks, median and MAD, z >= 3 and >= 10% (and >= ₹10,000 for
+  money). The MAD never goes below 0.8 x the natural noise of a total of rows (sqrt of the count; for money
+  sqrt(2 x count x value per row)). Without the floor, quiet series of small counts flagged ordinary days (22 flags
+  in August 2026 of the demo data); with 0.8 exactly the planted App outage of 2026-08-15 is flagged that month,
+  and the missing Website week shows as seven zero days.
+- **Forecast:** Holt-Winters with two full seasons, else trend x seasonal index, else a straight line; the 80%
+  range is never narrower than the backtest error (an index fitted on one season fits itself too well).
+- **Marketing and budget tables** are found by column names (spend, impressions, clicks, conversions, revenue,
+  channel, campaign; budget and actual in rupees). P&L and receivables need accounting data (Zoho Books, Tally);
+  until then `finance_summary` says so.
+
+### D67. The answer and the number check (M8, BUILD_SPEC 7.4, 7.7, R9)
+- The model answers through a `give_answer` tool (lead, key figure, evidence, why it matters, recommendation with
+  `impact_inr`/`basis_inr`, data notes, next questions, charts, confidence): one structured call that works the
+  same on Gemini and Claude. A plain-text reply is asked once for the structure, then used as it is.
+- **Citations:** every figure is followed by its result id, `₹28.0 L [r3]`; a citation up to a few words later
+  ("30 orders [r1]") belongs to the figure. A figure without a citation that matches some result gets that
+  result's citation added.
+- **Matching:** within half a unit of the precision it is written with (₹12.4 L matches ₹12,35,000 to
+  ₹12,45,000), lakh/crore/thousand, `%` against both 17.7 and 0.177, "x" ratios, the sign ignored ("fell 17.7%" vs
+  -17.7). Dates, years (1900-2100 without a unit), quarters, times, ids (`#1004`, `r12`) and counts up to 12
+  ("top 3") are not figures.
+- **Repair:** unsupported figures go back to the model once as the `give_answer` call's error, with the list;
+  what is still unsupported after that is removed sentence by sentence (a removed lead is replaced by the first
+  remaining evidence bullet) and a data note says so.
+- **₹ impact (R9):** a recommendation stays when the question asks for advice (recommend, should we, how can I,
+  improve, reduce, ...), or when its `impact_inr` matches a result and is material: >= the workspace's
+  `impact_threshold_inr` (₹1 lakh) or >= `impact_threshold_pct` (5%) of `basis_inr`. Otherwise it is removed with a
+  note.
+- **Data notes from code** are codes (the web app writes the sentence, D41): dictionary not confirmed, metrics
+  whose table was removed (D64), periods past the data, partial buckets, attribution limits, figures removed, a
+  restart. Quality warnings of the tables used come with the answer and show as QualityBanners.
+
+### D68. Limits (M8, BUILD_SPEC 6.5)
+- A step is one model call. The last allowed call (`AGENT_MAX_STEPS`, 12) offers only `give_answer` and asks for the
+  answer with what was found, so a long question still ends with an answer and says what it could not check.
+- `TOKEN_BUDGET_PER_QUESTION` (150k input tokens, summed over the calls): when spent, the question stops with
+  `limit:tokens` and the screen suggests narrowing it.
+- `ROWS_TO_LLM_PER_TOOL_CALL` (200) rows per tool result, with the total row count; numbers are rounded for the
+  model (2 decimals; 4 significant digits below 1). `SOURCE_QUERY_TIMEOUT_SECONDS` (30) interrupts a workspace
+  query.
+- `LLM_MAX_OUTPUT_TOKENS` stays 3,000 (M5 note): the answer is a short tool call; a cut-off reply is asked once to
+  answer briefly.
+- **Model fallback mid-question** (M5 note): when the provider layer has moved to another model and the call fails
+  with an `other` error, the question starts again once from the plain question on the new model; results already
+  computed stay citable. Quota, invalid key and other kinds end the question with their kind (`llm:quota`, ...)
+  and are never retried by the agent (the M5 layer already retried 429/503).
+
+### D69. What the agent may see (M8, P3, P6, BUILD_SPEC 6.2)
+- `AccessContext` is built from the database for the asking person (the job has no request), with the
+  Connections screen's rules (D50); paused connections are left out.
+- `visible_dictionary` removes tables of connections the person may not see and every metric and join on them.
+  Metrics whose table was **removed** are named in a data note; metrics of **hidden** tables are dropped without a
+  word (their names are not the person's to know).
+- Tools work on that dictionary only: `run_sql` accepts only its table keys, other tools resolve names through
+  it, so a hidden table cannot be reached by any tool.
+- The prompt holds the dictionary summary (tables, columns with role and unit, owner-written meanings, metrics,
+  joins), never sample values. `describe_dataset` gives the model three sample rows with personal columns (by the
+  profiler's flag) shown as "(hidden)".
+- `query_source` (push-down SQL to a customer database) is not offered until the database connector (M14).
+- The activity log gets `question.asked` with a SHA-256 of the question, the lens, the tables read and whether the
+  answer was reused: never the question text or the answer.
+
+### D70. Ask screen (M8)
+- `/ask` (new question: lens, starters, saved questions) and `/ask/{id}` (the conversation). History is per person;
+  someone else's conversation or saved question answers 404 (route matrix: `PERSONAL`, tested in `test_chat.py`).
+- Viewers have no `ask` permission: the Ask screen tells them so (the menu keeps its shape for every role).
+- Answers: the lead with the haldi mark on the key figure, numbered SourceMarks for citations, evidence rows,
+  charts, data notes, next questions, "Save question" on the question and "Show my work" (steps with time, rows,
+  errors and SQL; sources with fetch times) as a drawer, a bottom sheet on phones.
+- Charts: the API sends a small neutral spec (type, title, categories, series, unit); `ChartCanvas` turns it into
+  ECharts options themed from the tokens (series colours in fixed order, dashed/dotted lines so colour is never
+  alone, no animation under reduced motion). ECharts is used directly (`echarts/core`, line and bar only, SVG
+  renderer): the `echarts-for-react` wrapper broke in the production build (its CommonJS default export arrived as
+  an object). It is a lazily loaded chunk (170 KB gzipped), outside the shell's 200 KB budget, and a chart that
+  cannot be drawn never takes the answer down (error boundary).
+- Pin, Export and Share are not on the answer yet (M10, M15). The command palette (Ctrl/Cmd+K) is not built yet.
+- Multilingual answers stay deferred (D41): the prompt asks for English; all text is in `locales/en.ts`. The
+  existing `AnswerSheet` labels moved there too.

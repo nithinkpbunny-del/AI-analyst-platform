@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router'
 import { ActivityPage } from '../features/activity/ActivityPage'
+import { AskPage } from '../features/ask/AskPage'
 import { AcceptInvitePage } from '../features/auth/AcceptInvitePage'
 import { AuthLayout } from '../features/auth/AuthLayout'
 import {
@@ -25,7 +26,7 @@ import { adminNav, mainNav } from './nav'
 import { RedirectIfSignedIn, RequireAuth } from './RequireAuth'
 
 export function AppRoutes() {
-  const built = new Set(['settings', 'team', 'activity', 'connections', 'dictionary'])
+  const built = new Set(['settings', 'team', 'activity', 'connections', 'dictionary', 'ask'])
   const placeholders = [...mainNav, ...adminNav].filter((item) => !built.has(item.key))
   return (
     <Routes>
@@ -56,6 +57,8 @@ export function AppRoutes() {
           {placeholders.map((item) => (
             <Route key={item.key} path={item.path} element={<PlaceholderPage item={item} />} />
           ))}
+          <Route path="/ask" element={<AskPage />} />
+          <Route path="/ask/:conversationId" element={<AskPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/activity" element={<ActivityPage />} />

@@ -116,6 +116,18 @@ def resolve(
     return ResolvedLLM(factory(provider, api_key), provider, "managed")
 
 
+def check_available(db: DbSession, org: Organization, *, settings: Settings, now: datetime) -> None:
+    """Before a question is queued: the monthly limit (Managed) and that a key exists, without building a client
+    or calling a provider. Raises ``UsageLimitReached`` or ``AiUnavailable``."""
+    if org.plan == "byok":
+        if own_key(db, org.id) is None:
+            raise AiUnavailable("ai_key_missing")
+        return
+    ensure_within_limit(db, org, now)
+    if not platform_key(settings):
+        raise AiUnavailable("ai_not_configured")
+
+
 def check_key(factory: LLMFactory, provider: str, api_key: str, preferred: str | None) -> str:
     """Ask the provider for the key's models; return the model we would use. Raises ``LLMError``."""
     client = factory(provider, api_key)

@@ -14,6 +14,7 @@ import { useSession } from '../../lib/authContext'
 import { cn } from '../../lib/cn'
 import {
   connectionsApi,
+  type DictionaryImpact,
   isSyncing,
   uploadFile,
   type ConnectionDetail,
@@ -847,7 +848,9 @@ export function ConnectionDetailPage() {
         confirmLabel={t('connections.detail.removeConfirm', { name: connection.name })}
         busy={remove.isPending}
         onConfirm={() => remove.mutate()}
-      />
+      >
+        <RemoveImpact impact={connection.dictionary_impact} />
+      </ConfirmDialog>
       <ConfirmDialog
         open={discarding !== null}
         onOpenChange={(open) => !open && setDiscarding(null)}
@@ -861,5 +864,39 @@ export function ConnectionDetailPage() {
       />
       {picker.element}
     </>
+  )
+}
+
+/** The warning before removal: what happens to the business dictionary's metrics and joins (D64). */
+function RemoveImpact({ impact }: { impact: DictionaryImpact | null | undefined }) {
+  const { t } = useTranslation()
+  if (!impact) return null
+  const orphaned = impact.orphaned_metrics
+  return (
+    <div className="mt-3 border-t border-line pt-3 text-small">
+      <h3 className="m-0 text-small font-medium">{t('connections.detail.removeDictionary')}</h3>
+      <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0 text-ink-muted">
+        {impact.moves.map((move) => (
+          <li key={`${move.table}-${move.to}`}>
+            {t('connections.detail.removeMoves', {
+              table: move.table,
+              to: move.to,
+              count: move.metrics,
+            })}
+          </li>
+        ))}
+        {orphaned.length > 0 ? (
+          <li className="text-caution">
+            {t('connections.detail.removeOrphaned', {
+              count: orphaned.length,
+              names: orphaned.join(', '),
+            })}
+          </li>
+        ) : null}
+        {impact.joins > 0 ? (
+          <li>{t('connections.detail.removeJoins', { count: impact.joins })}</li>
+        ) : null}
+      </ul>
+    </div>
   )
 }

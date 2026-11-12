@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.agent import service as agent_service
 from app.connectors import service
 from app.connectors.registry import ConnectorRuntime
 from app.dictionary import service as dictionary_service
@@ -22,6 +23,7 @@ from app.llm.base import LLMFactory
 
 SYNC_CONNECTION = "app.tasks.jobs.sync_connection"
 DRAFT_DICTIONARY = "app.tasks.jobs.draft_dictionary"
+ANSWER_QUESTION = "app.tasks.jobs.answer_question"
 
 
 class JobQueue(Protocol):
@@ -46,6 +48,19 @@ class JobQueue(Protocol):
         """Draft or update the workspace's business dictionary (the caller reserved the slot with
         ``dictionary.service.mark_queued``)."""
         ...
+
+    def answer_question(self, asked: agent_service.Asked) -> None:
+        """Answer a question the API stored as a ``queued`` message (M8)."""
+        ...
+
+
+def _answer_kwargs(asked: agent_service.Asked) -> dict[str, Any]:
+    return {
+        "org_id": str(asked.org_id),
+        "message_id": str(asked.message_id),
+        "ip": asked.ip,
+        "user_agent": asked.user_agent,
+    }
 
 
 def _draft_kwargs(
@@ -106,6 +121,11 @@ class CeleryJobQueue:
             DRAFT_DICTIONARY, kwargs=_draft_kwargs(org_id, user_id, force, fresh_ai)
         )
 
+    def answer_question(self, asked: agent_service.Asked) -> None:
+        from app.tasks.celery_app import celery_app
+
+        celery_app.send_task(ANSWER_QUESTION, kwargs=_answer_kwargs(asked))
+
 
 class InlineJobQueue:
     """Runs jobs at once, in this process. Like the worker, a finished sync leads to a dictionary update."""
@@ -154,6 +174,11 @@ class InlineJobQueue:
             fresh_ai=fresh_ai,
         )
 
+    def answer_question(self, asked: agent_service.Asked) -> None:
+        if self._llm_factory is None:
+            return
+        agent_service.answer_question(self._runtime, self._llm_factory, asked)
+
 
 @dataclass
 class RecordingJobQueue:
@@ -184,3 +209,6 @@ class RecordingJobQueue:
         fresh_ai: bool = False,
     ) -> None:
         self.jobs.append((DRAFT_DICTIONARY, _draft_kwargs(org_id, user_id, force, fresh_ai)))
+
+    def answer_question(self, asked: agent_service.Asked) -> None:
+        self.jobs.append((ANSWER_QUESTION, _answer_kwargs(asked)))

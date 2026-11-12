@@ -45,6 +45,12 @@ for (const screen of screens) {
         await expect(page.getByText('We looked at 2 tables and 7 columns.')).toBeVisible()
         await expect(page.getByText('Not confirmed yet')).toBeVisible()
       }
+      if (screen === 'ask') {
+        await expect(page.getByRole('radio', { name: 'Business' })).toBeChecked()
+        await expect(
+          page.getByRole('button', { name: /^Were there any unusual days/ }),
+        ).toBeVisible()
+      }
       if (screen === 'activity') {
         await expect(page.getByText('Turned on two-step verification')).toBeVisible()
       }
@@ -60,6 +66,32 @@ for (const screen of screens) {
     })
   })
 }
+
+// M8: a finished answer with its chart, sources and notes, and the "Show my work" drawer.
+test.describe('ask: an answer', () => {
+  test('matches the baseline', async ({ page }) => {
+    await open(page, '/ask/conv1')
+    await expect(page.getByRole('article', { name: 'Answer' })).toBeVisible()
+    await expect(page.getByRole('figure').locator('svg')).toBeVisible()
+    await expect(page).toHaveScreenshot('ask-answer.png', { fullPage: true })
+  })
+
+  test('has no accessibility violations', async ({ page }) => {
+    await open(page, '/ask/conv1')
+    await page.getByRole('figure').locator('svg').waitFor()
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze()
+    expect(results.violations.map((v) => `${v.id}: ${v.help} (${v.nodes.length})`)).toEqual([])
+  })
+
+  test('"Show my work" drawer', async ({ page }) => {
+    await open(page, '/ask/conv1')
+    await page.getByRole('button', { name: 'Show my work' }).click()
+    await expect(page.getByRole('dialog', { name: 'How this answer was made' })).toBeVisible()
+    await expect(page).toHaveScreenshot('ask-work.png')
+  })
+})
 
 test('the "More" sheet on phones', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('mobile'), 'phones only')

@@ -1,16 +1,19 @@
-**Next milestone: M8: Agent core + Ask UI** (start when the human says "continue").
-**Unfinished work:** none for M7. Carry into M8 and later:
-- Read every table through `dictionary.units.to_units` (Razorpay paise -> rupees) and take the dictionary from
-  `dictionary.service.active(db, org_id)`; while `confirmed` is false every answer carries the note
-  `"dictionary not confirmed"` (D60). Metrics are DuckDB expressions over rupee-converted tables (D59, D60).
-- Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants in its migration
-  (`tests/security/test_rls.py`). Every new route must be classified in `tests/api/test_route_matrix.py`
-  (placeholders now include `{dict_version}`).
-- Every LLM call goes through `keys.resolve(...)` and metering (D42, D61). **No real LLM calls during builds or
+**Next milestone: M9: What-if simulator** (start when the human says "continue").
+**Unfinished work:** none for M8. Carry into M9 and later:
+- New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`), get `AccessContext` through `ToolContext`, use
+  only `ctx.dictionary` (the visible one) and `ctx.ensure()` to load tables, and return results through
+  `ctx.store.add(...)` so the number check and provenance see them (D65-D69). `what_if` replaces the M9 note in
+  `app/agent/playbooks/what_if.md`.
+- Every number comes from code: the model cites result ids (`[r3]`), `give_answer` is the only way to answer (D67).
+- Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants; every new route goes in
+  `tests/api/test_route_matrix.py` (`CASES`, or `PERSONAL` for per-person ids, tested in its own file).
+- Every LLM call goes through `keys.resolve(...)` and is metered (D42). **No real LLM calls during builds or
   tests** (CLAUDE.md): fake client only; never run `make llm-check` unless asked by name.
-- Read data only through `DatasetCache` and decide visibility only with `app.connectors.access` (D50, D53).
-**Deferred:** multilingual answers (originally M8) and UI translations (M15); keep text in `locales/en.ts` (D41).
-Email notice of a new dictionary draft comes with briefing emails (M10).
+- Read data only through `DatasetCache`; decide visibility with `app.agent.access` (agent) or
+  `app.connectors.access` (API).
+**Deferred:** multilingual answers and UI translations (D41): answers are in English, all text in `locales/en.ts`.
+Pin/Export/Share on answers (M10, M15), the command palette Ctrl/Cmd+K (not built yet; suggest M10 with Today and
+onboarding). Email notice of a new dictionary draft comes with briefing emails (M10).
 
 ## Milestone checklist (BUILD_SPEC §14)
 
@@ -23,7 +26,7 @@ Email notice of a new dictionary draft comes with briefing emails (M10).
 - [x] M5: Secrets, LLM layer, plans, usage
 - [x] M6: Connections framework + Excel/CSV + Google Sheets
 - [x] M7: Zero setup: profiler + business dictionary
-- [ ] M8: Agent core + Ask UI (multilingual answers deferred, D41)
+- [x] M8: Agent core + Ask UI (multilingual answers deferred, D41)
 - [ ] M9: What-if simulator
 - [ ] M10: Briefings, long tasks, exports, sharing, eval
 - [ ] M10b: Public website (then Phase 1 review, stop)
@@ -566,3 +569,88 @@ its data notes and preview; then "Connect Google Sheets" (stand-in) and choose t
 - Joins cannot be added by hand; analysts cannot suggest edits (`dictionary.suggest` unused).
 - After a replace without removing the old connection, its tables are drafted again as new tables.
 - A removed-then-re-uploaded file is matched to its old table by name and columns (>= 0.8), else it is new.
+
+
+---
+
+## M8: Agent core + Ask UI (done)
+
+**First: the M7 bug (two sources with a table of the same name), D64**
+- Removing the first source no longer leaves metrics pointing at a table that is gone. Its same-named twin in the
+  other source (same name, nearly the same columns) takes over its metrics, joins and the Owner's descriptions,
+  under the plain key (`orders`). With no twin, automatic metrics and joins of the gone table are removed, and
+  metrics people wrote are flagged; the draft cannot be confirmed until they are fixed. The draft's diff says what
+  happened (`metrics_moved`, `metric_orphaned`, `join_removed`).
+- **Warning before removal:** the connection page's Remove dialog says which metrics move and where, which would
+  have no table, and how many joins go (`dictionary_impact` on `GET /connections/{id}`).
+
+**Built**
+- **Database** (migration `0009`, reversible): `conversations`, `messages`, `saved_questions`, each with RLS, the
+  `tenant_isolation` policy and grants.
+- **SQL guard** (`app/security/sql_guard.py`, sqlglot): one SELECT/WITH/UNION only; no writes, `INTO`, locks,
+  file/network/sleep functions, table functions or file paths; only known tables.
+- **DuckDB workspace** per question (`app/data/workspace.py`): copies only, external access off, configuration
+  locked, a time limit per query, at most 200 rows back.
+- **Analytics library** (`app/analytics/`): `kpi_summary`, `trend`, `driver_analysis` (contribution by dimension,
+  volume vs rate, new vs repeat customers, dimensions of joined tables), `detect_anomalies` (same weekday over 8
+  weeks, robust z with a noise floor), `forecast` (Holt-Winters / trend x seasonal index, 80% range, backtest
+  MAPE), `rfm_segments`, `cohort_retention`, `marketing_efficiency`, `budget_variance`, `receivables_ageing`
+  (P&L needs accounting data, M13/M16). D66.
+- **Agent** (`app/agent/`): 13 tools (BUILD_SPEC 7.3 without what-if, goals, growth signals; `query_source` waits
+  for M14), each with `AccessContext`; the three lenses; 10 playbooks chosen by the question's words; the system
+  prompt with the dictionary summary and the rules; provenance for every result; the **number check** (one repair
+  turn, then unsupported figures are removed with a note); the **₹ impact rule**; data notes from code (quality
+  warnings, "dictionary not confirmed", removed metrics, incomplete periods); **limits** (12 steps with a final
+  "answer now" step, 150k input tokens, 200 rows per tool, query timeout); restart once if the provider switches
+  models mid-question. D65-D69.
+- **Background job** `answer_question` (Celery): progress steps as it works, one `usage_events` row per model call
+  (kind `question`), `question.asked` in the activity log (hash + tables, never the text or the answer), a stale
+  answer reported after 30 minutes. An identical first question within the cache window reuses the answer
+  without an AI call.
+- **API**: `GET/POST /conversations`, `GET/PATCH/DELETE /conversations/{id}`, `POST /conversations/{id}/messages`
+  (follow-up; 409 while an answer is running), `GET /conversations/{id}/messages/{message_id}` (polling),
+  `GET/POST /saved-questions`, `DELETE /saved-questions/{id}`. Before queueing: 10 questions per person per minute
+  (429), the Managed monthly limit (429) and an AI key (409). History is per person (others' ids are 404).
+- **Web app** (`/ask`, `/ask/{id}`): lens picker, starter questions, history and saved questions (side column on
+  desktop, a sheet on tablet and phone), live progress steps (polling every second), the answer sheet with the
+  haldi mark on the key figure, numbered source marks with their popovers, evidence, charts (ECharts, loaded
+  lazily), why it matters, recommendation with its ₹ impact, data notes, quality banners, next questions, "Save
+  question", "Show my work" (steps, SQL, sources and fetch times), failed answers with what to do, delete and
+  lens change. Enter asks, Shift+Enter adds a line, `/` focuses the box. Viewers are told their role cannot ask.
+  All text in `locales/en.ts` (the AnswerSheet labels moved there too). Storybook: Screens/Ask and the charts.
+- New dependencies: `statsmodels`, `scipy`, `sqlglot` (backend); `echarts` (web). No new
+  environment variables (the M1 settings for limits are used).
+
+**Test status**
+- **Backend:** 1540 passed (1326 in M7); ruff and mypy (strict) clean. New: SQL guard (accepts and 30 kinds of
+  refusals), workspace walls (no file access, locked settings, timeout, row cap); analytics against the answer key
+  (planted findings 1-5 and 7 with exact numbers: South -17.7% and repeat customers, ROAS by channel, Marketing
+  +22.0%, Operations festive overrun, Fashion discounts / Electronics margin, only the App outage flagged in
+  August, the missing Website week); the agent with the fake LLM (tools, provenance, hidden tables unreachable,
+  repair turn, removal, step and token limits, plain text, model errors, model switch, prompt); the Ask API (flow,
+  progress, metering, audit hash, polling, follow-ups, 409, stale answers, reuse, rate and monthly limits, no AI,
+  failures, per-person history, saved questions, per-person id routes); security (RLS on the new tables, other
+  workspaces' and paused tables invisible, write SQL through the agent leaves stored data unchanged, no rows,
+  personal values or secrets in prompts or logs); route matrix with the new routes; the M7 bug (unit + API).
+- **Frontend:** vitest 297 passed (282 in M7); eslint, prettier, tsc and tokens:check clean. Build OK: shell
+  181.2 KB of 200 KB gzipped (ECharts is a separate 170 KB chunk loaded with the first chart). Storybook builds.
+- **Playwright:** 281 passed (31 skipped by design). The Ask baselines were re-recorded and reviewed (the new-question
+  screen in light/dark × desktop/phone) and new ones added: a finished answer with its chart, sources and notes
+  (`ask-answer`) and the "Show my work" drawer (`ask-work`), each with axe checks; the 375-1536 px no-scroll check
+  now covers an answer. Unrelated baselines that an update run re-rendered with sub-pixel noise were restored and
+  pass against the committed images.
+- **No AI calls were made.** Not run against a real model or `make dev` (that would call Gemini): the prompt,
+  tool use and answer format are tested with the fake client only.
+
+**How to try it:** see the testing steps given at the end of M8.
+
+**Known gaps / notes**
+- **Never run against a real model.** The first real questions may show prompt or tool-use issues the fake client
+  cannot (e.g. how well the model cites `[rN]`). When you are ready, a short live check by name is the next step.
+- Polling, not streaming: progress appears within a second of each step (D65).
+- Pin/Export/Share (M10/M15), the command palette (Ctrl/Cmd+K) and the "health check" first answer after
+  confirming the dictionary (M10 onboarding) are not built.
+- Cross-source joins work through `run_sql` or the dictionary's joins; a dimension of a joined table needs a join
+  in the dictionary.
+- The anomaly noise floor (0.8) was tuned on the demo data (D66); real data may need a per-workspace setting.
+- The shell grew to 181.2 KB of the 200 KB budget (171.3 KB in M7); later screens may need lazy loading.

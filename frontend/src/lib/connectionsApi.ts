@@ -92,9 +92,19 @@ export interface Connection {
   google: { account_email: string | null; spreadsheets: Spreadsheet[] } | null
 }
 
+/** What removing a connection does to the business dictionary (shown before removing it). */
+export interface DictionaryImpact {
+  /** Tables whose metrics another source's table of the same name takes over. */
+  moves: { table: string; to: string; metrics: number }[]
+  /** Metrics written by the Owner or the AI that would point at nothing and wait for review. */
+  orphaned_metrics: string[]
+  joins: number
+}
+
 export interface ConnectionDetail extends Connection {
   datasets: Dataset[]
   versions: FileVersion[]
+  dictionary_impact?: DictionaryImpact | null
 }
 
 export interface Sources {

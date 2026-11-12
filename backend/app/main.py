@@ -19,6 +19,7 @@ from app.api import (
     ai,
     audit,
     auth,
+    chat,
     connections,
     dictionary,
     google,
@@ -179,6 +180,7 @@ def create_app(
     app.include_router(ai.router)
     app.include_router(connections.router)
     app.include_router(dictionary.router)
+    app.include_router(chat.router)
     app.include_router(audit.router)
     return app
 

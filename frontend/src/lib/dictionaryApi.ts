@@ -82,6 +82,8 @@ export interface DictionaryDiffItem {
   from?: string
   to?: string
   meaning?: string
+  metric?: string
+  metrics?: string[]
 }
 
 export interface DictionaryNotes {

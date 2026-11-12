@@ -438,11 +438,15 @@ def _run_draft(
             db.commit()
             return DraftOutcome("unchanged", base.id)
         baseline = parse(base.content) if base else None
+        moves: list[dict[str, Any]] = []
         if baseline is not None:
             baseline = replace.rebind_orphans(baseline, gathered.inputs).dictionary
+            over = replace.take_over_orphans(baseline, {i.dataset_id for i in gathered.inputs})
+            baseline, moves = over.dictionary, over.moves
         origin = "initial" if base is None else ("redraft" if force else "schema_change")
         db.commit()
     built = build(gathered.inputs, baseline, company_name=gathered.org_name)
+    built.diff[:0] = moves
     if baseline is None and gathered.industry in INDUSTRIES:
         built.dictionary.company.industry = gathered.industry  # type: ignore[assignment]
     by_key = {key: e.dataset_id or "" for key, e in built.dictionary.datasets.items()}

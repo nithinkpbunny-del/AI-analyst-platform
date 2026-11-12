@@ -7,6 +7,7 @@ import {
   demoOrdersDetail,
   demoDatasetPreview,
 } from '../src/testing/connectionFixtures'
+import { demoConversation, demoConversations, demoSaved } from '../src/testing/askFixtures'
 import { firstDraftState } from '../src/testing/dictionaryFixtures'
 import { demoAudit, demoInvitations, demoMembers, demoPreview } from '../src/testing/teamFixtures'
 
@@ -176,6 +177,15 @@ export async function mockApi(
     route.fulfill({ json: demoDatasetPreview }),
   )
   await page.route(`${API}/dictionary`, (route) => route.fulfill({ json: firstDraftState }))
+  await page.route(`${API}/conversations`, (route) =>
+    route.fulfill({ json: { conversations: demoConversations } }),
+  )
+  await page.route(`${API}/conversations/conv1`, (route) =>
+    route.fulfill({ json: demoConversation }),
+  )
+  await page.route(`${API}/saved-questions`, (route) =>
+    route.fulfill({ json: { questions: demoSaved } }),
+  )
   await page.route('http://localhost:8000/health', (route) =>
     route.fulfill({
       json: { status: 'ok', service: 'analyst-api', version: '0.1.0', env: 'development' },
