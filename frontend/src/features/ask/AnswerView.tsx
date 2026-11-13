@@ -20,12 +20,16 @@ export function AnswerView({
   onSave,
   onShowWork,
   onRetry,
+  onExport,
+  onShare,
 }: {
   message: ChatMessage
   onNextQuestion: (question: string) => void
   onSave?: () => void
-  onShowWork: () => void
+  onShowWork?: () => void
   onRetry?: () => void
+  onExport?: () => void
+  onShare?: () => void
 }) {
   const { t } = useTranslation()
   const sources = useSources(message)
@@ -70,7 +74,7 @@ export function AnswerView({
               {t('ask.errors.askAgain')}
             </Button>
           ) : null}
-          {message.tool_trace.length > 0 ? (
+          {message.tool_trace.length > 0 && onShowWork ? (
             <Button variant="ghost" size="sm" onClick={onShowWork}>
               {t('ask.work.open')}
             </Button>
@@ -135,6 +139,8 @@ export function AnswerView({
         nextQuestions={answer.next_questions}
         onNextQuestion={onNextQuestion}
         onSave={onSave}
+        onExport={onExport}
+        onShare={onShare}
         onShowWork={onShowWork}
       />
       {message.reused ? (

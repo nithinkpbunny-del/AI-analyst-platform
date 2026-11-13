@@ -1,0 +1,7 @@
+{% extends "_layout.html" %}
+{% block body %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">{{ org_name }} will be deleted on {{ when }}</h1>
+<p style="margin:0 0 12px;">{{ requester }} asked to delete this workspace. On {{ when }} every connection, file, cached copy, conversation, report and setting of {{ org_name }} is deleted for good.</p>
+<p style="margin:0;">Until then, any Owner can cancel it in Settings, under Privacy.</p>
+{% with url=link, label="Open Settings" %}{% include "_button.html" %}{% endwith %}
+{% endblock %}

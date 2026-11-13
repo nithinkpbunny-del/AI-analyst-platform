@@ -1,0 +1,5 @@
+{{ sharer }} shared {{ what }} with you in {{ org_name }}:
+
+{{ title }}
+
+Open it: {{ link }}

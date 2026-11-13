@@ -35,6 +35,12 @@ for (const size of widths) {
     await page.getByRole('button', { name: 'Run scenario' }).click()
     await page.getByRole('table').waitFor()
     expect(await hasNoHorizontalScroll(page), 'what-if result').toBe(true)
+    // M10: a briefing report and a long task's report.
+    for (const report of ['/reports/rep-briefing', '/reports/rep-task']) {
+      await open(page, report)
+      await page.getByRole('heading', { level: 1 }).waitFor()
+      expect(await hasNoHorizontalScroll(page), report).toBe(true)
+    }
     // A connection with its columns and preview open: wide tables scroll inside their own box.
     await open(page, '/connections/c1')
     await page.getByRole('button', { name: 'Columns and preview' }).click()

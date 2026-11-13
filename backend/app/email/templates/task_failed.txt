@@ -1,0 +1,7 @@
+Your analysis could not finish.
+
+{{ prompt }}
+
+{{ reason }}
+
+Open long tasks: {{ link }}

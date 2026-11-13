@@ -1,0 +1,500 @@
+# Golden questions about the UrbanCart demo company (BUILD_SPEC 12.2, X4). Run by eval/harness.py:
+#   - make test: a stand-in model replays each `plan` (no AI); checks the harness and the tool layer.
+#   - make eval: a real model answers on its own (opt-in, uses the key in .env); report in eval/reports/.
+#
+# expect:
+#   numbers: figures a correct answer states. value as in ANSWER_KEY.md; tolerance (absolute) or relative.
+#            Signs are not compared ("fell 17.7%" and "-17.7%" both count). unit (pct, x, inr) only shapes how the
+#            stand-in model writes it.
+#   names:   groups of words; each group needs one of its words in the answer (case does not matter).
+#   pct_between: [low, high] a percentage change in this range must be stated (what-ifs).
+# finding: the planted finding of ANSWER_KEY.md the question checks (none = an everyday question).
+# The five what-ifs come from whatif_scenarios.yaml (`scenario:`); they also need a range and assumptions.
+# Hindi and Kannada questions are scored on facts; answers are in English for now (DECISIONS D41).
+
+questions:
+  # --- 1. South falls in Q3 2026 -------------------------------------------------------------------------------
+  - id: south_q3_why
+    ask: "Why did South revenue fall in Q3 2026 compared with Q2?"
+    finding: 1
+    plan:
+      - tool: driver_analysis
+        args: {metric: revenue, period: {start: "2026-07-01", end: "2026-09-30"}, compare: {start: "2026-04-01", end: "2026-06-30"}, dimensions: [shipping_region]}
+    expect:
+      numbers: [{label: South change, value: -17.7, tolerance: 0.5, unit: pct}]
+      names: [[South], [repeat, existing, returning]]
+
+  - id: regions_q3
+    ask: "How did each region do in Q3 2026 against Q2?"
+    finding: 1
+    plan:
+      - tool: driver_analysis
+        args: {metric: revenue, period: {start: "2026-07-01", end: "2026-09-30"}, compare: {start: "2026-04-01", end: "2026-06-30"}, dimensions: [shipping_region]}
+    expect:
+      numbers:
+        - {label: South, value: -17.7, tolerance: 0.5, unit: pct}
+        - {label: West, value: 18.5, tolerance: 0.5, unit: pct}
+        - {label: East, value: 17.0, tolerance: 0.5, unit: pct}
+        - {label: North, value: 10.1, tolerance: 0.5, unit: pct}
+      names: [[South]]
+
+  - id: south_q3_revenue
+    ask: "What was South revenue in Q3 2026?"
+    finding: 1
+    plan:
+      - tool: kpi_summary
+        args: {metrics: [revenue], period: {start: "2026-07-01", end: "2026-09-30"}, compare: {start: "2026-04-01", end: "2026-06-30"}, filters: {shipping_region: South}}
+    expect:
+      numbers: [{label: South Q3 revenue, value: 2801265, relative: 0.01, unit: inr}]
+
+  - id: south_electronics_price
+    ask: "Did Electronics prices change in the South in July 2026?"
+    finding: 1
+    plan:
+      - tool: run_sql
+        args:
+          sql: "SELECT ROUND(AVG(CASE WHEN o.created_at >= '2026-07-01' THEN o.unit_price / p.price END), 2) AS price_ratio_after, ROUND(AVG(CASE WHEN o.created_at < '2026-07-01' THEN o.unit_price / p.price END), 2) AS price_ratio_before FROM shopify_orders o JOIN shopify_products p ON o.product_id = p.id WHERE o.product_type = 'Electronics' AND o.shipping_region = 'South' AND o.created_at >= '2026-04-01'"
+    expect:
+      numbers: [{label: price ratio after, value: 1.12, tolerance: 0.01}]
+
+  - id: south_categories
+    ask: "Which categories fell in the South in Q3 2026?"
+    finding: 1
+    plan:
+      - tool: driver_analysis
+        args: {metric: revenue, period: {start: "2026-07-01", end: "2026-09-30"}, compare: {start: "2026-04-01", end: "2026-06-30"}, dimensions: [product_type], filters: {shipping_region: South}}
+    expect:
+      numbers: [{label: South change, value: -17.7, tolerance: 0.5, unit: pct}]
+      names: [[Electronics], [Sports, Fashion]]
+
+  - id: hi_south
+    language: hi
+    ask: "दक्षिण में Q3 2026 में बिक्री क्यों घटी?"
+    finding: 1
+    plan:
+      - tool: driver_analysis
+        args: {metric: revenue, period: {start: "2026-07-01", end: "2026-09-30"}, compare: {start: "2026-04-01", end: "2026-06-30"}, dimensions: [shipping_region]}
+    expect:
+      numbers: [{label: South change, value: -17.7, tolerance: 0.5, unit: pct}]
+      names: [[South, दक्षिण]]
+
+  - id: kn_south
+    language: kn
+    ask: "ದಕ್ಷಿಣದಲ್ಲಿ Q3 2026 ರಲ್ಲಿ ಮಾರಾಟ ಏಕೆ ಕುಸಿಯಿತು?"
+    finding: 1
+    plan:
+      - tool: driver_analysis
+        args: {metric: revenue, period: {start: "2026-07-01", end: "2026-09-30"}, compare: {start: "2026-04-01", end: "2026-06-30"}, dimensions: [shipping_region]}
+    expect:
+      numbers: [{label: South change, value: -17.7, tolerance: 0.5, unit: pct}]
+      names: [[South, ದಕ್ಷಿಣ]]
+
+  # --- 2. Channel efficiency -----------------------------------------------------------------------------------
+  - id: best_roas
+    ask: "Which marketing channels give the best return on ad spend?"
+    lens: marketing
+    finding: 2
+    plan:
+      - tool: marketing_efficiency
+        args: {by: channel}
+    expect:
+      numbers:
+        - {label: Email ROAS, value: 6.4, tolerance: 0.05, unit: x}
+        - {label: Instagram ROAS, value: 4.1, tolerance: 0.05, unit: x}
+      names: [[Email], [Instagram]]
+
+  - id: youtube_roas
+    ask: "Is YouTube advertising paying for itself?"
+    lens: marketing
+    finding: 2
+    plan:
+      - tool: marketing_efficiency
+        args: {by: channel}
+    expect:
+      numbers: [{label: YouTube ROAS, value: 0.8, tolerance: 0.05, unit: x}]
+      names: [[YouTube]]
+
+  - id: largest_spend
+    ask: "Which channel takes the biggest share of our marketing spend?"
+    lens: marketing
+    finding: 2
+    plan:
+      - tool: marketing_efficiency
+        args: {by: channel}
+    expect:
+      numbers: [{label: Google Ads share, value: 33.2, tolerance: 0.5, unit: pct}]
+      names: [[Google Ads]]
+
+  - id: total_marketing_spend
+    ask: "How much have we spent on marketing in total, and what came back?"
+    lens: marketing
+    finding: 2
+    plan:
+      - tool: marketing_efficiency
+        args: {by: channel}
+    expect:
+      numbers:
+        - {label: total spend, value: 13538935, relative: 0.01, unit: inr}
+        - {label: overall ROAS, value: 2.29, tolerance: 0.05, unit: x}
+
+  - id: hi_roas
+    language: hi
+    ask: "कौन सा मार्केटिंग चैनल सबसे अच्छा ROAS देता है?"
+    lens: marketing
+    finding: 2
+    plan:
+      - tool: marketing_efficiency
+        args: {by: channel}
+    expect:
+      numbers: [{label: Email ROAS, value: 6.4, tolerance: 0.05, unit: x}]
+      names: [[Email, ईमेल]]
+
+  - id: kn_youtube
+    language: kn
+    ask: "YouTube ಜಾಹೀರಾತು ಲಾಭದಾಯಕವೇ?"
+    lens: marketing
+    finding: 2
+    plan:
+      - tool: marketing_efficiency
+        args: {by: channel}
+    expect:
+      numbers: [{label: YouTube ROAS, value: 0.8, tolerance: 0.05, unit: x}]
+      names: [[YouTube]]
+
+  # --- 3. Budget variance --------------------------------------------------------------------------------------
+  - id: marketing_over_budget
+    ask: "Which department went over budget in Q3 2026?"
+    lens: finance
+    finding: 3
+    plan:
+      - tool: finance_summary
+        args: {kind: budget_variance, period: {start: "2026-07-01", end: "2026-09-30"}}
+    expect:
+      numbers: [{label: Marketing variance, value: 22.0, tolerance: 0.5, unit: pct}]
+      names: [[Marketing]]
+
+  - id: operations_festive
+    ask: "Did any department overspend during the 2025 festive season (October and November)?"
+    lens: finance
+    finding: 3
+    plan:
+      - tool: finance_summary
+        args: {kind: budget_variance, period: {start: "2025-10-01", end: "2025-11-30"}}
+    expect:
+      numbers: [{label: Operations variance, value: 10.0, tolerance: 0.5, unit: pct}]
+      names: [[Operations]]
+
+  - id: q3_budget_all
+    ask: "Show budget against actual for every department in Q3 2026."
+    lens: finance
+    finding: 3
+    plan:
+      - tool: finance_summary
+        args: {kind: budget_variance, period: {start: "2026-07-01", end: "2026-09-30"}}
+    expect:
+      numbers:
+        - {label: Marketing, value: 22.0, tolerance: 0.5, unit: pct}
+        - {label: Technology, value: -1.6, tolerance: 0.1, unit: pct}
+        - {label: total variance, value: 4.6, tolerance: 0.2, unit: pct}
+
+  - id: kn_budget
+    language: kn
+    ask: "Q3 2026 ರಲ್ಲಿ ಯಾವ ವಿಭಾಗ ಬಜೆಟ್ ಮೀರಿದೆ?"
+    lens: finance
+    finding: 3
+    plan:
+      - tool: finance_summary
+        args: {kind: budget_variance, period: {start: "2026-07-01", end: "2026-09-30"}}
+    expect:
+      numbers: [{label: Marketing variance, value: 22.0, tolerance: 0.5, unit: pct}]
+      names: [[Marketing]]
+
+  # --- 4. Discounting and margin -------------------------------------------------------------------------------
+  - id: heaviest_discount
+    ask: "Which category has the heaviest discounting?"
+    lens: finance
+    finding: 4
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT product_type, ROUND(100 * SUM(total_discounts) / SUM(total_line_items_price), 1) AS avg_discount_pct FROM shopify_orders GROUP BY 1 ORDER BY 2 DESC"}
+    expect:
+      numbers: [{label: Fashion discount, value: 23.1, tolerance: 0.3, unit: pct}]
+      names: [[Fashion]]
+
+  - id: thinnest_margin
+    ask: "Which category has the thinnest gross margin?"
+    lens: finance
+    finding: 4
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT o.product_type, ROUND(100 * (SUM(o.total_price) - SUM(o.quantity * p.cost_per_item)) / SUM(o.total_price), 1) AS gross_margin_pct FROM shopify_orders o JOIN shopify_products p ON o.product_id = p.id GROUP BY 1 ORDER BY 2"}
+    expect:
+      numbers: [{label: Electronics margin, value: 21.5, tolerance: 0.3, unit: pct}]
+      names: [[Electronics]]
+
+  - id: festive_discounts
+    ask: "How much more discount did we give in October and November 2025 than in the two months before?"
+    lens: finance
+    finding: 4
+    plan:
+      - tool: kpi_summary
+        args: {metrics: [revenue, discounts], period: {start: "2025-10-01", end: "2025-11-30"}, compare: {start: "2025-08-01", end: "2025-09-30"}}
+    expect:
+      numbers: [{label: discount change, value: 130.3, tolerance: 0.5, unit: pct}]
+
+  - id: hi_discount
+    language: hi
+    ask: "किस श्रेणी में सबसे ज़्यादा छूट दी जाती है?"
+    lens: finance
+    finding: 4
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT product_type, ROUND(100 * SUM(total_discounts) / SUM(total_line_items_price), 1) AS avg_discount_pct FROM shopify_orders GROUP BY 1 ORDER BY 2 DESC"}
+    expect:
+      numbers: [{label: Fashion discount, value: 23.1, tolerance: 0.3, unit: pct}]
+      names: [[Fashion, फैशन]]
+
+  # --- 5. App outage -------------------------------------------------------------------------------------------
+  - id: app_outage
+    ask: "Was anything unusual with orders in August 2026?"
+    finding: 5
+    plan:
+      - tool: detect_anomalies
+        args: {metric: orders, period: {start: "2026-08-01", end: "2026-08-31"}, dimension: sales_channel}
+    expect:
+      numbers:
+        - {label: App orders that day, value: 13, tolerance: 0}
+        - {label: usual for a Saturday, value: 27, tolerance: 0.5}
+      names: [[App], ["2026-08-15", "15 Aug", "Aug 15", "August 15"]]
+
+  - id: app_drop_size
+    ask: "How big was the drop in App orders on 15 August 2026?"
+    finding: 5
+    plan:
+      - tool: detect_anomalies
+        args: {metric: orders, period: {start: "2026-08-10", end: "2026-08-20"}, dimension: sales_channel}
+    expect:
+      numbers: [{label: drop, value: -51.9, tolerance: 0.5, unit: pct}]
+      names: [[App]]
+
+  - id: kn_outage
+    language: kn
+    ask: "ಆಗಸ್ಟ್ 2026 ರಲ್ಲಿ ಆರ್ಡರ್‌ಗಳಲ್ಲಿ ಏನಾದರೂ ಅಸಾಮಾನ್ಯವಾಗಿತ್ತೇ?"
+    finding: 5
+    plan:
+      - tool: detect_anomalies
+        args: {metric: orders, period: {start: "2026-08-01", end: "2026-08-31"}, dimension: sales_channel}
+    expect:
+      numbers: [{label: App orders that day, value: 13, tolerance: 0}]
+      names: [[App]]
+
+  # --- 6. Growth signal ----------------------------------------------------------------------------------------
+  - id: growing_segments
+    ask: "What is growing steadily in the business?"
+    finding: 6
+    plan:
+      - tool: growth_signals
+        args: {metric: orders, period: {start: "2025-10-01", end: "2026-09-30"}}
+    expect:
+      numbers: [{label: West Beauty orders in September, value: 210, tolerance: 0}]
+      names: [[Beauty], [West]]
+
+  - id: west_beauty_repeat
+    ask: "Is the growth in Beauty in the West coming from repeat customers?"
+    finding: 6
+    plan:
+      - tool: growth_signals
+        args: {metric: orders, period: {start: "2025-10-01", end: "2026-09-30"}, dimensions: [shipping_region, product_type]}
+    expect:
+      numbers: [{label: share from repeat customers, value: 81.5, tolerance: 1.0, unit: pct}]
+      names: [[Beauty]]
+
+  - id: hi_growth
+    language: hi
+    ask: "कौन सा सेगमेंट लगातार बढ़ रहा है?"
+    finding: 6
+    plan:
+      - tool: growth_signals
+        args: {metric: orders, period: {start: "2025-10-01", end: "2026-09-30"}}
+    expect:
+      numbers: [{label: West Beauty orders in September, value: 210, tolerance: 0}]
+      names: [[Beauty, ब्यूटी]]
+
+  # --- 7. Data gap ---------------------------------------------------------------------------------------------
+  - id: website_gap
+    ask: "How many Website orders did we get in the week of 9 March 2026?"
+    finding: 7
+    plan:
+      - tool: kpi_summary
+        args: {metrics: [orders], period: {start: "2026-03-09", end: "2026-03-15"}, compare: previous_period, filters: {sales_channel: Website}}
+    expect:
+      numbers:
+        - {label: the week before, value: 94, tolerance: 1}
+        - {label: change, value: -100, tolerance: 0.5, unit: pct}
+
+  # --- 8. Targets ----------------------------------------------------------------------------------------------
+  - id: targets_q3
+    ask: "Which regions missed their revenue target in Q3 2026?"
+    finding: 8
+    plan:
+      - tool: run_sql
+        args:
+          sql: "WITH t AS (SELECT region, SUM(revenue_target_inr) AS target FROM targets WHERE month >= '2026-07-01' AND month < '2026-10-01' GROUP BY 1), a AS (SELECT shipping_region AS region, SUM(total_price) - SUM(total_refunds) AS actual FROM shopify_orders WHERE created_at >= '2026-07-01' AND created_at < '2026-10-01' GROUP BY 1) SELECT t.region, t.target, a.actual, ROUND(100 * (a.actual / t.target - 1), 1) AS vs_target_pct FROM t JOIN a USING (region) ORDER BY 4"
+    expect:
+      numbers: [{label: South vs target, value: -25.5, tolerance: 0.3, unit: pct}]
+      names: [[South]]
+
+  - id: south_target_gap
+    ask: "How far is the South from its Q3 2026 revenue target, in rupees?"
+    finding: 8
+    plan:
+      - tool: run_sql
+        args:
+          sql: "WITH t AS (SELECT SUM(revenue_target_inr) AS target FROM targets WHERE region = 'South' AND month >= '2026-07-01' AND month < '2026-10-01'), a AS (SELECT SUM(total_price) - SUM(total_refunds) AS actual FROM shopify_orders WHERE shipping_region = 'South' AND created_at >= '2026-07-01' AND created_at < '2026-10-01') SELECT t.target, a.actual, t.target - a.actual AS gap FROM t, a"
+    expect:
+      numbers:
+        - {label: target, value: 3759000, relative: 0.01, unit: inr}
+        - {label: gap, value: 957735, relative: 0.02, unit: inr}
+
+  # --- Everyday questions --------------------------------------------------------------------------------------
+  - id: q3_kpis
+    ask: "How did revenue, orders and average order value change in Q3 2026 against Q2?"
+    plan:
+      - tool: kpi_summary
+        args: {metrics: [revenue, orders, aov], period: {start: "2026-07-01", end: "2026-09-30"}, compare: {start: "2026-04-01", end: "2026-06-30"}}
+    expect:
+      numbers:
+        - {label: revenue change, value: 5.5, tolerance: 0.1, unit: pct}
+        - {label: orders change, value: 9.5, tolerance: 0.1, unit: pct}
+        - {label: AOV change, value: -3.6, tolerance: 0.1, unit: pct}
+
+  - id: september_orders
+    ask: "How many orders did we get in September 2026, and how does that compare with August?"
+    plan:
+      - tool: kpi_summary
+        args: {metrics: [orders], period: {start: "2026-09-01", end: "2026-09-30"}, compare: previous_period}
+    expect:
+      numbers:
+        - {label: September orders, value: 1701, tolerance: 0}
+        - {label: change, value: 3.5, tolerance: 0.1, unit: pct}
+
+  - id: revenue_trend_2026
+    ask: "Show me monthly revenue for 2026 so far. Which month was best?"
+    plan:
+      - tool: trend
+        args: {metric: revenue, period: {start: "2026-01-01", end: "2026-09-30"}, grain: month}
+    expect:
+      numbers: [{label: August revenue, value: 4468291, relative: 0.01, unit: inr}]
+      names: [[August, Aug, "2026-08"]]
+
+  - id: ytd_vs_last_year
+    ask: "How is revenue this year so far compared with the same months last year?"
+    plan:
+      - tool: kpi_summary
+        args: {metrics: [revenue], period: {start: "2026-01-01", end: "2026-09-30"}, compare: previous_year}
+    expect:
+      numbers: [{label: growth, value: 23.9, tolerance: 0.2, unit: pct}]
+
+  - id: top_category
+    ask: "Which product category brings in the most revenue?"
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT product_type, ROUND(SUM(total_price) - SUM(total_refunds), 0) AS revenue FROM shopify_orders GROUP BY 1 ORDER BY 2 DESC"}
+    expect:
+      numbers: [{label: Electronics revenue, value: 30224171, relative: 0.01, unit: inr}]
+      names: [[Electronics]]
+
+  - id: channel_mix
+    ask: "What share of our orders come through the app?"
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT sales_channel, ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS share_pct FROM shopify_orders GROUP BY 1 ORDER BY 2 DESC"}
+    expect:
+      numbers: [{label: App share, value: 50.3, tolerance: 0.3, unit: pct}]
+      names: [[App]]
+
+  - id: customers_by_region
+    ask: "Where are our customers? Give the share by region."
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT region, COUNT(*) AS customers, ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS share_pct FROM shopify_customers GROUP BY 1 ORDER BY 2 DESC"}
+    expect:
+      numbers:
+        - {label: South share, value: 30.0, tolerance: 0.3, unit: pct}
+        - {label: East share, value: 18.0, tolerance: 0.3, unit: pct}
+      names: [[South]]
+
+  - id: small_business_customers
+    ask: "Do small business customers order more often than consumers?"
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT segment, COUNT(*) AS customers, ROUND(AVG(orders_count), 2) AS avg_orders FROM shopify_customers GROUP BY 1"}
+    expect:
+      numbers:
+        - {label: Small Business orders, value: 14.55, tolerance: 0.05}
+        - {label: Consumer orders, value: 8.62, tolerance: 0.05}
+
+  - id: refunds
+    ask: "How many payments were refunded, and for how much?"
+    lens: finance
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT status, COUNT(*) AS payments, SUM(amount) AS amount FROM razorpay_payments GROUP BY 1"}
+    expect:
+      numbers:
+        - {label: refunded payments, value: 746, tolerance: 0}
+        - {label: refunded amount, value: 2057906, relative: 0.01, unit: inr}
+
+  - id: payment_methods
+    ask: "Which payment method do customers use most?"
+    lens: finance
+    plan:
+      - tool: run_sql
+        args: {sql: "SELECT method, COUNT(*) AS payments FROM razorpay_payments GROUP BY 1 ORDER BY 2 DESC"}
+    expect:
+      numbers: [{label: UPI payments, value: 9903, tolerance: 0}]
+      names: [[upi, UPI]]
+
+  - id: rfm_champions
+    ask: "Who are our best customers and how much of revenue do they bring?"
+    lens: marketing
+    plan:
+      - tool: segment_customers
+        args: {metric: revenue, kind: rfm}
+    expect:
+      numbers: [{label: Champions share of revenue, value: 49.4, tolerance: 0.3, unit: pct}]
+      names: [[Champions]]
+
+  - id: retention
+    ask: "How many new customers come back the month after their first order?"
+    lens: marketing
+    plan:
+      - tool: segment_customers
+        args: {metric: revenue, kind: cohorts}
+    expect:
+      numbers: [{label: month-1 retention, value: 37.9, tolerance: 0.3, unit: pct}]
+
+  - id: forecast_q4
+    ask: "What revenue should we expect for the next three months?"
+    lens: finance
+    plan:
+      - tool: forecast
+        args: {metric: revenue, grain: month, horizon: 3}
+    expect:
+      numbers:
+        - {label: forecast total, value: 16075317, relative: 0.02, unit: inr}
+        - {label: backtest error, value: 7.2, tolerance: 0.3, unit: pct}
+
+  # --- What-ifs (whatif_scenarios.yaml) ------------------------------------------------------------------------
+  - id: whatif_electronics_south_price_up
+    scenario: electronics_south_price_up
+  - id: whatif_fashion_discount_up
+    scenario: fashion_discount_up
+  - id: whatif_youtube_spend_cut
+    scenario: youtube_spend_cut
+    lens: marketing
+  - id: whatif_instagram_spend_up
+    scenario: instagram_spend_up
+    lens: marketing
+  - id: whatif_whole_shop_price_cut
+    scenario: whole_shop_price_cut

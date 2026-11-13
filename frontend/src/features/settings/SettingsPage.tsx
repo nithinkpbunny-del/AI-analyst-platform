@@ -8,6 +8,7 @@ import { cn } from '../../lib/cn'
 import { useTheme, type ThemePreference } from '../../lib/theme'
 import { AiPlanSection } from './AiPlanSection'
 import { DevicesSection } from './DevicesSection'
+import { PrivacySection } from './PrivacySection'
 import { SecuritySection } from './SecuritySection'
 import { SystemStatus } from './SystemStatus'
 import { UsageSection } from './UsageSection'
@@ -68,6 +69,7 @@ export function SettingsPage() {
         <DevicesSection />
         <AiPlanSection />
         <UsageSection />
+        <PrivacySection />
         <section className="rounded-panel border border-line bg-surface p-4 tablet:p-6">
           <h2 className="text-h4">{t('settings.appearance')}</h2>
           <fieldset className="m-0 mt-4 border-0 p-0">

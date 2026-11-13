@@ -15,11 +15,14 @@ from app.models.consent import Consent
 from app.models.dictionary import DictionaryVersion
 from app.models.invitation import Invitation
 from app.models.org import Membership, Organization
+from app.models.reports import BriefingRun, BriefingSetting, Report, Share, Task
 from app.models.two_factor import KnownDevice, LoginChallenge, TwoFactor, TwoFactorCode
 from app.models.user import User
 
 __all__ = [
     "AuditLog",
+    "BriefingRun",
+    "BriefingSetting",
     "Connection",
     "ConnectionGrant",
     "Consent",
@@ -35,10 +38,13 @@ __all__ = [
     "Message",
     "Organization",
     "RefreshToken",
+    "Report",
     "SavedQuestion",
     "Secret",
     "Session",
+    "Share",
     "Snapshot",
+    "Task",
     "TwoFactor",
     "TwoFactorCode",
     "UsageEvent",

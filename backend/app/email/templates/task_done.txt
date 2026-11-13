@@ -1,0 +1,11 @@
+Your analysis is ready.
+
+{{ prompt }}
+
+{{ lead }}
+{% for item in evidence %}
+- {{ item }}
+{% endfor %}
+
+The full report{% if attached %} is attached as a PDF and{% endif %} is in the app, with the sources behind every number:
+{{ link }}

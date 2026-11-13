@@ -12,6 +12,7 @@ from app.connectors.google_sheets import default_setup
 from app.connectors.registry import ConnectorRuntime
 from app.data.objects import S3ObjectStore
 from app.db.session import make_engine, make_session_factory
+from app.email.sender import SmtpEmailSender
 from app.security.secrets import SecretStore, key_wrapper
 
 
@@ -30,4 +31,5 @@ def worker_runtime() -> ConnectorRuntime:  # pragma: no cover - exercised by the
         secrets=SecretStore(key_wrapper(settings)),
         google=default_setup(settings),
         clock=_utc_now,
+        email=SmtpEmailSender(settings),
     )

@@ -1,5 +1,5 @@
 import { LogOut, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
-import { useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher'
@@ -233,8 +233,29 @@ function MobileNav() {
   )
 }
 
+// The command palette loads the first time someone presses Ctrl/Cmd + K.
+const CommandPalette = lazy(() =>
+  import('../features/palette/CommandPalette').then((m) => ({ default: m.CommandPalette })),
+)
+
+function usePaletteShortcut(): [boolean, (open: boolean) => void] {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  return [open, setOpen]
+}
+
 export function AppShell() {
   const { t } = useTranslation()
+  const [paletteOpen, setPaletteOpen] = usePaletteShortcut()
   return (
     <div className="flex min-h-dvh bg-paper text-ink">
       <a
@@ -259,6 +280,11 @@ export function AppShell() {
         </main>
       </div>
       <MobileNav />
+      {paletteOpen ? (
+        <Suspense fallback={null}>
+          <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+        </Suspense>
+      ) : null}
     </div>
   )
 }

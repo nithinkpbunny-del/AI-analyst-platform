@@ -37,6 +37,11 @@ export function describeEntry(t: TFunction, entry: AuditEntry): string {
         ? t(`ai.providers.${details.provider}`, { defaultValue: details.provider })
         : '',
     last4: typeof details.last4 === 'string' ? details.last4 : '',
+    // Exports and shares (M10) say what they were about.
+    what: t(`activity.targets.${entry.target_type ?? 'item'}`, {
+      defaultValue: t('activity.targets.item'),
+    }),
+    format: details.format === 'xlsx' ? 'Excel' : 'PDF',
   })
   const reason = details.reason
   if (entry.action === 'auth.login.failure' && typeof reason === 'string') {

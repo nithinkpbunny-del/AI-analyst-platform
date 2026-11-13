@@ -1,4 +1,5 @@
-"""Celery application (worker + beat): connection syncs and snapshot purging (M6); briefings and long tasks later."""
+"""Celery application (worker + beat): connection syncs and snapshot purging (M6), questions (M8), long tasks,
+briefings and workspace deletion (M10)."""
 
 from __future__ import annotations
 
@@ -33,6 +34,10 @@ celery_app.conf.update(
         "heartbeat": {"task": "app.tasks.jobs.ping", "schedule": 300.0},
         # Cached copies of customer data never outlive SNAPSHOT_MAX_AGE_HOURS (BUILD_SPEC 6.6).
         "purge-snapshots": {"task": "app.tasks.jobs.purge_snapshots", "schedule": 900.0},
+        # Briefings due in the next window, per person and time zone (BUILD_SPEC 13.1).
+        "schedule-briefings": {"task": "app.tasks.jobs.schedule_briefings", "schedule": 300.0},
+        # Workspaces past their 7-day deletion grace period (BUILD_SPEC 6.6).
+        "purge-deleted-orgs": {"task": "app.tasks.jobs.purge_deleted_orgs", "schedule": 3600.0},
     },
 )
 

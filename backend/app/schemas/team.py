@@ -100,11 +100,19 @@ class OrganizationSettingsOut(BaseModel):
     timezone: str
     currency: str
     plan: str
+    industry: str | None = None
+    # A requested deletion (BUILD_SPEC 6.6): when it was asked and when it happens.
+    deletion_requested_at: datetime | None = None
+    deletion_due_at: datetime | None = None
 
 
 class OrganizationSettingsRequest(_Strict):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    industry: (
+        Literal["retail", "d2c", "restaurant", "fuel_station", "services", "manufacturing", "other"]
+        | None
+    ) = None
 
     @field_validator("name")
     @classmethod
@@ -153,3 +161,9 @@ class AuditQuery(BaseModel):
     date_to: date | None = Field(default=None, alias="to")
     cursor: str | None = Field(default=None, max_length=200)
     limit: int = Field(default=50, ge=1, le=200)
+
+
+class DeletionRequest(_Strict):
+    """The workspace's name, typed by the Owner to confirm."""
+
+    confirm_name: str = Field(min_length=1, max_length=120)

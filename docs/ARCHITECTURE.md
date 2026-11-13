@@ -160,3 +160,16 @@ web:    polls GET /conversations/{id} every second; ProgressSteps while running;
   workspace (P4), unit-tested against the planted findings of the demo data.
 - `app/data/workspace.py` (DuckDB per question) and `app/security/sql_guard.py` (sqlglot, SELECT only).
 - Decisions: D65-D70.
+
+## Briefings, long tasks, exports, sharing, privacy, eval (M10)
+- `app/briefings/`: `facts.py` (figures by code with the recipient's permissions, through the agent's tools),
+  `writer.py` (one `write_briefing` AI call + number check, or a code-written fallback), `schedule.py` (slots per person
+  and time zone, idempotent runs), `service.py` (the `send_briefing` job: report + email).
+- `app/tasks/long_tasks.py` (the `run_task` job) on `agent.service.run_agent`, the runner questions use too.
+- `app/exports/` (`document.py`, `pdf.py` WeasyPrint, `excel.py` openpyxl, `charts.py` SVG, `text.py` note sentences)
+  and `app/reports/` (who may see what, files, shares).
+- `app/privacy/` (`export.py` ZIP, `deletion.py` grace period and purge). `app/analytics/growth.py` (growth signals).
+- Celery beat: `schedule-briefings` every 5 minutes, `purge-deleted-orgs` hourly (plus M6's snapshot purge).
+- Tables (migration `0010`): `reports`, `tasks`, `briefing_settings`, `briefing_runs`, `shares`, each with RLS.
+- `eval/harness.py`, `eval/golden_questions.yaml`, `eval/run_eval.py` (`make eval`, real model, opt-in).
+- Decisions: D77-D87.

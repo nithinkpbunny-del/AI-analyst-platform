@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormAlert } from '../../components/FormAlert'
@@ -8,7 +8,7 @@ import { SelectField } from '../../components/ui/select'
 import { ApiError } from '../../lib/api'
 import { useAuth, useSession } from '../../lib/authContext'
 import { useCan } from '../../lib/permissions'
-import { teamApi } from '../../lib/teamApi'
+import { INDUSTRIES, teamApi, type Industry } from '../../lib/teamApi'
 
 const COMMON_ZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'UTC']
 
@@ -25,12 +25,25 @@ export function WorkspaceSection() {
   const canEdit = useCan('org.manage')
   const [name, setName] = useState(organization.name)
   const [timezone, setTimezone] = useState(organization.timezone)
+  const queryClient = useQueryClient()
+  // The kind of business is the onboarding's first step (BUILD_SPEC 11a.8) and shapes the metrics.
+  const org = useQuery({ queryKey: ['organization'], queryFn: teamApi.organization })
+  const [industry, setIndustry] = useState<Industry | ''>('')
+  const currentIndustry = org.data?.industry ?? ''
+  const chosenIndustry = industry || currentIndustry
   const [error, setError] = useState<string | undefined>()
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const zones = useMemo(() => timeZones(organization.timezone), [organization.timezone])
   const save = useMutation({
-    mutationFn: () => teamApi.updateOrganization({ name: name.trim(), timezone }),
-    onSuccess: async () => {
+    mutationFn: () =>
+      teamApi.updateOrganization({
+        name: name.trim(),
+        timezone,
+        ...(chosenIndustry ? { industry: chosenIndustry } : {}),
+      }),
+    onSuccess: async (data) => {
+      queryClient.setQueryData(['organization'], data)
+      setIndustry('')
       setNotice({ tone: 'success', text: t('workspace.saved') })
       await reload() // the name shows in the sidebar and the switcher
     },
@@ -49,7 +62,10 @@ export function WorkspaceSection() {
     setError(undefined)
     save.mutate()
   }
-  const changed = name.trim() !== organization.name || timezone !== organization.timezone
+  const changed =
+    name.trim() !== organization.name ||
+    timezone !== organization.timezone ||
+    chosenIndustry !== currentIndustry
 
   return (
     <section
@@ -84,6 +100,20 @@ export function WorkspaceSection() {
               </option>
             ))}
           </SelectField>
+          <SelectField
+            label={t('workspace.industry')}
+            name="industry"
+            value={chosenIndustry}
+            onChange={(event) => setIndustry(event.target.value as Industry)}
+          >
+            {chosenIndustry ? null : <option value="">{t('workspace.industryNone')}</option>}
+            {INDUSTRIES.map((option) => (
+              <option key={option} value={option}>
+                {t(`workspace.industries.${option}`)}
+              </option>
+            ))}
+          </SelectField>
+          <p className="-mt-2 mb-0 text-caption text-ink-muted">{t('workspace.industryHint')}</p>
           <Button type="submit" className="w-fit" disabled={!changed || save.isPending}>
             {t('workspace.save')}
           </Button>

@@ -11,6 +11,16 @@ import { demoConversation, demoConversations, demoSaved } from '../src/testing/a
 import { firstDraftState } from '../src/testing/dictionaryFixtures'
 import { demoAudit, demoInvitations, demoMembers, demoPreview } from '../src/testing/teamFixtures'
 import { demoOptions, demoResult } from '../src/testing/whatIfFixtures'
+import {
+  demoBriefing,
+  demoBriefingSettings,
+  demoOrg,
+  demoRuns,
+  demoShares,
+  demoTaskReport,
+  demoTasks,
+  demoToday,
+} from '../src/testing/reportsFixtures'
 
 export const screens = [
   'today',
@@ -195,6 +205,17 @@ export async function mockApi(
     route.fulfill({ json: { values: ['Electronics', 'Fashion', 'Home & Kitchen'] } }),
   )
   await page.route(`${API}/whatif/run`, (route) => route.fulfill({ json: whatIf }))
+  // M10: Today, briefings, long tasks, reports and sharing.
+  await page.route(`${API}/today`, (route) => route.fulfill({ json: demoToday }))
+  await page.route(`${API}/org`, (route) => route.fulfill({ json: demoOrg() }))
+  await page.route(`${API}/tasks`, (route) => route.fulfill({ json: demoTasks }))
+  await page.route(`${API}/briefings/settings`, (route) =>
+    route.fulfill({ json: demoBriefingSettings }),
+  )
+  await page.route(`${API}/briefings`, (route) => route.fulfill({ json: { runs: demoRuns } }))
+  await page.route(`${API}/reports/rep-briefing`, (route) => route.fulfill({ json: demoBriefing }))
+  await page.route(`${API}/reports/rep-task`, (route) => route.fulfill({ json: demoTaskReport }))
+  await page.route(`${API}/shares?*`, (route) => route.fulfill({ json: demoShares }))
   await page.route(`${API}/saved-questions`, (route) =>
     route.fulfill({ json: { questions: demoSaved } }),
   )

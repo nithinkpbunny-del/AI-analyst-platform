@@ -22,6 +22,7 @@ from app.connectors.base import Connector, ConnectorError
 from app.connectors.files import FileConnector, StoredFile
 from app.connectors.google_sheets import GoogleSheetsConnector, GoogleSheetsSetup, Spreadsheet
 from app.data.objects import ObjectStore
+from app.email.sender import EmailSender
 from app.models import Connection, FileVersion
 from app.security.secrets import SecretStore, SecretUnavailable
 
@@ -39,6 +40,8 @@ class ConnectorRuntime:
     secrets: SecretStore
     google: GoogleSheetsSetup
     clock: Callable[[], datetime]
+    # Emails from background jobs (briefings, finished long tasks, shares): SMTP in the worker, memory in tests.
+    email: EmailSender | None = None
 
 
 def version_in_use(connection: Connection, versions: list[FileVersion]) -> FileVersion | None:

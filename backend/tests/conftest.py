@@ -201,6 +201,7 @@ def runtime(
     object_store: MemoryObjectStore,
     google_setup: GoogleSheetsSetup,
     clock: FakeClock,
+    outbox: MemoryEmailSender,
 ) -> ConnectorRuntime:
     """What connectors, the cache and background jobs use, outside the API."""
     return ConnectorRuntime(
@@ -211,6 +212,7 @@ def runtime(
         secrets=SecretStore(key_wrapper(settings)),
         google=google_setup,
         clock=clock,
+        email=outbox,
     )
 
 

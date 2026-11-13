@@ -19,6 +19,7 @@ from app.api import (
     ai,
     audit,
     auth,
+    briefings,
     chat,
     connections,
     dictionary,
@@ -26,7 +27,10 @@ from app.api import (
     health,
     invitations,
     org,
+    reports,
+    tasks,
     team,
+    today,
     two_factor,
     whatif,
 )
@@ -128,6 +132,7 @@ def create_app(
         secrets=app.state.secret_store,
         google=google_sheets or default_setup(settings),
         clock=app.state.clock,
+        email=app.state.email_sender,
     )
     app.state.job_queue = job_queue or (
         InlineJobQueue(app.state.connector_runtime, app.state.llm_factory)
@@ -183,6 +188,10 @@ def create_app(
     app.include_router(dictionary.router)
     app.include_router(chat.router)
     app.include_router(whatif.router)
+    app.include_router(tasks.router)
+    app.include_router(reports.router)
+    app.include_router(briefings.router)
+    app.include_router(today.router)
     app.include_router(audit.router)
     return app
 

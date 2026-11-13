@@ -1,0 +1,7 @@
+{% extends "_layout.html" %}
+{% block body %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">Your data changed</h1>
+<p style="margin:0 0 12px;">The structure of your data in {{ org_name }} changed ({{ summary }}), so Analyst drafted a new version of the business dictionary.</p>
+<p style="margin:0;">Check what changed and confirm it, so answers use the right meanings.</p>
+{% with url=link, label="Check the dictionary" %}{% include "_button.html" %}{% endwith %}
+{% endblock %}

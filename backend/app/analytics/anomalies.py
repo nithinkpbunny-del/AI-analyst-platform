@@ -81,6 +81,8 @@ def detect_anomalies(
             if grain == "day"
             else _score_seasonal(points, grain, count=count)
         )
+        if scored.empty:
+            continue  # too little history for a baseline (nothing to compare with)
         in_period = scored[
             (scored.index >= pd.Timestamp(period.start))
             & (scored.index <= pd.Timestamp(period.end))

@@ -1044,3 +1044,157 @@ a missing one.
   version" on the connection, which keeps them. Keeping a removed table's edits for a re-upload was considered and
   not built (the Owner asked for the small fix).
 
+
+### D77. Growth signals (M10, BUILD_SPEC 10.3)
+- `app/analytics/growth.py`, exact code over the workspace, also an agent tool (`growth_signals`). Complete periods
+  only: a month still running is left out.
+- **Streak:** a segment (a value of one dimension, or a pair such as category × region) whose metric rose in each of
+  the last 3+ periods **and** whose share of the whole rose each time. The share rule takes out the season (in the
+  demo, every segment sells more from June to September; only West × Beauty gains share every month). A segment must
+  be at least 1% of the whole and have grown at least 10% over its streak. A single value that only echoes a pair's
+  streak is dropped.
+- **Beats last year:** the whole metric above the same period a year earlier for 3+ periods in a row.
+- For the top 3 streaks: the share of the increase from **repeat customers** (customers first seen in the table before
+  the streak began) and an **estimated upside** (one more period at the streak's average step), labelled an estimate.
+- Default dimensions are chosen by name (region, category/type, channel, segment, outlet, store, state, city) and size
+  (2-40 values); status, gateway, currency, method, ids and names are never used.
+- On the demo data: West × Beauty, 5 months in a row, 48 to 210 orders, about 81% from repeat customers (the answer key
+  says 101% with a slightly different definition of "repeat": an order with an earlier order in the same table).
+  North × Electronics also shows a 3-month streak; that is in the data, not planted.
+
+### D78. Briefings: facts by code, words by one AI call (M10, BUILD_SPEC 13)
+- **Facts** (`app/briefings/facts.py`) come from the agent's own tools, run with the **recipient's** `AccessContext` and
+  visible dictionary, so every figure has a result id and provenance: KPI snapshot (latest day vs the same weekday a
+  week earlier; last 7 days vs the 7 before), unusual numbers (`detect_anomalies`, last 7 days, by the best segment
+  dimension), growth signals (last 12 months), risks (data-quality warnings, connections in error, data that stopped
+  arriving), finished long tasks. Goals arrive in M15.
+- **Latest day of data** = the newest day the main table covers, up to yesterday in the recipient's time zone. A
+  workspace whose data ends earlier (the demo ends 2026-09-30) still gets a briefing about its last days, with a note
+  saying how old it is, and "stale data" becomes an alert.
+- **Alerts** = an unusual drop on the latest day, a connection in error or needing sign-in, data that stopped.
+- **Words:** one small AI call with a `write_briefing` tool (subject, headline, key figure, sections), from the compact
+  facts only (no rows, no personal data), following the daily-briefing playbook. Then the number check (R14): an item
+  with an unsupported figure is removed (note `numbers_removed`); an unsupported headline makes the whole text unusable.
+  No repair turn (one call per briefing).
+- **Fallback:** when AI cannot be used (no key, quota, error, unusable answer), code writes plain sentences from the
+  same facts, with the same citations. A briefing is never lost because of the AI. `written_by` says which.
+- **Cache:** identical facts + language reuse the written words for a day (Redis), checked before any AI client is
+  made, so two people with the same access cost one call.
+- **Metering:** each call is a `usage_events` row of kind `briefing`; briefings do not count towards the Managed
+  question limit (D42) and are made even when it is reached.
+- **Suppression:** unusual numbers already sent to the person in the last 3 days, and growth signals in the last 7,
+  are left out (fingerprints in `briefing_runs.findings`).
+- **Email:** HTML for phones + plain text, the haldi mark on the headline's key figure, every figure followed by a
+  small number that links to the report in the app, a button to Today and a link to the briefing settings. Stored as a
+  report (source `briefing`).
+- **Language:** stored per person; English only for now (D41). The settings screen says so.
+
+### D79. Briefing schedule (M10, BUILD_SPEC 13.1)
+- Beat job every 5 minutes. A slot is due from 5 minutes before its time to 30 minutes after it (a short worker or
+  beat outage is caught up). Defaults: Owners on at 06:00 daily in the workspace's time zone; Analysts and Viewers off
+  until they turn it on. Frequencies: daily, weekly (chosen weekday), alerts only (made daily, sent only when there is
+  an alert or an unusual number), off. A person may choose their own time zone.
+- Idempotent: a **partial unique index** on (workspace, person, slot) for `kind = 'scheduled'` and
+  `INSERT ... ON CONFLICT DO NOTHING`; only a newly added run is queued. "Send me a briefing now" runs (`kind = 'test'`)
+  are not limited by it (3 an hour per person instead).
+- Only active members with a confirmed email get briefings; a workspace waiting for deletion gets none.
+- The scheduler reads across workspaces unscoped (like the snapshot purge); each run is written with its workspace id
+  and composed by a scoped job.
+
+### D80. Long tasks (M10, BUILD_SPEC R10, 13.5, 6.5)
+- One agent runner for questions and tasks (`agent.service.run_agent`, refactored out of M8's question job). A task uses
+  the long limits: 40 steps, the long source timeout (120 s), and a token budget scaled with the steps (3 × 150k).
+- Before each model call the loop checks whether the author cancelled (`should_stop`); a cancelled task stops without
+  another AI call. A queued task is cancelled at once.
+- At most `CONCURRENT_LONG_TASKS_PER_ORG` (2) tasks queued or running per workspace (429). The same rate and Managed
+  limits as a question apply; a task counts as one run towards the monthly limit (D42).
+- A task running for more than 2 hours is reported as failed (`timeout`), like a stale answer.
+- A finished task becomes a report (the answer, its provenance with the cited results' rows, data notes); its PDF is
+  made at once and kept in object storage. The author gets an email with the lead, the evidence, a link to the report
+  and the PDF attached (if 5 MB or less). A failed task is emailed with the reason in words.
+- Submitting is in the activity log (`task.submitted`, a hash of the text); so is cancelling.
+
+### D81. Exports (M10, BUILD_SPEC X3)
+- One `Document` shape (`app/exports/document.py`) for answers, task reports and briefings. Citations become numbered
+  source marks; a Sources list gives tables, connection, fetch time, rows and the query.
+- **PDF** (WeasyPrint): the design system in print (indigo ink, ledger rules, one haldi mark on the key figure, Noto
+  fonts for Indian scripts). Charts are drawn as SVG by code (ECharts cannot run there) with a one-line text summary.
+  WeasyPrint gets no base URL and a fetcher that refuses everything: text the model wrote can never load a file or a
+  web address. Every text is escaped.
+- **Excel** (openpyxl): Summary, Sources, one sheet per cited result's rows, the data behind each chart. Values only;
+  text starting with `=`, `+`, `-`, `@`, tab or CR is stored with a leading apostrophe (formula injection).
+- To export rows, **cited results keep the rows they showed** (at most 200, the same rows the model saw) in their
+  provenance (`data`). Uncited results keep provenance only.
+- An answer's files are made on each export and not kept (BUILD_SPEC 6.6, nothing extra stored); a report's files are
+  made once and kept in object storage (`pdf_key`, `xlsx_key`), deleted with the workspace.
+- Note sentences for PDF, Excel and email are an English copy of `ask.notes` in `locales/en.ts`
+  (`app/exports/text.py`); a test keeps the two in step.
+- Viewers export only items shared with them (BUILD_SPEC 6.2; `require(EXPORT, resource=SharedItem)`). Every export is
+  in the activity log (`export.created`, format, shared or own).
+- The backend image installs Pango and `fonts-noto-core` for WeasyPrint; on a Mac, Pango from Homebrew is used.
+
+### D82. Sharing with the recipient's permissions (M10, BUILD_SPEC X3, P6)
+- A person shares their own answer or report with active members of the same workspace. The recipient may see it only
+  when their connection access covers **every connection its results read** (Owners and "all connections": always;
+  "only these": each one granted; a removed connection counts as not granted). Checked when sharing (409 naming who
+  cannot see it; the dialog lists them but they cannot be chosen) and again on every view: if access shrinks later,
+  the item disappears for them (404).
+- Paused connections still count as theirs: pausing stops new reads, it does not take away what was shared.
+- The person who shared it or the item's owner can stop sharing. The recipient gets an email with a link
+  (`/shared/{id}`). Creating and removing a share are in the activity log. Sharing an item again changes nothing.
+
+### D83. Today and the first insight (M10, BUILD_SPEC 11a.8)
+- `/today` costs no AI call and reads no source: the latest briefing (top 3 items per section, key numbers), three
+  suggested questions written by code from the briefing's findings and the dictionary the person may see, the
+  onboarding checklist, the latest long tasks and items shared with them, and a banner while the workspace waits for
+  deletion.
+- Checklist (Owners): **Company details** = the kind of business is chosen (new "Kind of business" field in Settings,
+  `PATCH /org` `industry`), **Connect data** = any connection, **Confirm dictionary** = a confirmed version exists,
+  **Ask first question** = this person asked one. Each step links to where it is done.
+- **First insight:** after an Owner's first dictionary confirmation (no question asked yet), the app opens Ask and runs
+  a health-check question at once (`/ask?q=...&run=1`). That is one AI question, counted as usual.
+- "Send me a briefing now" on Today and Briefings makes one on demand (3 an hour).
+
+### D84. Command palette (M10, BUILD_SPEC 11a.8)
+- Ctrl/Cmd + K opens a dialog that filters screens (as the menu shows them to this person), "Shared with you", saved
+  questions and connections; arrow keys and Enter go there. It loads on first use (not part of the shell's first load).
+
+### D85. Privacy: data export and workspace deletion (M10, BUILD_SPEC 6.6)
+- **Export** (Owners, 5 an hour): a ZIP of JSON files (workspace, members, connections and tables, dictionary
+  versions, conversations with answers and sources, saved questions, tasks, reports, shares, briefing settings and
+  runs, AI usage) and the activity log as CSV, with a README. Never included: passwords, connection credentials and AI
+  keys; cached copies of the sources (they expire within a day); uploaded files (the Owner has the originals).
+- **Deletion:** an Owner types the workspace's name; `deletion_requested_at` is set and every Owner is emailed the date
+  (7 days later). Any Owner can cancel until then. Meanwhile the workspace works, with a banner, and briefings stop.
+- **Purge** (beat job, hourly): every connection is removed the normal way (files, snapshots, secrets deleted, Google
+  token revoked), report files are deleted, then the workspace row is deleted and the database cascades to every
+  table with its id. One anonymised activity entry `org.deleted` stays: no names, only counts and dates.
+- **Kept on purpose:** people's accounts (an account is global and may belong to other workspaces; a person can still
+  sign in and create a new workspace), and the workspace's earlier activity-log entries (the log is append-only by
+  design, BUILD_SPEC 5). Both are open questions for M19: deleting accounts that belong to no workspace, and a
+  retention limit for the activity log.
+- **Approved by the Owner (2026-11-13):** keep accounts and keep the earlier activity-log entries when a workspace is
+  deleted; both stay open for M19.
+
+### D86. Accuracy evaluation (M10, BUILD_SPEC 12.2, X4)
+- `eval/golden_questions.yaml`: 48 questions (every planted finding, everyday KPI questions, 4 Hindi and 4 Kannada
+  questions, the 5 what-ifs of `whatif_scenarios.yaml` by id), each with expected facts (numbers within a tolerance,
+  named drivers, a change range for what-ifs) and the ideal tool plan.
+- `eval/harness.py`: one pipeline (the agent loop, its tools over the demo tables, the number check, the scorer).
+  **CI** replays each plan with a stand-in model that answers with the figures the tools returned: it checks the
+  harness and the tool layer, and must pass 100%. **`make eval`** (opt-in; `ONLY=`, `LIMIT=`, `LIST=1`) runs the
+  configured real model through the app's LLM layer (retries, fallbacks and the Gemini pitfalls apply) and writes
+  `eval/reports/<date>.md` with the pass rate (Phase 1 needs 85%), each answer, and tokens and estimated cost per run.
+- Scoring ignores signs ("fell 17.7%" = "-17.7%"); money may be written in lakh/crore. Hindi and Kannada questions
+  are scored on their facts; answers are in English for now (D41).
+
+### D87. Two M8 bugs found while building M10
+- `detect_anomalies` raised a TypeError when a series had too little history for a baseline (empty scores compared
+  with a date). The agent saw "bad input"; briefings on short data failed. Now such a series is skipped (nothing to
+  compare with).
+- Opening a conversation marked only the first stale answer as failed (`any(...)` stops at the first match); now every
+  stale answer (and every stale long task) is marked.
+
+### D88. Dictionary metric check label (confirmed 2026-11-13)
+- The Owner confirmed the label stays **"Checked"**: no change. A flagged metric's button reads "Looks right" until it
+  is pressed, then the metric shows "Checked" (`dictionary` strings `check` / `checked` in `locales/en.ts`, D76).

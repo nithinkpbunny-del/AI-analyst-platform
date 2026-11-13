@@ -169,26 +169,78 @@ def _fail(rt: ConnectorRuntime, asked: Asked, code: str, **extra: Any) -> None:
         db.commit()
 
 
-def _answer(
+@dataclass
+class AgentRun:
+    """What one run of the agent produced (a question's answer or a long task's report)."""
+
+    run_id: uuid.UUID
+    ctx: ToolContext
+    outcome: loop.LoopOutcome
+    answer_json: dict[str, Any] | None
+    quality: list[dict[str, Any]]
+    tables_used: list[str]
+    token_usage: dict[str, Any]
+    dictionary_version: int | None
+
+    @property
+    def provenance(self) -> dict[str, Any]:
+        """Provenance of every result; cited results also keep the rows they showed (at most
+        ``rows_to_llm_per_tool_call``), so exports can include them (BUILD_SPEC X3)."""
+        cited = set((self.answer_json or {}).get("cited") or [])
+        out: dict[str, Any] = {}
+        for rid, prov in self.ctx.store.provenance.items():
+            item = prov.as_json()
+            data = self.ctx.store.data.get(rid) or {}
+            if rid in cited and data.get("columns"):
+                item["data"] = {
+                    "columns": data.get("columns"),
+                    "rows": list(data.get("rows") or [])[: self.ctx.max_rows],
+                    "total_rows": data.get("total_rows"),
+                }
+            out[rid] = item
+        return out
+
+
+class RunRefused(Exception):
+    """The agent could not start: no access, no dictionary, no visible tables, or no AI (``code``)."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class RunSpec:
+    """One run of the agent: who asks, what, and with which limits (questions and long tasks differ)."""
+
+    org_id: uuid.UUID
+    user_id: uuid.UUID
+    lens: str
+    question: str
+    turns: list[tuple[str, str]]
+    kind: str = "question"  # usage kind: question | task
+    long: bool = False  # long-task limits (BUILD_SPEC 6.5)
+
+
+def run_agent(
     rt: ConnectorRuntime,
     factory: LLMFactory,
-    asked: Asked,
+    spec: RunSpec,
     *,
-    user_id: uuid.UUID,
-    lens: str,
-    question: str,
-    turns: list[tuple[str, str]],
-) -> str:
+    progress: Any,
+    should_stop: Any = lambda: False,
+) -> AgentRun:
+    """Run the agent for one question with the asker's permissions (BUILD_SPEC 7.1, 6.2). Raises ``RunRefused``
+    before any model call when it cannot start. Every model call is metered (``spec.kind``)."""
     settings = rt.settings
-    with _session(rt, asked.org_id) as db:
+    with _session(rt, spec.org_id) as db:
         try:
-            access = access_context(db, asked.org_id, user_id)
-        except NoAccess:
+            access = access_context(db, spec.org_id, spec.user_id)
+        except NoAccess as error:
             db.commit()
-            _fail(rt, asked, "no_access")
-            return "failed"
-        active = dictionary_service.active(db, asked.org_id)
-        org = db.get(Organization, asked.org_id)
+            raise RunRefused("no_access") from error
+        active = dictionary_service.active(db, spec.org_id)
+        org = db.get(Organization, spec.org_id)
         resolved = None
         failure = None
         if org is not None:
@@ -209,51 +261,51 @@ def _answer(
                 failure = "limit:month"
         db.commit()
     if active.dictionary is None:
-        _fail(rt, asked, "no_dictionary")
-        return "failed"
+        raise RunRefused("no_dictionary")
     visible = visible_dictionary(active.dictionary, access)
     if not visible.dictionary.datasets:
-        _fail(rt, asked, "no_sources")
-        return "failed"
+        raise RunRefused("no_sources")
     if resolved is None:
-        _fail(rt, asked, failure or "ai:ai_not_configured")
-        return "failed"
+        raise RunRefused(failure or "ai:ai_not_configured")
 
     run_id = uuid.uuid4()
     store = ResultStore()
     today = rt.clock().astimezone(_zone(access.timezone)).date()
-    workspace = Workspace(
-        timeout_seconds=settings.source_query_timeout_seconds,
-        max_rows=settings.rows_to_llm_per_tool_call,
+    timeout = (
+        settings.source_query_timeout_long_task_seconds
+        if spec.long
+        else settings.source_query_timeout_seconds
     )
+    max_steps = settings.agent_max_steps_long_task if spec.long else settings.agent_max_steps
+    workspace = Workspace(timeout_seconds=timeout, max_rows=settings.rows_to_llm_per_tool_call)
     ctx = ToolContext(
         access=access,
         visible=visible,
         workspace=workspace,
-        cache=DatasetCache(rt, asked.org_id),
+        cache=DatasetCache(rt, spec.org_id),
         store=store,
         today=today,
         max_rows=settings.rows_to_llm_per_tool_call,
-        progress=_progress(rt, asked),
+        progress=progress,
     )
     system, playbooks = prompts.system_prompt(
         access=access,
         visible=visible,
-        lens=lens,
-        question=question,
+        lens=spec.lens,
+        question=spec.question,
         today=today,
         confirmed=active.confirmed,
-        max_steps=settings.agent_max_steps,
+        max_steps=max_steps,
     )
 
     def meter(response: LLMResponse) -> None:
-        with _session(rt, asked.org_id) as db:
+        with _session(rt, spec.org_id) as db:
             usage.record(
                 db,
-                org_id=asked.org_id,
-                user_id=user_id,
+                org_id=spec.org_id,
+                user_id=spec.user_id,
                 run_id=run_id,
-                kind="question",
+                kind=spec.kind,
                 provider=response.provider,
                 model=response.model,
                 usage=response.usage,
@@ -267,14 +319,17 @@ def _answer(
             resolved.client,
             ctx,
             system=system,
-            history=loop.history_messages(turns),
-            question=question,
+            history=loop.history_messages(spec.turns),
+            question=spec.question,
             limits=loop.Limits(
-                max_steps=settings.agent_max_steps,
-                token_budget=settings.token_budget_per_question,
+                max_steps=max_steps,
+                # A long task may read more: its budget grows with its steps.
+                token_budget=settings.token_budget_per_question
+                * (max_steps // max(1, settings.agent_max_steps) if spec.long else 1),
                 max_output_tokens=settings.llm_max_output_tokens,
             ),
             on_response=meter,
+            should_stop=should_stop,
         )
     finally:
         close_client(resolved.client)
@@ -290,50 +345,80 @@ def _answer(
         "playbooks": playbooks,
     }
     tables_used = _tables_used(ctx)
-    if outcome.answer is None:
-        _fail(
-            rt,
-            asked,
-            outcome.error or "no_answer",
-            run_id=run_id,
-            token_usage=token_usage,
-            tool_trace=ctx.trace,
-            provenance={rid: p.as_json() for rid, p in store.provenance.items()},
-            dictionary_version=active.version,
+    answer_json = None
+    if outcome.answer is not None:
+        notes = _notes(ctx, visible, outcome, confirmed=active.confirmed)
+        removed = answers.impact_rule(
+            outcome.answer,
+            store,
+            asked=answers.asks_for_advice(spec.question),
+            threshold_inr=access.impact_threshold_inr,
+            threshold_pct=access.impact_threshold_pct,
         )
-        _audit(rt, asked, user_id, question, lens, tables_used, status="failed")
-        return "failed"
-
-    notes = _notes(ctx, visible, outcome, confirmed=active.confirmed)
-    removed = answers.impact_rule(
-        outcome.answer,
-        store,
-        asked=answers.asks_for_advice(question),
-        threshold_inr=access.impact_threshold_inr,
-        threshold_pct=access.impact_threshold_pct,
-    )
-    if removed:
-        notes.append({"code": removed})
-    charts = _charts(ctx, outcome.answer.charts)
-    answer_json = answers.as_json(outcome.answer, notes=notes, charts=charts)
+        if removed:
+            notes.append({"code": removed})
+        charts = _charts(ctx, outcome.answer.charts)
+        answer_json = answers.as_json(outcome.answer, notes=notes, charts=charts)
     quality = [
         {"table": key, "name": ctx.loaded.get(key, {}).get("name", key), **q}
         for key in tables_used
         for q in ctx.quality.get(key, [])
     ]
+    return AgentRun(
+        run_id=run_id,
+        ctx=ctx,
+        outcome=outcome,
+        answer_json=answer_json,
+        quality=quality,
+        tables_used=tables_used,
+        token_usage=token_usage,
+        dictionary_version=active.version,
+    )
+
+
+def _answer(
+    rt: ConnectorRuntime,
+    factory: LLMFactory,
+    asked: Asked,
+    *,
+    user_id: uuid.UUID,
+    lens: str,
+    question: str,
+    turns: list[tuple[str, str]],
+) -> str:
+    spec = RunSpec(asked.org_id, user_id, lens, question, turns)
+    try:
+        run = run_agent(rt, factory, spec, progress=_progress(rt, asked))
+    except RunRefused as refused:
+        _fail(rt, asked, refused.code)
+        return "failed"
+    if run.answer_json is None:
+        _fail(
+            rt,
+            asked,
+            run.outcome.error or "no_answer",
+            run_id=run.run_id,
+            token_usage=run.token_usage,
+            tool_trace=run.ctx.trace,
+            provenance=run.provenance,
+            dictionary_version=run.dictionary_version,
+        )
+        _audit(rt, asked, user_id, question, lens, run.tables_used, status="failed")
+        return "failed"
+
     first_question = not turns
     with _session(rt, asked.org_id) as db:
         message = db.get(Message, asked.message_id)
         if message is not None:
             message.status = "done"
-            message.content = outcome.answer.lead
-            message.answer_json = answer_json
-            message.tool_trace = ctx.trace
-            message.provenance = {rid: p.as_json() for rid, p in store.provenance.items()}
-            message.quality_warnings = quality
-            message.token_usage = token_usage
-            message.run_id = run_id
-            message.dictionary_version = active.version
+            message.content = str(run.answer_json["lead"])
+            message.answer_json = run.answer_json
+            message.tool_trace = run.ctx.trace
+            message.provenance = run.provenance
+            message.quality_warnings = run.quality
+            message.token_usage = run.token_usage
+            message.run_id = run.run_id
+            message.dictionary_version = run.dictionary_version
             message.finished_at = rt.clock()
             message.progress_json = [*message.progress_json, {"code": "done"}]
             conversation = db.get(Conversation, message.conversation_id)
@@ -341,9 +426,9 @@ def _answer(
                 conversation.last_message_at = rt.clock()
         db.commit()
     if first_question:
-        key = reuse_key(asked.org_id, user_id, lens, question, active.version)
-        rt.redis.set(key, str(asked.message_id), ex=max(1, settings.cache_ttl_seconds))
-    _audit(rt, asked, user_id, question, lens, tables_used, status="done")
+        key = reuse_key(asked.org_id, user_id, lens, question, run.dictionary_version)
+        rt.redis.set(key, str(asked.message_id), ex=max(1, rt.settings.cache_ttl_seconds))
+    _audit(rt, asked, user_id, question, lens, run.tables_used, status="done")
     return "done"
 
 

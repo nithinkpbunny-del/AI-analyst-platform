@@ -1,11 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/ui/button'
 import { ConfirmDialog } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import { ApiError } from '../../lib/api'
+import { useCan } from '../../lib/permissions'
+import { reportsApi } from '../../lib/reportsApi'
+import { askLink } from '../today/links'
 import {
   DICTIONARY,
   INDUSTRIES,
@@ -163,6 +167,8 @@ export function DraftWorkspace({
     },
     onError: (error) => onNotice({ tone: 'error', text: errorText(t, error) }),
   })
+  const navigate = useNavigate()
+  const canAsk = useCan('ask')
   const confirm = useMutation({
     mutationFn: async () => {
       if (dirty) {
@@ -181,6 +187,11 @@ export function DraftWorkspace({
         text: t('dictionary.actions.confirmed', { version: confirmed.version }),
       })
       await refresh()
+      // The first confirmation leads straight to the first insight: a health check (BUILD_SPEC 11a.8).
+      if (canAsk) {
+        const today = await reportsApi.today().catch(() => null)
+        if (today && !today.checklist.ask) void navigate(askLink(today.health_check, true))
+      }
     },
     onError: (error) => onNotice({ tone: 'error', text: errorText(t, error) }),
   })

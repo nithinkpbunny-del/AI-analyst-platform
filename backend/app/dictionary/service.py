@@ -478,7 +478,46 @@ def _run_draft(
         )
         db.commit()
         version_id = saved.id
+    if origin == "schema_change" and confirmed is not None and built.diff:
+        notify_owners(rt, org_id, len(built.diff))
     return DraftOutcome("drafted", version_id, ai.status, notes)
+
+
+def notify_owners(rt: ConnectorRuntime, org_id: uuid.UUID, changes: int) -> None:
+    """Email the workspace's Owners that a change in the data made a new draft to check (BUILD_SPEC 9.6)."""
+    if rt.email is None:
+        return
+    from app.email import templates
+    from app.models import Membership, Organization, User
+
+    with _session(rt, org_id) as db:
+        org = db.get(Organization, org_id)
+        owners = list(
+            db.scalars(
+                select(User)
+                .join(Membership, Membership.user_id == User.id)
+                .where(
+                    Membership.org_id == org_id,
+                    Membership.role == "owner",
+                    Membership.status == "active",
+                    User.is_active.is_(True),
+                )
+            )
+        )
+        db.commit()
+    if org is None:
+        return
+    summary = "1 change" if changes == 1 else f"{changes} changes"
+    for owner in owners:
+        rt.email.send(
+            templates.render(
+                "dictionary_draft",
+                to=owner.email,
+                org_name=org.name,
+                summary=summary,
+                link=f"{rt.settings.app_base_url}/dictionary",
+            )
+        )
 
 
 # ------------------------------------------------------------------------------------------ confirming

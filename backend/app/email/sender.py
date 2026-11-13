@@ -23,11 +23,19 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class Attachment:
+    filename: str
+    content_type: str  # e.g. "application/pdf"
+    data: bytes
+
+
+@dataclass(frozen=True)
 class OutgoingEmail:
     to: str
     subject: str
     text: str
     html: str
+    attachments: tuple[Attachment, ...] = ()
 
 
 class EmailSender(Protocol):
@@ -47,6 +55,11 @@ class SmtpEmailSender:
         email["Message-ID"] = make_msgid(domain="analyst.local")
         email.set_content(message.text)
         email.add_alternative(message.html, subtype="html")
+        for attachment in message.attachments:
+            maintype, _, subtype = attachment.content_type.partition("/")
+            email.add_attachment(
+                attachment.data, maintype=maintype, subtype=subtype, filename=attachment.filename
+            )
         return email
 
     def send(self, message: OutgoingEmail) -> None:

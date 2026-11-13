@@ -165,7 +165,8 @@ class TestTools:
         for spec in SPECS.values():
             assert spec.parameters["type"] == "object" and spec.description
         assert "what_if" in SPECS  # M9
-        assert "goal_progress" not in SPECS and "growth_signals" not in SPECS
+        assert "growth_signals" in SPECS  # M10
+        assert "goal_progress" not in SPECS  # goals arrive in M15
 
 
 # ------------------------------------------------------------------------------------------------- loop

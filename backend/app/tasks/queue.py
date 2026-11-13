@@ -24,6 +24,8 @@ from app.llm.base import LLMFactory
 SYNC_CONNECTION = "app.tasks.jobs.sync_connection"
 DRAFT_DICTIONARY = "app.tasks.jobs.draft_dictionary"
 ANSWER_QUESTION = "app.tasks.jobs.answer_question"
+RUN_TASK = "app.tasks.jobs.run_task"
+SEND_BRIEFING = "app.tasks.jobs.send_briefing"
 
 
 class JobQueue(Protocol):
@@ -51,6 +53,14 @@ class JobQueue(Protocol):
 
     def answer_question(self, asked: agent_service.Asked) -> None:
         """Answer a question the API stored as a ``queued`` message (M8)."""
+        ...
+
+    def run_task(self, *, org_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        """Run a long task the API stored as ``queued`` (M10)."""
+        ...
+
+    def send_briefing(self, *, org_id: uuid.UUID, run_id: uuid.UUID) -> None:
+        """Compose and send one briefing run (M10)."""
         ...
 
 
@@ -126,6 +136,16 @@ class CeleryJobQueue:
 
         celery_app.send_task(ANSWER_QUESTION, kwargs=_answer_kwargs(asked))
 
+    def run_task(self, *, org_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        from app.tasks.celery_app import celery_app
+
+        celery_app.send_task(RUN_TASK, kwargs={"org_id": str(org_id), "task_id": str(task_id)})
+
+    def send_briefing(self, *, org_id: uuid.UUID, run_id: uuid.UUID) -> None:
+        from app.tasks.celery_app import celery_app
+
+        celery_app.send_task(SEND_BRIEFING, kwargs={"org_id": str(org_id), "run_id": str(run_id)})
+
 
 class InlineJobQueue:
     """Runs jobs at once, in this process. Like the worker, a finished sync leads to a dictionary update."""
@@ -179,6 +199,20 @@ class InlineJobQueue:
             return
         agent_service.answer_question(self._runtime, self._llm_factory, asked)
 
+    def run_task(self, *, org_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        if self._llm_factory is None:
+            return
+        from app.tasks import long_tasks
+
+        long_tasks.run_task(self._runtime, self._llm_factory, org_id, task_id)
+
+    def send_briefing(self, *, org_id: uuid.UUID, run_id: uuid.UUID) -> None:
+        if self._llm_factory is None:
+            return
+        from app.briefings import service as briefings
+
+        briefings.send_briefing(self._runtime, self._llm_factory, org_id, run_id)
+
 
 @dataclass
 class RecordingJobQueue:
@@ -212,3 +246,9 @@ class RecordingJobQueue:
 
     def answer_question(self, asked: agent_service.Asked) -> None:
         self.jobs.append((ANSWER_QUESTION, _answer_kwargs(asked)))
+
+    def run_task(self, *, org_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        self.jobs.append((RUN_TASK, {"org_id": str(org_id), "task_id": str(task_id)}))
+
+    def send_briefing(self, *, org_id: uuid.UUID, run_id: uuid.UUID) -> None:
+        self.jobs.append((SEND_BRIEFING, {"org_id": str(org_id), "run_id": str(run_id)}))

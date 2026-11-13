@@ -7,6 +7,12 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH="/opt/venv/bin:$PATH"
 
+# PDF exports (WeasyPrint, M10) need Pango and fonts for every Indian script the app shows.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-noto-core \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir uv==0.13.7
 
 WORKDIR /app

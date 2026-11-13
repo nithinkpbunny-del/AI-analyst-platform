@@ -29,7 +29,7 @@ INDUSTRY_NAMES = {
 }
 
 # Playbook file -> words that call for it, most specific first (``choose_playbooks`` keeps the first few).
-# ``daily_briefing`` belongs to M10.
+# ``daily_briefing`` also guides the morning briefing writer (M10) and "health check" questions.
 PLAYBOOK_WORDS: dict[str, re.Pattern[str]] = {
     "what_if": re.compile(
         r"\b(what if|what would happen|if we|if i|suppose|simulat\w*|scenario|"
@@ -61,6 +61,11 @@ PLAYBOOK_WORDS: dict[str, re.Pattern[str]] = {
         r"\b(budget\w*|over ?spen\w*|variance|expenses?|overrun)\b", re.I
     ),
     "goal_tracking": re.compile(r"\b(targets?|goals?|on track|behind plan|ahead of plan)\b", re.I),
+    "daily_briefing": re.compile(
+        r"\b(health ?check|briefing|overview|how (are|is) (we|the business) doing|what'?s working|"
+        r"working well|growth signals?|growing)\b",
+        re.I,
+    ),
 }
 
 

@@ -10,9 +10,9 @@ beforeEach(() => {
 })
 
 describe('app shell', () => {
-  it('opens on Today', () => {
+  it('opens on Today', async () => {
     renderApp('/')
-    expect(screen.getByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument()
   })
 
   it('lists the main screens and, for Owners, the management screens in spec order', () => {
@@ -46,14 +46,14 @@ describe('app shell', () => {
   })
 
   it('every placeholder screen has one sentence and one primary action', () => {
-    renderApp('/briefings')
+    renderApp('/goals')
     const main = screen.getByRole('main')
     expect(
-      within(main).getByText('Your first briefing arrives the morning after you connect data.'),
+      within(main).getByText('Set your first target to track progress every day.'),
     ).toBeInTheDocument()
-    expect(within(main).getByRole('link', { name: 'Connect data' })).toHaveAttribute(
+    expect(within(main).getByRole('link', { name: 'Ask a question' })).toHaveAttribute(
       'href',
-      '/connections',
+      '/ask',
     )
   })
 

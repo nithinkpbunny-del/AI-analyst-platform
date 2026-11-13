@@ -50,7 +50,7 @@ TEXT_NUDGE = "Call give_answer with your answer."
 @dataclass
 class LoopOutcome:
     answer: answers.Answer | None
-    error: str | None = None  # limit:steps | limit:tokens | llm:<kind> | no_answer
+    error: str | None = None  # limit:steps | limit:tokens | llm:<kind> | no_answer | cancelled
     notes: list[str] = field(
         default_factory=list
     )  # code notes: numbers_removed:<n>, restarted, ...
@@ -81,6 +81,7 @@ def run(
     question: str,
     limits: Limits,
     on_response: Callable[[LLMResponse], None] = lambda _r: None,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> LoopOutcome:
     start: list[Message] = [*history, UserMessage(question)]
     messages: list[Message] = list(start)
@@ -90,6 +91,10 @@ def run(
     nudged_text = False
 
     while outcome.calls < limits.max_steps:
+        if should_stop():
+            # A long task the person cancelled: stop before the next model call (nothing more is spent).
+            outcome.error = "cancelled"
+            return outcome
         if outcome.usage.input_tokens >= limits.token_budget:
             outcome.error = "limit:tokens"
             return outcome

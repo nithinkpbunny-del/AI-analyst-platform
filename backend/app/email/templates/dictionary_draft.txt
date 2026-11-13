@@ -1,0 +1,3 @@
+Your data in {{ org_name }} changed ({{ summary }}), so Analyst drafted a new version of the business dictionary.
+
+Check what changed and confirm it, so answers use the right meanings: {{ link }}

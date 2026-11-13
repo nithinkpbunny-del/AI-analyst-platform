@@ -137,7 +137,10 @@ def _conversation_out(conversation: Conversation) -> ConversationOut:
 def _detail(tenant: Tenant, conversation: Conversation) -> ConversationDetailOut:
     messages = _messages(tenant, conversation)
     now = tenant.service.clock()
-    if any(agent_service.mark_stale(tenant.db, m, now) for m in messages):
+    stale = [
+        agent_service.mark_stale(tenant.db, m, now) for m in messages
+    ]  # every one, not just the first
+    if any(stale):
         tenant.db.commit()
     return ConversationDetailOut(
         **_conversation_out(conversation).model_dump(),

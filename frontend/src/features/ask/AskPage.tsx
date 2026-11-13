@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, History, MessageSquareText, Plus, Trash2, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { EmptyState } from '../../components/EmptyState'
@@ -29,6 +29,13 @@ import { ShowMyWork } from './ShowMyWork'
 
 const CONVERSATIONS = ['conversations'] as const
 const SAVED = ['saved-questions'] as const
+// Export and Share load when first opened (the Ask screen is part of the app shell's first load).
+const ExportDialog = lazy(() =>
+  import('../reports/ExportDialog').then((m) => ({ default: m.ExportDialog })),
+)
+const ShareDialog = lazy(() =>
+  import('../reports/ShareDialog').then((m) => ({ default: m.ShareDialog })),
+)
 const POLL_MS = 1000
 
 function conversationKey(id: string) {
@@ -183,6 +190,8 @@ export function AskPage() {
   const queryClient = useQueryClient()
   const canAsk = useCan('ask')
   const canSave = useCan('saved_questions')
+  const canExport = useCan('export')
+  const canShare = useCan('share')
   const box = useRef<HTMLTextAreaElement>(null)
   useSlashFocus(box)
   const [lens, setLens] = useState<Lens>('business')
@@ -190,6 +199,9 @@ export function AskPage() {
   const [work, setWork] = useState<ChatMessage | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [exporting, setExporting] = useState<ChatMessage | null>(null)
+  const [sharing, setSharing] = useState<ChatMessage | null>(null)
+  const autoRun = useRef(false)
 
   useEffect(() => {
     document.title = `${t('pages.ask.title')} · ${t('app.name')}`
@@ -265,6 +277,14 @@ export function AskPage() {
     if (conversationId && current) followUp.mutate(question)
     else start.mutate({ question, lens: chosen })
   }
+
+  // `/ask?q=...&run=1` asks at once (the first health check after onboarding, Today's suggestions).
+  useEffect(() => {
+    if (autoRun.current || conversationId || !canAsk || !typed) return
+    if (searchParams.get('run') !== '1') return
+    autoRun.current = true
+    start.mutate({ question: typed, lens: 'business' })
+  }, [conversationId, canAsk, typed, searchParams, start])
 
   function askFresh(question: string, chosen: Lens) {
     setNotice(null)
@@ -422,6 +442,14 @@ export function AskPage() {
                     message={message}
                     onNextQuestion={(q) => ask(q)}
                     onShowWork={() => setWork(message)}
+                    onExport={
+                      canExport && message.status === 'done'
+                        ? () => setExporting(message)
+                        : undefined
+                    }
+                    onShare={
+                      canShare && message.status === 'done' ? () => setSharing(message) : undefined
+                    }
                     onRetry={() => {
                       const asked = current.messages[i - 1]
                       if (asked?.role === 'user') ask(asked.content)
@@ -463,6 +491,25 @@ export function AskPage() {
         open={work !== null}
         onOpenChange={(open) => !open && setWork(null)}
       />
+      {current && exporting ? (
+        <Suspense fallback={null}>
+          <ExportDialog
+            target={{ kind: 'message', conversationId: current.id, messageId: exporting.id }}
+            open
+            onOpenChange={(open) => !open && setExporting(null)}
+          />
+        </Suspense>
+      ) : null}
+      {sharing ? (
+        <Suspense fallback={null}>
+          <ShareDialog
+            kind="message"
+            objectId={sharing.id}
+            open
+            onOpenChange={(open) => !open && setSharing(null)}
+          />
+        </Suspense>
+      ) : null}
       <ConfirmDialog
         open={deleting}
         onOpenChange={setDeleting}

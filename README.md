@@ -30,6 +30,7 @@ make storybook   # component workshop at http://localhost:6006
 make e2e         # visual snapshots + accessibility + layout checks (Playwright in Docker)
 make tokens      # regenerate design/generated/ after editing design/tokens.json
 make llm-check   # one real tool-calling round trip with the AI key in .env (opt-in, a few hundred tokens)
+make eval        # the 48 golden questions on a real model (opt-in; ONLY=id1,id2 LIMIT=n LIST=1)
 make help        # every command
 ```
 Backend tests start a throwaway Postgres 16 with testcontainers, so Docker must be running (or set
@@ -45,5 +46,5 @@ To try roles, open **Team** as an Owner and invite someone (any address works lo
 Mailpit). Open the link in a private window to accept it as that person.
 
 ## Layout
-`backend/` FastAPI + Celery · `frontend/` React + Vite · `design/` design tokens · `eval/` demo-data generator and answer key ·
+`backend/` FastAPI + Celery · `frontend/` React + Vite · `design/` design tokens · `eval/` demo-data generator, answer key and golden questions ·
 `scripts/` helpers · `docs/` architecture, design, decisions, progress.

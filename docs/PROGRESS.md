@@ -1,23 +1,24 @@
-**Next milestone: M10: Briefings, long tasks, exports, sharing, eval** (start when the human says "continue").
-**Unfinished work:** none for M9. Carry into M10 and later:
-- New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`), get `AccessContext` through `ToolContext`, use
-  only `ctx.dictionary` (the visible one) and `ctx.ensure()` to load tables, and return results through
-  `ctx.store.add(...)` so the number check and provenance see them (D65-D69). `what_if` (M9) is the model.
-- Every number comes from code: the model cites result ids (`[r3]`), `give_answer` is the only way to answer (D67).
+**Next milestone: M10b: Public website** (then the Phase 1 review; start when the human says "continue").
+**Unfinished work:** none for M10. Carry into M10b and later:
+- **Never run against a real model yet** (M8-M10): the agent, the briefing writer and `make eval` are tested with the
+  fake client only. Phase 1 sign-off needs >= 85% on `make eval` with a real model (BUILD_SPEC 12.2): run it by name
+  when you are ready (`make eval LIST=1` lists the 48 questions; `make eval ONLY=south_q3_why,youtube_roas` runs a few).
+- M10b's final design QA (11a.9) should look again at the Today, Briefings, Tasks and report screens on phones.
+- The app shell is at 195.2 KB of its 200 KB budget: the next screens must load lazily; splitting `locales/en.ts` by
+  screen is the next lever.
+- New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`); questions and long tasks run through
+  `agent.service.run_agent`. Every number comes from code and cites a result id (D67).
 - Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants; every new route goes in
-  `tests/api/test_route_matrix.py` (`CASES`, `PERSONAL` for per-person ids, or `DATA_ROUTES` for routes that need
-  uploaded data, each tested in its own file).
-- Every LLM call goes through `keys.resolve(...)` and is metered (D42). **No real LLM calls during builds or
-  tests** (CLAUDE.md): fake client only; never run `make llm-check` unless asked by name.
-- Read data only through `DatasetCache`; decide visibility with `app.agent.access` (agent) or
-  `app.connectors.access` (API).
-- M10's golden questions (`eval/golden_questions.yaml`) should include the five what-ifs of
-  `eval/whatif_scenarios.yaml` (D75); briefings can call `what_if` for "suggested changes" only with the labelled
-  assumptions and range.
-**Deferred:** multilingual answers and UI translations (D41): answers are in English, all text in `locales/en.ts`.
-Pin/Export/Share on answers (M10, M15), the command palette Ctrl/Cmd+K (not built yet; suggest M10 with Today and
-onboarding). Email notice of a new dictionary draft comes with briefing emails (M10). What-if levers for stock,
-staffing and product mix (D71).
+  `tests/api/test_route_matrix.py` (`CASES`, `PERSONAL`, `DATA_ROUTES` or `STATEFUL`, the last three tested in their
+  own files).
+- Every LLM call goes through `keys.resolve(...)` and is metered (D42); no real LLM calls in builds or tests.
+- Open privacy questions for M19 (D85, approved by the Owner 2026-11-13: keep accounts and keep earlier activity-log
+  entries on workspace deletion for now): deleting accounts that belong to no workspace; a retention limit for the
+  activity log.
+- Dictionary metric label confirmed: it stays "Checked" (D88); no code change.
+- Small fix asked for later: removing a source and uploading the same file again loses its dictionary edits (D76).
+**Deferred:** multilingual answers, briefings and UI translations (D41): everything is in English, all UI text in
+`locales/en.ts`. Pin to dashboard and goals (M15). What-if levers for stock, staffing and product mix (D71).
 
 ## Milestone checklist (BUILD_SPEC §14)
 
@@ -32,7 +33,7 @@ staffing and product mix (D71).
 - [x] M7: Zero setup: profiler + business dictionary
 - [x] M8: Agent core + Ask UI (multilingual answers deferred, D41)
 - [x] M9: What-if simulator
-- [ ] M10: Briefings, long tasks, exports, sharing, eval
+- [x] M10: Briefings, long tasks, exports, sharing, eval
 - [ ] M10b: Public website (then Phase 1 review, stop)
 
 ### Phase 2
@@ -745,3 +746,85 @@ check" that could not be found or cleared, with Confirm disabled.
   web app (strip, button, Confirm enabled after checking, text of the change, dialog warning).
 - Not done on purpose: keeping a removed table's edits for a re-upload.
 
+
+
+---
+
+## M10: Briefings, long tasks, exports, sharing, eval (done)
+
+**Built**
+- **Database** (migration `0010`, reversible): `reports`, `tasks`, `briefing_settings`, `briefing_runs` (one scheduled
+  run per person and slot: a partial unique index), `shares`; each with RLS, the `tenant_isolation` policy and
+  least-privilege grants (briefing history and shares cannot be edited by a workspace request).
+- **Growth signals** (`app/analytics/growth.py`, agent tool `growth_signals`): segments and pairs that grew 3+ periods
+  in a row while gaining share, the whole beating last year, repeat-customer share and an estimated upside (D77).
+  Finds planted finding 6 (West × Beauty).
+- **Briefings** (`app/briefings/`): facts by code with the recipient's permissions (KPI snapshot, unusual numbers,
+  growth signals, risks, finished long tasks), one small AI call to write them (number-checked) or a code-written
+  fallback, a cache for identical facts, suppression of findings already sent, alerts-only mode, HTML + text email with
+  numbered source links, stored as a report (D78). Beat job every 5 minutes, per-person time zone, idempotent (D79).
+- **Long tasks** (`app/tasks/long_tasks.py`): the agent with the long limits (40 steps), progress, cancel before the
+  next AI call, 2 per workspace, report + PDF, email with the PDF attached (D80). Questions and tasks now share one
+  runner (`agent.service.run_agent`).
+- **Exports** (`app/exports/`): PDF (WeasyPrint, the design system in print, SVG charts, sources list, no outside
+  fetches) and Excel (summary, sources, the cited results' rows, chart data, formula-safe) for answers, task reports
+  and briefings (D81).
+- **Sharing** (`/shares`, `/shared`): with members whose connection access covers every source the item used, checked
+  when sharing and on every view; Viewers can export what was shared with them; emails to recipients (D82).
+- **Today** (`/today`): onboarding checklist (Company details, Connect data, Confirm dictionary, Ask first question),
+  the latest briefing with key numbers, three suggested questions written by code, "Run a health check", latest
+  analyses and shared items, a deletion banner. No AI call (D83). After an Owner's first dictionary confirmation the
+  app runs the health check at once.
+- **Privacy** (Settings, Owners): download the workspace's data as a ZIP (no secrets, no cached source data);
+  delete the workspace (type its name; 7-day grace with emails to every Owner; cancel any time; hourly purge removes
+  connections, files, snapshots, secrets, reports and every row; an anonymised `org.deleted` entry stays) (D85).
+- **Dictionary draft email** (carried from M7): when a change in the data makes a new draft after a confirmed one,
+  every Owner gets an email with a link to the review screen.
+- **Command palette** (Ctrl/Cmd + K): screens, saved questions, connections (D84).
+- **Eval harness** (`eval/harness.py`, `eval/golden_questions.yaml`, `make eval`): 48 golden questions (all eight
+  planted findings, 4 Hindi + 4 Kannada, the 5 what-ifs); CI replays each question's ideal plan with a stand-in model
+  through the real agent loop and scorer (100%); `make eval` runs a real model, opt-in, with a report, pass rate and
+  token cost (D86).
+- **Web app**: Today, Briefings (settings, "Send me a briefing now", past briefings), Tasks (start, progress, cancel,
+  open report), report pages, "Shared with you", Export and Share on every answer and report, Privacy and "Kind of
+  business" in Settings, activity-log sentences for the new entries. New screens load lazily. All text in
+  `locales/en.ts`.
+- **Fixed on the way** (D87): `detect_anomalies` failed on short histories (M8); only the first stale answer was marked
+  failed (M8).
+- New dependency: `weasyprint` (backend; the Docker image now installs Pango and Noto fonts). No new environment
+  variables.
+
+**Test status**
+- Backend: 1933 passed (1652 in M9); ruff and mypy (strict, app + tests + eval) clean. New: growth signals against the
+  answer key and synthetic data; exports (sources, citations, the haldi mark, escaping, no fetches, Hindi text, Excel
+  formula safety, notes in step with the web app); briefing facts on the demo data (the 15 Aug outage as the alert,
+  growth, old data, suppression, provenance, no rows to the AI), the writer (fake AI: good answer, invented figures
+  removed, invented headline refused, errors and plain text fall back), the schedule (IST slots, window, weekly, off,
+  own time zone); API: tasks (run, report, PDF email, failure email, limits, stale, cancel before the next AI call,
+  access), briefings (settings, send now with and without AI, reuse of written words, rate limit, scheduler idempotency,
+  settings followed, deleting workspace, alerts only, not sent twice, dictionary-draft email), exports and sharing
+  (PDF/Excel, Viewer rules, recipients who cannot see the sources, shrinking access, stop sharing, 404s), Today,
+  data export (no secrets, no other workspace), deletion (request, cancel, emails, purge after 7 days with storage
+  cleared); security (RLS on the five new tables, no cross-workspace writes, no deleting briefing history, growth tool
+  cannot reach hidden tables); route matrix for 11 new routes (466 cases) plus 10 personal and 1 stateful route tested
+  in their own files; the 48 golden questions through the harness.
+- Frontend: vitest 335 passed (312 in M9); eslint, prettier, tsc, tokens:check clean. Build OK: shell 195.2 KB of
+  200 KB gzipped (184.2 in M9). Storybook builds (new "Screens/Today, briefings and tasks").
+- Playwright: one full run (`--update-snapshots=changed`): 301 passed, 31 skipped by design, none failed. Re-recorded
+  and reviewed: Today, Briefings, Tasks, Settings (Privacy, kind of business), the workspace switcher and the phone
+  "More" sheet (they open over Today), and the phone Ask answer (Export and Share buttons); new baselines for a
+  briefing report and the Share dialog; axe clean on all of them. The review found "vs vs" on the key-number tiles and
+  raw `[r3]` marks in the past-briefings list; both fixed, and only the Today/Briefings/report specs were re-run
+  (28 passed twice; one screenshot mismatch on the first check did not come back).
+- **No AI calls were made.** `make eval` and `make llm-check` were not run.
+
+**How to try it:** see the testing steps given at the end of M10.
+
+**Known gaps / notes**
+- Not run against a real model: how well a real model writes briefings and passes the golden questions is unknown
+  until `make eval` runs (by name, when you are ready). The briefing always has the code-written version to fall back on.
+- Briefings and answers are in English (D41); the briefing language setting shows English only.
+- Goals in briefings and Today arrive with M15; "upcoming risks" are data-quality and connection risks for now
+  (stock and receivables risks need Tally/Zoho, M13/M16).
+- A deleted workspace's people keep their accounts, and its earlier activity-log entries stay (D85; M19).
+- Task and briefing PDFs use the fonts installed on the server (Noto in Docker); Bricolage Grotesque is not embedded.

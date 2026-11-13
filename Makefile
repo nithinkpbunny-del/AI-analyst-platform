@@ -107,5 +107,6 @@ seed-demo: fixtures ## Alias for fixtures (later milestones also load them into 
 llm-check: ## One real tool-calling round trip with the AI key in .env (opt-in; uses a few hundred tokens)
 	$(BACKEND) uv run python -m app.llm.check $(if $(PROVIDER),--provider $(PROVIDER),)
 
-eval: ## Golden-question evaluation against a real model (arrives in milestone M10)
-	@echo "The evaluation harness is built in milestone M10. Nothing to run yet."
+eval: ## Golden questions against a real model (opt-in, uses the .env key; ONLY=id1,id2 LIMIT=n LIST=1)
+	$(BACKEND) uv run python ../eval/run_eval.py $(if $(PROVIDER),--provider $(PROVIDER),) \
+		$(if $(ONLY),--only $(ONLY),) $(if $(LIMIT),--limit $(LIMIT),) $(if $(LIST),--list,)

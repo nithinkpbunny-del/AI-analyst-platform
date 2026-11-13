@@ -1,4 +1,11 @@
-import { API_BASE_URL, ApiError, authedRequest, getAccessToken, request } from './api'
+import {
+  API_BASE_URL,
+  ApiError,
+  authedDownload,
+  authedRequest,
+  getAccessToken,
+  request,
+} from './api'
 import type { LoginResponse, SwitchedResponse } from './authApi'
 import type { Role } from './role'
 
@@ -37,12 +44,28 @@ export interface InvitationPreview {
   has_password: boolean
 }
 
+export type Industry =
+  'retail' | 'd2c' | 'restaurant' | 'fuel_station' | 'services' | 'manufacturing' | 'other'
+export const INDUSTRIES: Industry[] = [
+  'retail',
+  'd2c',
+  'restaurant',
+  'fuel_station',
+  'services',
+  'manufacturing',
+  'other',
+]
+
 export interface OrganizationSettings {
   id: string
   name: string
   timezone: string
   currency: string
   plan: string
+  industry: Industry | null
+  /** A requested deletion (BUILD_SPEC 6.6): when it was asked and when it happens. */
+  deletion_requested_at: string | null
+  deletion_due_at: string | null
 }
 
 // -------------------------------------------------------------------------------------------- activity
@@ -101,8 +124,15 @@ export const teamApi = {
     authedRequest<void>(`/team/invitations/${id(invitationId)}`, { method: 'DELETE' }),
 
   organization: () => authedRequest<OrganizationSettings>('/org'),
-  updateOrganization: (changes: { name?: string; timezone?: string }) =>
+  updateOrganization: (changes: { name?: string; timezone?: string; industry?: Industry }) =>
     authedRequest<OrganizationSettings>('/org', { method: 'PATCH', body: changes }),
+  requestDeletion: (confirmName: string) =>
+    authedRequest<OrganizationSettings>('/org/deletion', {
+      method: 'POST',
+      body: { confirm_name: confirmName },
+    }),
+  cancelDeletion: () => authedRequest<OrganizationSettings>('/org/deletion', { method: 'DELETE' }),
+  exportData: () => authedDownload('/org/export.zip'),
 
   audit: (filters: AuditFilters, cursor?: string | null) =>
     authedRequest<AuditPage>(`/audit${auditQuery(filters, cursor)}`),

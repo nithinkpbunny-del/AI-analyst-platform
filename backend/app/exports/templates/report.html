@@ -1,0 +1,93 @@
+{#- Print colours are the light-theme tokens (design/tokens.json): ink #1E1C3A, ink-muted #5A5874, line #E2E4EE,
+    neel #3A36A8, haldi #F2C230 (the mark at 55% opacity), caution #A86A0A. Keep them in sync with the tokens. -#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ doc.title }}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm;
+    @bottom-left { content: "{{ doc.org_name }} · {{ doc.title|truncate(60) }}"; font-size: 8pt; color: #5A5874;
+      font-family: "Noto Sans", Arial, sans-serif; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: #5A5874;
+      font-family: "Noto Sans", Arial, sans-serif; } }
+  body { font-family: "Noto Sans", "Noto Sans Devanagari", Arial, sans-serif; color: #1E1C3A; font-size: 10pt;
+    line-height: 1.55; font-variant-numeric: tabular-nums; }
+  .brand { color: #3A36A8; font-weight: 600; font-size: 9pt; margin: 0 0 8pt; }
+  h1 { font-family: "Bricolage Grotesque", "Noto Sans", Arial, sans-serif; font-size: 18pt; line-height: 1.15;
+    margin: 0 0 4pt; letter-spacing: -0.01em; }
+  .meta { color: #5A5874; font-size: 9pt; margin: 0 0 14pt; }
+  .question { border-left: 3px solid #3A36A8; padding: 4pt 0 4pt 10pt; margin: 0 0 14pt; color: #1E1C3A; }
+  .lead { font-family: "Bricolage Grotesque", "Noto Sans", Arial, sans-serif; font-size: 14pt; line-height: 1.35;
+    margin: 0 0 14pt; font-weight: 600; }
+  .mark { background-color: rgba(242, 194, 48, 0.55); padding: 0 2pt; border-radius: 2pt; }
+  h2 { font-size: 11pt; margin: 16pt 0 4pt; }
+  ul.ledger { list-style: none; padding: 0; margin: 0; }
+  ul.ledger li { border-top: 1px solid #E2E4EE; padding: 6pt 0; }
+  ul.ledger li:last-child { border-bottom: 1px solid #E2E4EE; }
+  sup { color: #3A36A8; font-size: 7pt; }
+  .chart { margin: 12pt 0; page-break-inside: avoid; }
+  .chart p { margin: 2pt 0; }
+  .chart .summary { color: #5A5874; font-size: 8.5pt; }
+  .notes li { color: #A86A0A; }
+  table { border-collapse: collapse; width: 100%; font-size: 8.5pt; }
+  th, td { text-align: left; border-bottom: 1px solid #E2E4EE; padding: 4pt 6pt 4pt 0; vertical-align: top; }
+  th { color: #5A5874; font-weight: 600; }
+  td.query { font-size: 7.5pt; color: #5A5874; word-break: break-word; }
+  .recommendation { border: 1px solid #E2E4EE; border-radius: 4pt; padding: 8pt 10pt; margin: 12pt 0; }
+</style>
+</head>
+<body>
+<p class="brand">Analyst · {{ doc.org_name }}</p>
+<h1>{{ doc.title }}</h1>
+<p class="meta">{{ doc.subtitle }}{% if doc.subtitle and doc.created_at %} · {% endif %}{{ doc.created_at }}</p>
+{% if doc.question %}<p class="question">{{ doc.question }}</p>{% endif %}
+{% if doc.lead %}<p class="lead">{{ cited(doc.lead, doc.key_figure) }}</p>{% endif %}
+
+{% for section in doc.sections %}
+<h2>{{ section.heading }}</h2>
+<ul class="ledger">
+{% for item in section.items %}<li>{{ cited(item) }}</li>{% endfor %}
+</ul>
+{% endfor %}
+
+{% if doc.recommendation %}
+<div class="recommendation"><strong>Recommendation.</strong> {{ cited(doc.recommendation) }}</div>
+{% endif %}
+
+{% for chart in charts %}
+<div class="chart">
+  <p><strong>{{ chart.title }}</strong></p>
+  {{ chart.svg }}
+  {% if chart.summary %}<p class="summary">{{ chart.summary }}</p>{% endif %}
+</div>
+{% endfor %}
+
+{% if doc.notes %}
+<h2>Data notes</h2>
+<ul class="ledger notes">
+{% for note in doc.notes %}<li>{{ note }}</li>{% endfor %}
+</ul>
+{% endif %}
+
+{% if doc.next_questions %}
+<h2>Next questions</h2>
+<ul class="ledger">
+{% for q in doc.next_questions %}<li>{{ q }}</li>{% endfor %}
+</ul>
+{% endif %}
+
+{% if doc.sources %}
+<h2>Sources</h2>
+<table>
+<thead><tr><th>#</th><th>Data</th><th>Fetched</th><th>Rows</th><th>How it was computed</th></tr></thead>
+<tbody>
+{% for s in doc.sources %}
+<tr><td>{{ s.number }}</td><td>{{ s.tables }}</td><td>{{ s.fetched_at }}</td><td>{{ s.rows }}</td>
+<td class="query">{{ s.tool }}{% if s.query %}: {{ s.query|truncate(400) }}{% endif %}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</body>
+</html>

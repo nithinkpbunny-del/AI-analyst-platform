@@ -1,4 +1,4 @@
-"""The agent's tools (BUILD_SPEC 7.3; M8 without what-if, goals and growth signals).
+"""The agent's tools (BUILD_SPEC 7.3; M8, ``what_if`` in M9, ``growth_signals`` in M10; goals arrive in M15).
 
 Every tool receives the ``ToolContext`` of the question: the asking person's ``AccessContext``, the dictionary
 cut down to what they may see, the per-question DuckDB workspace and the live data cache. A tool can only reach
@@ -29,6 +29,7 @@ from app.analytics import (
     drivers,
     finance,
     forecast,
+    growth,
     kpis,
     marketing,
     rfm,
@@ -328,6 +329,21 @@ SPECS: dict[str, ToolSpec] = {
                 "period": _PERIOD,
                 "dimension": {"type": "string"},
                 "grain": {"type": "string", "enum": ["day", "week", "month"]},
+                "filters": _FILTERS,
+            },
+            ["metric", "period"],
+        ),
+        _spec(
+            "growth_signals",
+            "Patterns that repeat and point to growth: segments (a value of a dimension, or a pair such as "
+            "category x region) whose metric rose for 3 or more complete periods in a row while gaining share of "
+            "the whole, and the whole metric beating the same period last year repeatedly. Says how much came "
+            "from repeat customers and an estimated upside for one more period.",
+            {
+                "metric": _METRIC,
+                "period": _PERIOD,
+                "dimensions": {"type": "array", "items": {"type": "string"}},
+                "grain": {"type": "string", "enum": ["week", "month", "quarter"]},
                 "filters": _FILTERS,
             },
             ["metric", "period"],
@@ -666,6 +682,20 @@ def detect_anomalies(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return _result(ctx, "detect_anomalies", args, result)
 
 
+def growth_signals(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    metric = _str(args, "metric") or ""
+    _computing(ctx, "growth_signals", metric)
+    result = growth.growth_signals(
+        ctx.analysis(),
+        metric,
+        _period(args),
+        _list(args, "dimensions") or None,
+        _grain(args, "month"),
+        _obj(args, "filters"),
+    )
+    return _result(ctx, "growth_signals", args, result)
+
+
 def run_forecast(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     metric = _str(args, "metric") or ""
     _computing(ctx, "forecast", metric)
@@ -816,6 +846,7 @@ HANDLERS: dict[str, Callable[[ToolContext, dict[str, Any]], dict[str, Any]]] = {
     "trend": trend,
     "driver_analysis": driver_analysis,
     "detect_anomalies": detect_anomalies,
+    "growth_signals": growth_signals,
     "forecast": run_forecast,
     "what_if": run_what_if,
     "segment_customers": segment_customers,

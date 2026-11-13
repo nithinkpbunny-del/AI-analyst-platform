@@ -137,3 +137,50 @@ export async function authedRequest<T>(path: string, options: RequestOptions = {
     return attempt(fresh)
   }
 }
+
+// ------------------------------------------------------------------------------------------------ downloads
+
+/** A file from the API (PDF, Excel, ZIP), signed in like `authedRequest`. The name comes from Content-Disposition. */
+export async function authedDownload(path: string): Promise<{ blob: Blob; filename: string }> {
+  const attempt = async (token: string | null) => {
+    let response: Response
+    try {
+      response = await fetch(`${API_BASE_URL}${path}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      })
+    } catch {
+      throw new ApiError(
+        0,
+        NETWORK_ERROR_CODE,
+        'The server could not be reached. Check your connection and try again.',
+      )
+    }
+    if (!response.ok) throw await toApiError(response)
+    const disposition = response.headers.get('Content-Disposition') ?? ''
+    const match = /filename="([^"]+)"/.exec(disposition)
+    return { blob: await response.blob(), filename: match?.[1] ?? 'download' }
+  }
+  try {
+    return await attempt(accessToken)
+  } catch (error) {
+    const expired =
+      error instanceof ApiError && error.status === 401 && error.code === 'token_expired'
+    if (!expired || !refreshHandler) throw error
+    const fresh = await refreshHandler()
+    if (!fresh) throw error
+    return attempt(fresh)
+  }
+}
+
+/** Hand a downloaded file to the browser ("Save as"). */
+export function saveFile({ blob, filename }: { blob: Blob; filename: string }) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}

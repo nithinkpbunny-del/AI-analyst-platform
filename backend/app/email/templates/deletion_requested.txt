@@ -1,0 +1,5 @@
+{{ requester }} asked to delete the workspace {{ org_name }}.
+
+On {{ when }} every connection, file, cached copy, conversation, report and setting of {{ org_name }} is deleted for good.
+
+Until then, any Owner can cancel it in Settings, under Privacy: {{ link }}

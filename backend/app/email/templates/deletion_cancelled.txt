@@ -1,0 +1,1 @@
+{{ requester }} cancelled the deletion of the workspace {{ org_name }}. Nothing was deleted.

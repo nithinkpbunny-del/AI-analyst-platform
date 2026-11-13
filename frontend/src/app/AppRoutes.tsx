@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
 import { ActivityPage } from '../features/activity/ActivityPage'
 import { AskPage } from '../features/ask/AskPage'
@@ -30,6 +30,29 @@ import { RedirectIfSignedIn, RequireAuth } from './RequireAuth'
 const WhatIfPage = lazy(() =>
   import('../features/whatif/WhatIfPage').then((m) => ({ default: m.WhatIfPage })),
 )
+// M10 screens load on first visit too (the shell stays under 200 KB).
+const TodayPage = lazy(() =>
+  import('../features/today/TodayPage').then((m) => ({ default: m.TodayPage })),
+)
+const BriefingsPage = lazy(() =>
+  import('../features/briefings/BriefingsPage').then((m) => ({ default: m.BriefingsPage })),
+)
+const TasksPage = lazy(() =>
+  import('../features/tasks/TasksPage').then((m) => ({ default: m.TasksPage })),
+)
+const ReportPage = lazy(() =>
+  import('../features/reports/ReportPages').then((m) => ({ default: m.ReportPage })),
+)
+const SharedPage = lazy(() =>
+  import('../features/reports/ReportPages').then((m) => ({ default: m.SharedPage })),
+)
+const SharedItemPage = lazy(() =>
+  import('../features/reports/ReportPages').then((m) => ({ default: m.SharedItemPage })),
+)
+
+function Lazy({ children }: { children: ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>
+}
 
 export function AppRoutes() {
   const built = new Set([
@@ -40,6 +63,9 @@ export function AppRoutes() {
     'dictionary',
     'ask',
     'whatIf',
+    'today',
+    'briefings',
+    'tasks',
   ])
   const placeholders = [...mainNav, ...adminNav].filter((item) => !built.has(item.key))
   return (
@@ -77,6 +103,54 @@ export function AppRoutes() {
               <Suspense fallback={null}>
                 <WhatIfPage />
               </Suspense>
+            }
+          />
+          <Route
+            path="/today"
+            element={
+              <Lazy>
+                <TodayPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/briefings"
+            element={
+              <Lazy>
+                <BriefingsPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/tasks"
+            element={
+              <Lazy>
+                <TasksPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/reports/:reportId"
+            element={
+              <Lazy>
+                <ReportPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/shared"
+            element={
+              <Lazy>
+                <SharedPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/shared/:shareId"
+            element={
+              <Lazy>
+                <SharedItemPage />
+              </Lazy>
             }
           />
           <Route path="/ask" element={<AskPage />} />

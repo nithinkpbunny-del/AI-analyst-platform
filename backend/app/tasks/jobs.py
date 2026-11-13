@@ -6,10 +6,14 @@ import logging
 import uuid
 
 from app.agent import service as agent_service
+from app.briefings import schedule as briefing_schedule
+from app.briefings import service as briefings
 from app.connectors import service
 from app.data import snapshots
 from app.dictionary import service as dictionary_service
 from app.llm.keys import default_factory
+from app.privacy import deletion
+from app.tasks import long_tasks
 from app.tasks.celery_app import celery_app
 from app.tasks.runtime import worker_runtime
 
@@ -17,6 +21,12 @@ logger = logging.getLogger(__name__)
 
 # Drafting may make a few AI calls of up to a few minutes each.
 DRAFT_TIME_LIMIT_SECONDS = 1500
+
+# A long task: up to 40 model calls (BUILD_SPEC 6.5) with the long source timeout.
+TASK_TIME_LIMIT_SECONDS = 3600
+
+# A briefing: a few analytics queries and one small AI call.
+BRIEFING_TIME_LIMIT_SECONDS = 600
 
 # A question: up to 12 model calls of at most a few minutes each, plus reading the sources.
 ANSWER_TIME_LIMIT_SECONDS = 1500
@@ -98,3 +108,49 @@ def purge_snapshots() -> (
     """Delete snapshots older than SNAPSHOT_MAX_AGE_HOURS in every workspace (BUILD_SPEC 6.6)."""
     runtime = worker_runtime()
     return snapshots.purge_expired(runtime.session_factory, runtime.objects, runtime.clock())
+
+
+@celery_app.task(name="app.tasks.jobs.run_task", time_limit=TASK_TIME_LIMIT_SECONDS)
+def run_task(
+    org_id: str, task_id: str
+) -> str:  # pragma: no cover - the body is long_tasks.run_task
+    """Run a long task and email its report (M10)."""
+    runtime = worker_runtime()
+    return long_tasks.run_task(
+        runtime, default_factory(runtime.settings), uuid.UUID(org_id), uuid.UUID(task_id)
+    )
+
+
+@celery_app.task(name="app.tasks.jobs.send_briefing", time_limit=BRIEFING_TIME_LIMIT_SECONDS)
+def send_briefing(
+    org_id: str, run_id: str
+) -> str:  # pragma: no cover - the body is briefings.send_briefing
+    """Compose and send one briefing (M10)."""
+    runtime = worker_runtime()
+    return briefings.send_briefing(
+        runtime, default_factory(runtime.settings), uuid.UUID(org_id), uuid.UUID(run_id)
+    )
+
+
+@celery_app.task(name="app.tasks.jobs.schedule_briefings")
+def schedule_briefings() -> (
+    int
+):  # pragma: no cover - the body is briefing_schedule.plan, tested directly
+    """Every 5 minutes: add the briefing runs that are due and queue them (BUILD_SPEC 13.1)."""
+    runtime = worker_runtime()
+    with runtime.session_factory() as db:
+        created = briefing_schedule.plan(db, runtime.clock())
+    for org_id, run_id in created:
+        celery_app.send_task(
+            "app.tasks.jobs.send_briefing", kwargs={"org_id": str(org_id), "run_id": str(run_id)}
+        )
+    return len(created)
+
+
+@celery_app.task(name="app.tasks.jobs.purge_deleted_orgs")
+def purge_deleted_orgs() -> (
+    int
+):  # pragma: no cover - the body is deletion.purge_due, tested directly
+    """Hourly: delete workspaces whose 7-day grace period has ended (BUILD_SPEC 6.6)."""
+    runtime = worker_runtime()
+    return deletion.purge_due(runtime, runtime.clock())

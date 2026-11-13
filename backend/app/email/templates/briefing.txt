@@ -1,0 +1,22 @@
+{{ title }}{% if data_as_of %} (data up to {{ data_as_of }}){% endif %}
+
+{{ headline_plain }}
+{% for section in sections %}
+
+{{ section.heading }}
+{% for item in section.plain %}
+- {{ item }}
+{% endfor %}
+{% endfor %}
+{% if notes %}
+
+Data notes
+{% for note in notes %}
+- {{ note }}
+{% endfor %}
+{% endif %}
+
+Numbers in [brackets] are sources; open the briefing to see them: {{ link }}
+Today: {{ today_link }}
+
+Change the time, how often you get this, or turn it off: {{ settings_link }}

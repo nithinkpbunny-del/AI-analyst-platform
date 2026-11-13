@@ -54,6 +54,16 @@ for (const screen of screens) {
       if (screen === 'what-if') {
         await expect(page.getByRole('button', { name: 'Run scenario' })).toBeVisible()
       }
+      if (screen === 'today') {
+        await expect(page.getByText('2 of 4 done')).toBeVisible()
+        await expect(page.getByText('Revenue, last 7 days')).toBeVisible()
+      }
+      if (screen === 'briefings') {
+        await expect(page.getByText('Not sent: nothing needed attention')).toBeVisible()
+      }
+      if (screen === 'tasks') {
+        await expect(page.getByText('Fetching Marketing from Google Sheets')).toBeVisible()
+      }
       if (screen === 'activity') {
         await expect(page.getByText('Turned on two-step verification')).toBeVisible()
       }
@@ -114,6 +124,29 @@ test.describe('what-if: a scenario', () => {
   test('has no accessibility violations', async ({ page }) => {
     await run(page)
     await noAxeViolations(page)
+  })
+})
+
+// M10: a briefing as a report, and the share dialog.
+test.describe('report: a briefing', () => {
+  test('matches the baseline', async ({ page }) => {
+    await open(page, '/reports/rep-briefing')
+    await expect(page.getByText('Today’s alerts')).toBeVisible()
+    await expect(page).toHaveScreenshot('report-briefing.png', { fullPage: true })
+  })
+
+  test('has no accessibility violations', async ({ page }) => {
+    await open(page, '/reports/rep-briefing')
+    await expect(page.getByText('Today’s alerts')).toBeVisible()
+    await noAxeViolations(page)
+  })
+
+  test('share dialog', async ({ page }) => {
+    await open(page, '/reports/rep-briefing')
+    await page.getByRole('button', { name: 'Share' }).click()
+    await expect(page.getByRole('checkbox', { name: /Lata/ })).toBeDisabled()
+    await noAxeViolations(page)
+    await expect(page).toHaveScreenshot('report-share.png')
   })
 })
 

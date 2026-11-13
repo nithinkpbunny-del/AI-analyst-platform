@@ -104,6 +104,24 @@ PERSONAL = {
     ("POST", "/conversations/{conversation_id}/messages"),
     ("GET", "/conversations/{conversation_id}/messages/{message_id}"),
     ("DELETE", "/saved-questions/{question_id}"),
+    # M10: long tasks, reports, exports and shares are personal too. Tested in test_tasks.py and
+    # test_reports_sharing.py (TestPersonalRoutes): 401, 403 by role, 404 for others' and other workspaces' ids, 422.
+    ("GET", "/tasks/{task_id}"),
+    ("POST", "/tasks/{task_id}/cancel"),
+    ("GET", "/reports/{report_id}"),
+    ("GET", "/reports/{report_id}/export"),
+    ("GET", "/conversations/{conversation_id}/messages/{message_id}/export"),
+    ("GET", "/shares"),
+    ("POST", "/shares"),
+    ("DELETE", "/shares/{share_id}"),
+    ("GET", "/shared/{share_id}"),
+    ("GET", "/shared/{share_id}/export"),
+}
+
+# Routes whose success depends on the workspace's state (M10): cancelling a deletion needs one to be requested.
+# Tested in test_today_privacy.py (TestDeletion: success, 409, 401, 403 for Analysts, Viewers and Owners without 2FA).
+STATEFUL = {
+    ("DELETE", "/org/deletion"),
 }
 
 
@@ -370,6 +388,42 @@ CASES: dict[tuple[str, str], Case] = {
         body={"text": "Why did South fall?"},
         invalid_body={"text": ""},
     ),
+    ("GET", "/tasks"): Case("GET", "/tasks", P.ASK, 200, check_leak=True),
+    ("POST", "/tasks"): Case(
+        "POST",
+        "/tasks",
+        P.ASK,
+        201,
+        body={"prompt": "Review last quarter's sales by outlet."},
+        invalid_body={"prompt": ""},
+    ),
+    ("GET", "/reports"): Case(
+        "GET", "/reports", P.SHARED_VIEW, 200, invalid_query="?source=export", check_leak=True
+    ),
+    ("GET", "/shared"): Case("GET", "/shared", P.SHARED_VIEW, 200, check_leak=True),
+    ("GET", "/briefings/settings"): Case(
+        "GET", "/briefings/settings", P.SHARED_VIEW, 200, check_leak=True
+    ),
+    ("PUT", "/briefings/settings"): Case(
+        "PUT",
+        "/briefings/settings",
+        P.SHARED_VIEW,
+        200,
+        body={"local_time": "07:00"},
+        invalid_body={"frequency": "hourly"},
+    ),
+    ("GET", "/briefings"): Case("GET", "/briefings", P.SHARED_VIEW, 200, check_leak=True),
+    ("POST", "/briefings/send-now"): Case("POST", "/briefings/send-now", P.SHARED_VIEW, 202),
+    ("GET", "/today"): Case("GET", "/today", P.SHARED_VIEW, 200, check_leak=True),
+    ("GET", "/org/export.zip"): Case("GET", "/org/export.zip", P.ORG_MANAGE, 200),
+    ("POST", "/org/deletion"): Case(
+        "POST",
+        "/org/deletion",
+        P.ORG_MANAGE,
+        202,
+        body={"confirm_name": "UrbanCart"},
+        invalid_body={"confirm_name": ""},
+    ),
     ("POST", "/connections/google/start"): Case(
         "POST",
         "/connections/google/start",
@@ -407,11 +461,13 @@ def _api_routes(client: TestClient) -> set[tuple[str, str]]:
 
 def test_every_route_is_classified(client: TestClient) -> None:
     routes = _api_routes(client)
-    unclassified = routes - PUBLIC - SELF - PERSONAL - DATA_ROUTES - set(CASES)
+    unclassified = routes - PUBLIC - SELF - PERSONAL - DATA_ROUTES - STATEFUL - set(CASES)
     assert unclassified == set(), (
         "New routes need tests: add them to PUBLIC, SELF or CASES in tests/api/test_route_matrix.py"
     )
-    assert (PUBLIC | SELF | PERSONAL | DATA_ROUTES | set(CASES)) - routes == set(), "stale entries"
+    assert (PUBLIC | SELF | PERSONAL | DATA_ROUTES | STATEFUL | set(CASES)) - routes == set(), (
+        "stale entries"
+    )
 
 
 @pytest.fixture
