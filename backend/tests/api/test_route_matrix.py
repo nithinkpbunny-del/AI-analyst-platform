@@ -40,8 +40,14 @@ from app.models import (
 )
 from app.security.secrets import SecretStore, key_wrapper
 from tests.conftest import FakeClock
-from tests.datasources import csv_bytes, make_file_connection, make_sheets_connection
+from tests.datasources import (
+    csv_bytes,
+    make_file_connection,
+    make_razorpay_connection,
+    make_sheets_connection,
+)
 from tests.recorded_google import NO_ACCESS_ID, SHEET_ID
+from tests.recorded_razorpay import KEY_ID, KEY_SECRET
 from tests.tenancy import World, add_member, build_world, token_for
 
 P = Permission
@@ -149,6 +155,8 @@ class Fixtures:
     dataset_b: str = ""
     sheets_a: str = ""
     sheets_b: str = ""
+    razorpay_a: str = ""
+    razorpay_b: str = ""
     version_a: str = ""  # a readable file version that is not in use
     version_b: str = ""
     dict_version_a: str = ""  # a confirmed version of the business dictionary
@@ -166,6 +174,7 @@ class Fixtures:
                 "connection",
                 "dataset",
                 "sheets",
+                "razorpay",
                 "version",
                 "dict_version",
             )
@@ -440,6 +449,22 @@ CASES: dict[tuple[str, str], Case] = {
         body_from=lambda ids: {"state": ids.google_state, "code": "4/test-code"},
         invalid_body={"state": "short", "code": ""},
     ),
+    ("POST", "/connections/razorpay"): Case(
+        "POST",
+        "/connections/razorpay",
+        P.CONNECTIONS_MANAGE,
+        201,
+        body={"key_id": KEY_ID, "key_secret": KEY_SECRET},
+        invalid_body={"key_id": "not-a-key", "key_secret": "x"},
+    ),
+    ("PUT", "/connections/{connection_id}/razorpay/key"): Case(
+        "PUT",
+        "/connections/{razorpay}/razorpay/key",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={"key_id": KEY_ID, "key_secret": KEY_SECRET},
+        invalid_body={"key_id": "not-a-key", "key_secret": "x"},
+    ),
     ("POST", "/connections/{connection_id}/google/picker-token"): Case(
         "POST", "/connections/{sheets}/google/picker-token", P.CONNECTIONS_MANAGE, 200
     ),
@@ -574,6 +599,11 @@ def ids(
             db.scalars(select(Dataset.id).where(Dataset.connection_id == files[org_id].id)).one()
         )
 
+    razorpay = {
+        org.id: make_razorpay_connection(db, runtime, org.id, sync=False)
+        for org in (world.org_a, world.org_b)
+    }
+
     # Each workspace gets a confirmed dictionary (version 1) and a draft (version 2) continuing it.
     dictionaries: dict[Any, str] = {}
     drafts: dict[Any, dict[str, Any]] = {}
@@ -619,6 +649,8 @@ def ids(
         dataset_b=dataset(world.org_b.id),
         sheets_a=str(sheets[world.org_a.id].id),
         sheets_b=str(sheets[world.org_b.id].id),
+        razorpay_a=str(razorpay[world.org_a.id].id),
+        razorpay_b=str(razorpay[world.org_b.id].id),
         version_a=spare_version(world.org_a.id),
         version_b=spare_version(world.org_b.id),
         dict_version_a=dictionaries[world.org_a.id],

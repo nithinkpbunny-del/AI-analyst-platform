@@ -60,6 +60,7 @@ from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from alembic import command  # noqa: E402
 from app.auth import passwords  # noqa: E402
 from app.connectors.google_sheets import GoogleSheetsSetup  # noqa: E402
+from app.connectors.razorpay import RazorpaySetup  # noqa: E402
 from app.connectors.registry import ConnectorRuntime  # noqa: E402
 from app.data.objects import MemoryObjectStore  # noqa: E402
 from app.db.base import Base  # noqa: E402
@@ -70,6 +71,8 @@ from app.llm.models import CATALOG  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.security.secrets import SecretStore, key_wrapper  # noqa: E402
 from tests.recorded_google import RecordedGoogle, recorded_setup  # noqa: E402
+from tests.recorded_razorpay import FakeRazorpay  # noqa: E402
+from tests.recorded_razorpay import setup as razorpay_test_setup  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -194,12 +197,23 @@ def google_setup(google_transport: RecordedGoogle) -> GoogleSheetsSetup:
 
 
 @pytest.fixture
+def fake_razorpay() -> FakeRazorpay:
+    return FakeRazorpay()
+
+
+@pytest.fixture
+def razorpay_setup(fake_razorpay: FakeRazorpay) -> RazorpaySetup:
+    return razorpay_test_setup(fake_razorpay)
+
+
+@pytest.fixture
 def runtime(
     settings: Settings,
     session_factory: sessionmaker[Session],
     fake_redis: fakeredis.FakeRedis,
     object_store: MemoryObjectStore,
     google_setup: GoogleSheetsSetup,
+    razorpay_setup: RazorpaySetup,
     clock: FakeClock,
     outbox: MemoryEmailSender,
 ) -> ConnectorRuntime:
@@ -211,6 +225,7 @@ def runtime(
         redis=fake_redis,
         secrets=SecretStore(key_wrapper(settings)),
         google=google_setup,
+        razorpay=razorpay_setup,
         clock=clock,
         email=outbox,
     )
@@ -226,6 +241,7 @@ def client(
     llm_factory: FakeLLMFactory,
     object_store: MemoryObjectStore,
     google_setup: GoogleSheetsSetup,
+    razorpay_setup: RazorpaySetup,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings,
@@ -237,6 +253,7 @@ def client(
         llm_factory=llm_factory,
         object_store=object_store,
         google_sheets=google_setup,
+        razorpay=razorpay_setup,
         inline_jobs=True,  # background jobs run at once, in the test
     )
     with TestClient(app, base_url="http://localhost:8000") as test_client:

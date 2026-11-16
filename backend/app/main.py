@@ -39,6 +39,8 @@ from app.auth.google_oidc import AuthlibGoogleProvider, GoogleProvider, StandInG
 from app.auth.service import Clock
 from app.config import Settings, get_settings
 from app.connectors.google_sheets import GoogleSheetsSetup, default_setup
+from app.connectors.razorpay import RazorpaySetup
+from app.connectors.razorpay import default_setup as razorpay_default_setup
 from app.connectors.registry import ConnectorRuntime
 from app.data.objects import ObjectStore, S3ObjectStore
 from app.db.session import make_engine, make_session_factory
@@ -88,6 +90,7 @@ def create_app(
     secret_store: SecretStore | None = None,
     object_store: ObjectStore | None = None,
     google_sheets: GoogleSheetsSetup | None = None,
+    razorpay: RazorpaySetup | None = None,
     job_queue: JobQueue | None = None,
     inline_jobs: bool = False,
 ) -> FastAPI:
@@ -131,6 +134,7 @@ def create_app(
         redis=app.state.redis,
         secrets=app.state.secret_store,
         google=google_sheets or default_setup(settings),
+        razorpay=razorpay or razorpay_default_setup(settings),
         clock=app.state.clock,
         email=app.state.email_sender,
     )

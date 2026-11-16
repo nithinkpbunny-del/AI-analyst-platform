@@ -54,6 +54,7 @@ from app.connectors.google_sheets import (
     revoke,
 )
 from app.connectors.google_stand_in import issue_code, stand_in_files
+from app.connectors.razorpay import RazorpayConnector, key_mode, mask_key_id
 from app.connectors.registry import (
     SECRET_PURPOSES,
     ConnectorRuntime,
@@ -99,6 +100,9 @@ from app.schemas.connections import (
     PickerOut,
     PreviewOut,
     QualityOut,
+    RazorpayKeyRequest,
+    RazorpayOut,
+    RazorpaySourceOut,
     SourcesOut,
     SpreadsheetOut,
     SpreadsheetsRequest,
@@ -320,7 +324,16 @@ def _connection_out(connection: Connection, loaded: _Loaded) -> ConnectionOut:
         if connection.type == "file"
         else None,
         google=google,
+        razorpay=_razorpay_out(connection),
     )
+
+
+def _razorpay_out(connection: Connection) -> RazorpayOut | None:
+    if connection.type != "razorpay":
+        return None
+    key_id = str(connection.config.get("key_id") or "")
+    mode = key_mode(key_id) or "live"
+    return RazorpayOut(key_id_masked=mask_key_id(key_id), mode=mode)
 
 
 def _one(tenant: Tenant, connection: Connection) -> ConnectionOut:
@@ -411,6 +424,9 @@ def list_connections(request: Request, tenant: ViewConnections) -> ConnectionLis
             upload_max_mb=_runtime(request).settings.upload_max_mb,
             google_sheets=GoogleSourceOut(
                 available=google.available, stand_in=google.mode == "stand_in"
+            ),
+            razorpay=RazorpaySourceOut(
+                available=True, stand_in=_runtime(request).razorpay.stand_in_prefix is not None
             ),
         ),
     )
@@ -928,6 +944,119 @@ def _mark_reauth(tenant: Tenant, connection: Connection, error: ConnectorError) 
         connection.status = "needs_reauth"
         connection.last_error = error.message
         tenant.db.commit()
+
+
+# ------------------------------------------------------------------------------------------- Razorpay
+RAZORPAY_CHECKS_PER_HOUR = 20
+
+
+def _check_razorpay_key(request: Request, tenant: Tenant, key_id: str, key_secret: str) -> None:
+    """Ask Razorpay (one read) whether the key works, before anything is saved. Raises ``ApiError`` 422."""
+    _limit(
+        request,
+        tenant,
+        "razorpay-key-checks",
+        RAZORPAY_CHECKS_PER_HOUR,
+        f"Razorpay keys were checked {RAZORPAY_CHECKS_PER_HOUR} times in the last hour. Try again later.",
+    )
+    runtime = _runtime(request)
+    connector = RazorpayConnector(
+        setup=runtime.razorpay,
+        key_id=key_id,
+        key_secret=key_secret,
+        timezone=_timezone(tenant),
+        max_rows=runtime.settings.max_rows_per_dataset,
+        clock=runtime.clock,
+    )
+    try:
+        result = connector.test()
+    except ConnectorError as error:  # pragma: no cover - test() reports errors in its result
+        raise ApiError(422, "razorpay_refused", error.message) from error
+    finally:
+        connector.close()
+    if not result.ok:
+        raise ApiError(422, "razorpay_refused", result.message)
+
+
+@router.post(
+    "/razorpay",
+    response_model=ConnectionOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_ERRORS,
+    summary="Connect Razorpay with an API key (checked with one read, then stored encrypted)",
+)
+def add_razorpay(
+    body: RazorpayKeyRequest, request: Request, tenant: ManageConnections
+) -> ConnectionOut:
+    secret = body.key_secret.get_secret_value()
+    _check_razorpay_key(request, tenant, body.key_id, secret)
+    mode = key_mode(body.key_id) or "live"
+    row = _runtime(request).secrets.put(
+        tenant.db, org_id=tenant.org_id, purpose=SECRET_PURPOSES["razorpay"], value=secret
+    )
+    name = body.name or ("Razorpay (test mode)" if mode == "test" else "Razorpay")
+    connection = Connection(
+        org_id=tenant.org_id,
+        type="razorpay",
+        name=name[:120],
+        status="active",
+        config={"key_id": body.key_id, "mode": mode},
+        secret_ref=row.id,
+        sync_state="idle",
+        created_by=tenant.auth.user.id,
+    )
+    tenant.db.add(connection)
+    tenant.db.flush()
+    _audit(
+        tenant,
+        "connection.added",
+        connection,
+        {"type": "razorpay", "name": connection.name, "mode": mode},
+    )
+    _queue_sync(request, tenant, connection)
+    return _one(tenant, connection)
+
+
+@router.put(
+    "/{connection_id}/razorpay/key",
+    response_model=ConnectionOut,
+    responses=_ERRORS,
+    summary="Replace the Razorpay API key of a connection (e.g. after it was revoked or rotated)",
+)
+def replace_razorpay_key(
+    connection_id: uuid.UUID,
+    body: RazorpayKeyRequest,
+    request: Request,
+    tenant: ManageConnections,
+) -> ConnectionOut:
+    connection = access.visible_connection(tenant.db, tenant.auth, connection_id, lock=True)
+    if connection.type != "razorpay":
+        raise ApiError(409, "not_razorpay", "This is not a Razorpay connection.")
+    secret = body.key_secret.get_secret_value()
+    _check_razorpay_key(request, tenant, body.key_id, secret)
+    runtime = _runtime(request)
+    old_secret = connection.secret_ref
+    connection.secret_ref = runtime.secrets.put(
+        tenant.db, org_id=tenant.org_id, purpose=SECRET_PURPOSES["razorpay"], value=secret
+    ).id
+    connection.config = {**connection.config, "key_id": body.key_id, "mode": key_mode(body.key_id)}
+    if connection.status != "disabled":
+        connection.status = "active"
+        connection.last_error = None
+    tenant.db.flush()
+    if old_secret is not None:
+        runtime.secrets.delete(tenant.db, org_id=tenant.org_id, secret_id=old_secret)
+    _audit(
+        tenant,
+        "connection.reauthorized",
+        connection,
+        {"type": "razorpay", "name": connection.name},
+    )
+    if connection.status != "disabled" and not _syncing(tenant, connection):
+        _queue_sync(request, tenant, connection, force=True)
+    else:
+        tenant.db.commit()
+    return _one(tenant, connection)
 
 
 @router.post(

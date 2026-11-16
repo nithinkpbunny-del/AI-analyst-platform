@@ -99,9 +99,31 @@ export const demoTargets: Connection = {
   },
 }
 
+export const demoRazorpay: Connection = {
+  id: 'c4',
+  type: 'razorpay',
+  name: 'Razorpay',
+  status: 'active',
+  sync_state: 'idle',
+  last_success_at: '2026-10-30T04:30:00+00:00',
+  last_error: null,
+  created_at: '2026-10-30T04:25:00+00:00',
+  created_by_name: 'Asha Rao',
+  datasets_count: 4,
+  rows_total: 18_203,
+  warnings_count: 0,
+  file: null,
+  google: null,
+  razorpay: { key_id_masked: 'rzp_live_AbCd••••', mode: 'live' },
+}
+
 export const demoConnectionList: ConnectionList = {
   connections: [demoOrders, demoMarketing, demoTargets],
-  sources: { upload_max_mb: 50, google_sheets: { available: true, stand_in: false } },
+  sources: {
+    upload_max_mb: 50,
+    google_sheets: { available: true, stand_in: false },
+    razorpay: { available: true, stand_in: false },
+  },
 }
 
 export const demoOrdersDetail: ConnectionDetail = {

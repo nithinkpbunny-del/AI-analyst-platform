@@ -136,6 +136,8 @@ class ColumnInfo:
     unparsed_count: int = 0
     unparsed_examples: tuple[str, ...] = ()
     currencies: tuple[str, ...] = ()
+    # How an API source stores a money amount ("paise" for Razorpay), when the source says so itself.
+    stored_in: str | None = None
 
 
 @dataclass

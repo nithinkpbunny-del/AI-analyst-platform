@@ -11,6 +11,7 @@ import {
   demoMarketing,
   demoOrders,
   demoOrdersDetail,
+  demoRazorpay,
   demoDatasetPreview,
   demoTargets,
 } from '../../testing/connectionFixtures'
@@ -178,7 +179,11 @@ describe('Google Sheets', () => {
         status: 200,
         body: {
           ...demoConnectionList,
-          sources: { upload_max_mb: 50, google_sheets: { available: false, stand_in: false } },
+          sources: {
+            upload_max_mb: 50,
+            google_sheets: { available: false, stand_in: false },
+            razorpay: { available: true, stand_in: false },
+          },
         },
       },
     })
@@ -527,5 +532,132 @@ describe('A connection', () => {
     routes({ 'GET /connections/nope': apiError(404, 'not_found', 'Not found.') })
     renderApp('/connections/nope')
     expect(await screen.findByText('This connection could not be loaded.')).toBeVisible()
+  })
+})
+
+describe('Razorpay', () => {
+  const connected = { ...demoRazorpay, sync_state: 'queued' as const }
+
+  async function open() {
+    renderApp('/connections')
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect Razorpay' }))
+    return screen.findByRole('dialog', { name: 'Connect Razorpay' })
+  }
+
+  it('says keys can make changes and that this app only reads', async () => {
+    routes()
+    const dialog = await open()
+    expect(
+      within(dialog).getByText(/Razorpay keys can make changes; this app only reads/),
+    ).toBeVisible()
+    expect(within(dialog).getByText(/Create a separate key/)).toBeVisible()
+  })
+
+  it('checks the key id and secret before sending anything', async () => {
+    const api = routes()
+    const dialog = await open()
+    await userEvent.type(within(dialog).getByLabelText('Key id'), 'hello')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Check and connect' }))
+    expect(within(dialog).getByText('The key id starts with rzp_live_ or rzp_test_.')).toBeVisible()
+    expect(within(dialog).getByText('Enter the key secret (no spaces).')).toBeVisible()
+    expect(api.count('POST /connections/razorpay')).toBe(0)
+  })
+
+  it('connects with a key, never shows the secret again and says it is reading', async () => {
+    const api = routes({ 'POST /connections/razorpay': { status: 201, body: connected } })
+    const dialog = await open()
+    await userEvent.type(within(dialog).getByLabelText('Key id'), 'rzp_live_AbCdEf123456')
+    await userEvent.type(within(dialog).getByLabelText('Key secret'), 's3cr3tK3yValue99')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Check and connect' }))
+    expect(
+      await screen.findByText('Razorpay is connected. Reading your payments now.'),
+    ).toBeVisible()
+    expect(api.body('POST /connections/razorpay')).toEqual({
+      key_id: 'rzp_live_AbCdEf123456',
+      key_secret: 's3cr3tK3yValue99',
+    })
+    expect(screen.queryByDisplayValue('s3cr3tK3yValue99')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('shows Razorpay’s refusal in the dialog and keeps it open', async () => {
+    routes({
+      'POST /connections/razorpay': apiError(
+        422,
+        'razorpay_refused',
+        'Razorpay did not accept the API key. Enter the key id and secret again.',
+      ),
+    })
+    const dialog = await open()
+    await userEvent.type(within(dialog).getByLabelText('Key id'), 'rzp_live_AbCdEf123456')
+    await userEvent.type(within(dialog).getByLabelText('Key secret'), 'wrongWrongWrong1')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Check and connect' }))
+    expect(await within(dialog).findByText(/did not accept the API key/)).toBeVisible()
+  })
+
+  it('is a card with the Razorpay label', async () => {
+    routes({
+      'GET /connections': {
+        status: 200,
+        body: { ...demoConnectionList, connections: [demoRazorpay] },
+      },
+    })
+    renderApp('/connections')
+    const card = await screen.findByRole('article', { name: 'Razorpay' })
+    expect(within(card).getByText('4 tables · 18,203 rows')).toBeInTheDocument()
+  })
+
+  it('shows the masked key, the mode and the read-only note on the connection page', async () => {
+    routes({
+      'GET /connections/c4': {
+        status: 200,
+        body: { ...demoRazorpay, datasets: [], versions: [] },
+      },
+    })
+    renderApp('/connections/c4')
+    expect(await screen.findByText(/Razorpay key rzp_live_AbCd••••/)).toBeVisible()
+    expect(screen.getByText(/Live mode/)).toBeVisible()
+    expect(screen.getByText(/Amounts are kept in paise/)).toBeVisible()
+  })
+
+  it('offers a new key when Razorpay stopped accepting the old one, and saves it', async () => {
+    const broken = {
+      ...demoRazorpay,
+      status: 'needs_reauth' as const,
+      last_error: 'Razorpay did not accept the API key. Enter the key id and secret again.',
+      datasets: [],
+      versions: [],
+    }
+    const api = routes({
+      'GET /connections/c4': { status: 200, body: broken },
+      'PUT /connections/c4/razorpay/key': {
+        status: 200,
+        body: { ...demoRazorpay, sync_state: 'queued' },
+      },
+    })
+    renderApp('/connections/c4')
+    await userEvent.click(await screen.findByRole('button', { name: 'Enter a new key' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Enter a new Razorpay key' })
+    expect(within(dialog).getByText('Current key: rzp_live_AbCd••••')).toBeVisible()
+    await userEvent.type(within(dialog).getByLabelText('Key id'), 'rzp_live_NewKey123456')
+    await userEvent.type(within(dialog).getByLabelText('Key secret'), 'newSecretValue12')
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Check and save the new key' }),
+    )
+    await waitFor(() => expect(api.count('PUT /connections/c4/razorpay/key')).toBe(1))
+    expect(await screen.findByText(/The new key works/)).toBeVisible()
+  })
+
+  it('does not offer Analysts a way to change the key', async () => {
+    routes({
+      'GET /connections': {
+        status: 200,
+        body: { ...demoConnectionList, connections: [demoRazorpay] },
+      },
+      'GET /connections/c4': { status: 200, body: { ...demoRazorpay, datasets: [], versions: [] } },
+    })
+    renderApp('/connections/c4', { session: analyst })
+    await screen.findByText(/Razorpay key rzp_live_AbCd••••/)
+    expect(screen.queryByRole('button', { name: 'Replace the API key' })).not.toBeInTheDocument()
   })
 })

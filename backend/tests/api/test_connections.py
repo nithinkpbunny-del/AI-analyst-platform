@@ -429,6 +429,7 @@ class TestWhoSeesWhat:
         assert sources == {
             "upload_max_mb": 50,
             "google_sheets": {"available": True, "stand_in": False},
+            "razorpay": {"available": True, "stand_in": False},
         }
 
 

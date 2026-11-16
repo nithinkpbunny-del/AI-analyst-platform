@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ChevronDown, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router'
 import { FormAlert } from '../../components/FormAlert'
@@ -27,6 +27,10 @@ import { ReplaceDialog } from '../dictionary/ReplaceDialog'
 import { FileDrop } from './AddData'
 import { CONNECTIONS, fileProblem } from './keys'
 import { useSpreadsheetPicker } from './useSpreadsheetPicker'
+
+const RazorpayDialog = lazy(() =>
+  import('./RazorpayDialog').then((m) => ({ default: m.RazorpayDialog })),
+)
 import {
   cellText,
   changeText,
@@ -457,6 +461,7 @@ export function ConnectionDetailPage() {
   const [renaming, setRenaming] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [replacing, setReplacing] = useState(false)
+  const [keyDialog, setKeyDialog] = useState(false)
   const [discarding, setDiscarding] = useState<FileVersion | null>(null)
   const picker = useSpreadsheetPicker()
   // Shares the list's cache; only the upload limit is needed from it here.
@@ -646,6 +651,19 @@ export function ConnectionDetailPage() {
               {t('connections.detail.account', { email: connection.google.account_email })}
             </p>
           ) : null}
+          {connection.razorpay ? (
+            <p className="m-0 mt-2 text-small text-ink-muted">
+              {t('connections.razorpay.keyLine', { key: connection.razorpay.key_id_masked })}
+              {' · '}
+              {t(
+                connection.razorpay.mode === 'test'
+                  ? 'connections.razorpay.modeTest'
+                  : 'connections.razorpay.modeLive',
+              )}
+              {'. '}
+              {t('connections.razorpay.readOnlyNote')}
+            </p>
+          ) : null}
           {paused ? (
             <p className="m-0 mt-2 text-small text-ink-muted">
               {t('connections.detail.pausedNote')}
@@ -665,6 +683,12 @@ export function ConnectionDetailPage() {
                     onClick={() => reconnect.mutate()}
                   >
                     {t('connections.detail.reconnectGoogle')}
+                  </Button>
+                ) : canManage &&
+                  connection.status === 'needs_reauth' &&
+                  connection.type === 'razorpay' ? (
+                  <Button size="sm" onClick={() => setKeyDialog(true)}>
+                    {t('connections.razorpay.reconnect')}
                   </Button>
                 ) : null
               }
@@ -716,6 +740,11 @@ export function ConnectionDetailPage() {
               >
                 {paused ? t('connections.detail.resume') : t('connections.detail.pause')}
               </Button>
+              {connection.type === 'razorpay' ? (
+                <Button variant="ghost" onClick={() => setKeyDialog(true)}>
+                  {t('connections.razorpay.replaceButton')}
+                </Button>
+              ) : null}
               <Button variant="ghost" onClick={() => setReplacing(true)}>
                 {t('dictionary.replace.button')}
               </Button>
@@ -836,6 +865,16 @@ export function ConnectionDetailPage() {
             void refresh()
           }}
         />
+      ) : null}
+      {keyDialog ? (
+        <Suspense fallback={null}>
+          <RazorpayDialog
+            open
+            onOpenChange={setKeyDialog}
+            connection={connection}
+            onDone={(text) => setNotice({ tone: 'success', text })}
+          />
+        </Suspense>
       ) : null}
       {replacing ? (
         <ReplaceDialog connection={connection} open onOpenChange={setReplacing} />

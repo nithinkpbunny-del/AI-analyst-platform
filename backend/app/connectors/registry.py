@@ -8,7 +8,7 @@ from settings (``app.tasks.runtime``); tests inject fakes.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -21,14 +21,22 @@ from app.config import Settings
 from app.connectors.base import Connector, ConnectorError
 from app.connectors.files import FileConnector, StoredFile
 from app.connectors.google_sheets import GoogleSheetsConnector, GoogleSheetsSetup, Spreadsheet
+from app.connectors.razorpay import RazorpayConnector, RazorpaySetup
 from app.data.objects import ObjectStore
 from app.email.sender import EmailSender
 from app.models import Connection, FileVersion
 from app.security.secrets import SecretStore, SecretUnavailable
 
 # Purpose bound into each connection secret's encryption context (app.security.secrets).
-SECRET_PURPOSES = {"google_sheets": "google_sheets_refresh_token"}
-TYPE_LABELS = {"file": "Excel or CSV file", "google_sheets": "Google Sheets"}
+SECRET_PURPOSES = {
+    "google_sheets": "google_sheets_refresh_token",
+    "razorpay": "razorpay_key_secret",
+}
+TYPE_LABELS = {
+    "file": "Excel or CSV file",
+    "google_sheets": "Google Sheets",
+    "razorpay": "Razorpay",
+}
 
 
 @dataclass
@@ -42,6 +50,7 @@ class ConnectorRuntime:
     clock: Callable[[], datetime]
     # Emails from background jobs (briefings, finished long tasks, shares): SMTP in the worker, memory in tests.
     email: EmailSender | None = None
+    razorpay: RazorpaySetup = field(default_factory=RazorpaySetup)
 
 
 def version_in_use(connection: Connection, versions: list[FileVersion]) -> FileVersion | None:
@@ -122,6 +131,31 @@ def build_connector(
             spreadsheets=spreadsheets(connection),
             timezone=timezone,
             max_rows=max_rows,
+        )
+    if connection.type == "razorpay":
+        key_id = str(connection.config.get("key_id") or "")
+        if connection.secret_ref is None or not key_id:
+            raise ConnectorError("needs_reauth", "Enter the Razorpay API key again to reconnect.")
+        try:
+            key_secret = runtime.secrets.reveal(
+                db,
+                org_id=connection.org_id,
+                secret_id=connection.secret_ref,
+                purpose=SECRET_PURPOSES["razorpay"],
+            )
+        except SecretUnavailable as error:
+            raise ConnectorError(
+                "needs_reauth",
+                "Enter the Razorpay API key again to reconnect.",
+                detail=str(error),
+            ) from error
+        return RazorpayConnector(
+            setup=runtime.razorpay,
+            key_id=key_id,
+            key_secret=key_secret,
+            timezone=timezone,
+            max_rows=max_rows,
+            clock=runtime.clock,
         )
     raise ConnectorError("invalid", "This kind of connection is not supported.")  # pragma: no cover
 

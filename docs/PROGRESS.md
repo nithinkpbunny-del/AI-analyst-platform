@@ -1,5 +1,5 @@
-**Next milestone: M10b: Public website** (then the Phase 1 review; start when the human says "continue").
-**Unfinished work:** none for M10. Carry into M10b and later:
+**Next milestone: M12: Shopify connector** (M11 is built and waits for the human's check and commit). **M10b (public website, then the Phase 1 review) is still not built**; the human chose to go on with M11 first, ask before skipping it for good.
+**Unfinished work:** none for M11. Carry into M10b and later:
 - **Never run against a real model yet** (M8-M10): the agent, the briefing writer and `make eval` are tested with the
   fake client only. Phase 1 sign-off needs >= 85% on `make eval` with a real model (BUILD_SPEC 12.2): run it by name
   when you are ready (`make eval LIST=1` lists the 48 questions; `make eval ONLY=south_q3_why,youtube_roas` runs a few).
@@ -16,6 +16,8 @@
   entries on workspace deletion for now): deleting accounts that belong to no workspace; a retention limit for the
   activity log.
 - Dictionary metric label confirmed: it stays "Checked" (D88); no code change.
+- Real Razorpay is untested (no key used): the connector is tested against a fake Razorpay in Razorpay's format. When you
+  have a key, try a **test-mode** key first (Connections > Add data > Connect Razorpay).
 - Small fix asked for later: removing a source and uploading the same file again loses its dictionary edits (D76).
 **Deferred:** multilingual answers, briefings and UI translations (D41): everything is in English, all UI text in
 `locales/en.ts`. Pin to dashboard and goals (M15). What-if levers for stock, staffing and product mix (D71).
@@ -34,10 +36,10 @@
 - [x] M8: Agent core + Ask UI (multilingual answers deferred, D41)
 - [x] M9: What-if simulator
 - [x] M10: Briefings, long tasks, exports, sharing, eval
-- [ ] M10b: Public website (then Phase 1 review, stop)
+- [ ] M10b: Public website (then Phase 1 review, stop) (skipped for now by the human's choice, still to do)
 
 ### Phase 2
-- [ ] M11: Razorpay connector
+- [x] M11: Razorpay connector
 - [ ] M12: Shopify connector
 - [ ] M13: Zoho Books connector
 - [ ] M14: PostgreSQL/MySQL connector
@@ -828,3 +830,47 @@ check" that could not be found or cleared, with Confirm disabled.
   (stock and receivables risks need Tally/Zoho, M13/M16).
 - A deleted workspace's people keep their accounts, and its earlier activity-log entries stay (D85; M19).
 - Task and briefing PDFs use the fonts installed on the server (Noto in Docker); Bricolage Grotesque is not embedded.
+
+
+---
+
+## M11: Razorpay connector (done)
+
+**Built**
+- **Connector** (`app/connectors/razorpay.py`): four tables, `payments`, `orders`, `refunds`, `settlements`. GET only
+  (the shared read-only client with no allowed POSTs), Basic auth, `count`/`skip` paging inside 31-day `from`/`to`
+  windows, retries on 429/5xx, plain-language errors (a refused key is "needs sign-in"). Incremental reads: a cursor
+  on `created_at` with a 30-day look-back, rows replaced by `id` (D90). No personal data is read. D89.
+- **Money stays in paise** and the source says so (`ColumnInfo.stored_in`), so the dictionary divides all 11 money
+  columns by 100, including `settlements` which the old name-based guess missed (D91).
+- **API:** `POST /connections/razorpay` (key id + secret, checked with one read, then stored encrypted; 422 with
+  Razorpay's reason if refused; 20 checks per hour) and `PUT /connections/{id}/razorpay/key` (replace a revoked or
+  rotated key). Connection answers carry `razorpay: {key_id_masked, mode}`; the list says Razorpay is available.
+  Migration `0011` (reversible) allows the new connection type. New env (in `.env.example`, both optional):
+  `RAZORPAY_HISTORY_DAYS`, `RAZORPAY_REFRESH_LOOKBACK_DAYS`.
+- **Development stand-in:** a key id starting `rzp_test_demo` reads the demo payments (`make fixtures` first) through
+  a local imitation of Razorpay's API. Production never uses it (D91).
+- **Web app:** "Connect Razorpay" on Add data (the key form loads on demand), the warning "Razorpay keys can make
+  changes; this app only reads" with the advice to use a dedicated key, the masked key and live/test mode on the
+  connection page, "Enter a new key" when Razorpay stops accepting the key, "Replace the API key". Strings in
+  `locales/en.ts`.
+- The dictionary metric label "Checked" (D88) needed no change.
+
+**Test status**
+- Backend: 2005 passed (1933 in M10); ruff and mypy (strict) clean. New: connector tests against a fake Razorpay (read-only,
+  paging, windows, history limit, row cap, incremental merge, errors, 429/503 retry, no personal data, typing, the
+  stand-in), API tests (connect, refusals, rate limit, roles, secrets never in responses/logs/audit/DB, preview in
+  paise, incremental read after the cache expires, revoked key and replacement, pause, removal deletes the secret,
+  cross-workspace 404, all 11 money columns detected as paise), route matrix for the 2 new routes.
+- Frontend: vitest 343 passed; eslint, prettier, tsc, tokens:check clean; build OK, first-load shell **196.1 KB of
+  200 KB** (195.2 before; the dialog is a separate lazy chunk).
+- Playwright: `make e2e` once at the end: 292 passed, 9 failed, all on the Connections screen (and the two dialogs that
+  open over it), which gained the Razorpay block. Those 9 baselines were re-recorded and reviewed; a re-run passed
+  301, 31 skipped by design. The M10 screens did not change.
+- **No AI calls were made.**
+
+**Known gaps / notes**
+- **Never run against the real Razorpay.** The fake follows Razorpay's documented list format; try a test-mode key first.
+- Subscriptions are not read (optional in the spec). Payments whose status changes more than 30 days after creation
+  appear after "Refresh now" (D90).
+- No Storybook story for the key dialog.

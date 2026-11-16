@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileSpreadsheet, Sheet, Upload } from 'lucide-react'
-import { useId, useRef, useState, type DragEvent } from 'react'
+import { CreditCard, FileSpreadsheet, Sheet, Upload } from 'lucide-react'
+import { lazy, Suspense, useId, useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormAlert } from '../../components/FormAlert'
 import { Button } from '../../components/ui/button'
@@ -8,6 +8,11 @@ import { ApiError } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import { connectionsApi, uploadFile, type Connection, type Sources } from '../../lib/connectionsApi'
 import { CONNECTIONS, fileProblem } from './keys'
+
+// The key form loads when first opened: the Connections screen is part of the app's first load.
+const RazorpayDialog = lazy(() =>
+  import('./RazorpayDialog').then((m) => ({ default: m.RazorpayDialog })),
+)
 
 const ACCEPT =
   '.xlsx,.csv,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv'
@@ -89,6 +94,7 @@ export function AddData({ sources }: { sources: Sources }) {
   const client = useQueryClient()
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [uploading, setUploading] = useState<string | null>(null)
+  const [razorpayOpen, setRazorpayOpen] = useState(false)
   const upload = useMutation({
     mutationFn: (file: File) => uploadFile(file),
     onMutate: (file) => {
@@ -140,7 +146,7 @@ export function AddData({ sources }: { sources: Sources }) {
           {t('connections.add.uploading', { name: uploading })}
         </p>
       ) : null}
-      <div className="mt-4 grid grid-cols-1 gap-4 tablet:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-4 tablet:grid-cols-2 desktop:grid-cols-3">
         <div className="flex flex-col gap-3">
           <h3 className="flex items-center gap-2 font-sans text-body font-semibold tracking-normal">
             <FileSpreadsheet className="size-5 text-neel" aria-hidden strokeWidth={1.5} />
@@ -168,7 +174,32 @@ export function AddData({ sources }: { sources: Sources }) {
             <p className="m-0 text-caption text-ink-muted">{googleNote}</p>
           </div>
         </div>
+        <div className="flex flex-col gap-3">
+          <h3 className="flex items-center gap-2 font-sans text-body font-semibold tracking-normal">
+            <CreditCard className="size-5 text-neel" aria-hidden strokeWidth={1.5} />
+            {t('connections.add.razorpayTitle')}
+          </h3>
+          <div className="flex flex-col items-start gap-2">
+            <Button disabled={!sources.razorpay.available} onClick={() => setRazorpayOpen(true)}>
+              {t('connections.add.connectRazorpay')}
+            </Button>
+            <p className="m-0 text-caption text-ink-muted">
+              {sources.razorpay.stand_in
+                ? t('connections.add.razorpayStandIn')
+                : t('connections.add.razorpayHint')}
+            </p>
+          </div>
+        </div>
       </div>
+      {razorpayOpen ? (
+        <Suspense fallback={null}>
+          <RazorpayDialog
+            open={razorpayOpen}
+            onOpenChange={setRazorpayOpen}
+            onDone={(text) => setNotice({ tone: 'success', text })}
+          />
+        </Suspense>
+      ) : null}
     </section>
   )
 }

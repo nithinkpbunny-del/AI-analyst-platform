@@ -214,6 +214,7 @@ def test_schema_json_round_trips_every_field() -> None:
         "unparsed_count": 0,
         "unparsed_examples": [],
         "currencies": ["₹"],
+        "stored_in": None,
     }
 
 

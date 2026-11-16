@@ -18,6 +18,7 @@ from app.connectors.registry import SECRET_PURPOSES, ConnectorRuntime
 from app.data.objects import file_key
 from app.models import Connection, FileVersion
 from tests.recorded_google import ACCOUNT, REFRESH_TOKEN, SHEET_ID
+from tests.recorded_razorpay import KEY_ID, KEY_SECRET
 
 SALES_CSV = (
     "UrbanCart outlet sales\n"
@@ -138,6 +139,36 @@ def make_sheets_connection(
             "account_email": ACCOUNT,
             "spreadsheets": [{"id": s, "name": spreadsheet_name} for s in spreadsheet_ids],
         },
+        secret_ref=secret.id,
+        sync_state="idle",
+    )
+    db.add(connection)
+    db.commit()
+    if sync:
+        service.sync_connection(runtime, org_id=org_id, connection_id=connection.id)
+        db.expire_all()
+    return connection
+
+
+def make_razorpay_connection(
+    db: DbSession,
+    runtime: ConnectorRuntime,
+    org_id: uuid.UUID,
+    *,
+    key_id: str = KEY_ID,
+    key_secret: str = KEY_SECRET,
+    name: str = "Razorpay",
+    sync: bool = True,
+) -> Connection:
+    secret = runtime.secrets.put(
+        db, org_id=org_id, purpose=SECRET_PURPOSES["razorpay"], value=key_secret
+    )
+    connection = Connection(
+        org_id=org_id,
+        type="razorpay",
+        name=name,
+        status="active",
+        config={"key_id": key_id, "mode": "live" if key_id.startswith("rzp_live_") else "test"},
         secret_ref=secret.id,
         sync_state="idle",
     )

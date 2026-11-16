@@ -2,7 +2,7 @@ import { API_BASE_URL, ApiError, authedRequest, getAccessToken, NETWORK_ERROR_CO
 import type { Role } from './role'
 
 // Shapes as the API sends them (backend app/schemas/connections.py).
-export type ConnectionType = 'file' | 'google_sheets'
+export type ConnectionType = 'file' | 'google_sheets' | 'razorpay'
 export type ConnectionStatus = 'active' | 'error' | 'needs_reauth' | 'disabled'
 export type SyncState = 'idle' | 'queued' | 'running'
 export type ColumnType = 'boolean' | 'integer' | 'number' | 'date' | 'datetime' | 'text'
@@ -90,6 +90,8 @@ export interface Connection {
   warnings_count: number
   file: FileInfo | null
   google: { account_email: string | null; spreadsheets: Spreadsheet[] } | null
+  /** Razorpay: the key id is shown masked; the secret is never returned. */
+  razorpay?: { key_id_masked: string; mode: 'live' | 'test' } | null
 }
 
 /** What removing a connection does to the business dictionary (shown before removing it). */
@@ -110,6 +112,7 @@ export interface ConnectionDetail extends Connection {
 export interface Sources {
   upload_max_mb: number
   google_sheets: { available: boolean; stand_in: boolean }
+  razorpay: { available: boolean; stand_in: boolean }
 }
 
 export interface ConnectionList {
@@ -153,6 +156,12 @@ export interface PickerConfig {
   app_id: string
   stand_in: boolean
   stand_in_files: Spreadsheet[]
+}
+
+export interface RazorpayKey {
+  key_id: string
+  key_secret: string
+  name?: string
 }
 
 export interface GoogleFinish {
@@ -210,6 +219,13 @@ export const connectionsApi = {
     authedRequest<GoogleFinish>('/connections/google/finish', {
       method: 'POST',
       body: { state, code },
+    }),
+  addRazorpay: (body: RazorpayKey) =>
+    authedRequest<Connection>('/connections/razorpay', { method: 'POST', body }),
+  replaceRazorpayKey: (connectionId: string, body: RazorpayKey) =>
+    authedRequest<Connection>(`/connections/${id(connectionId)}/razorpay/key`, {
+      method: 'PUT',
+      body,
     }),
   pickerToken: (connectionId: string) =>
     authedRequest<PickerConfig>(`/connections/${id(connectionId)}/google/picker-token`, {

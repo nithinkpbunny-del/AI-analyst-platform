@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # The Google Cloud project *number* (not its id): the Picker needs it to grant access to picked files.
     google_cloud_project_number: str = ""
 
+    # --- Razorpay connector (M11) ---
+    # How far back the first read goes, and how many days before the newest row each later read starts again
+    # (payments change after they are created: captured, refunded), D90.
+    razorpay_history_days: int = Field(default=365, ge=1, le=3650)
+    razorpay_refresh_lookback_days: int = Field(default=30, ge=1, le=365)
+
     # --- AI ---
     llm_default_provider: Literal["gemini", "claude"] = "gemini"
     gemini_api_key: SecretStr = SecretStr("")

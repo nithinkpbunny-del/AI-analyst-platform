@@ -9,6 +9,7 @@ import redis
 
 from app.config import get_settings
 from app.connectors.google_sheets import default_setup
+from app.connectors.razorpay import default_setup as razorpay_setup
 from app.connectors.registry import ConnectorRuntime
 from app.data.objects import S3ObjectStore
 from app.db.session import make_engine, make_session_factory
@@ -30,6 +31,7 @@ def worker_runtime() -> ConnectorRuntime:  # pragma: no cover - exercised by the
         redis=redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=10),
         secrets=SecretStore(key_wrapper(settings)),
         google=default_setup(settings),
+        razorpay=razorpay_setup(settings),
         clock=_utc_now,
         email=SmtpEmailSender(settings),
     )

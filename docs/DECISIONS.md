@@ -1198,3 +1198,41 @@ a missing one.
 ### D88. Dictionary metric check label (confirmed 2026-11-13)
 - The Owner confirmed the label stays **"Checked"**: no change. A flagged metric's button reads "Looks right" until it
   is pressed, then the metric shows "Checked" (`dictionary` strings `check` / `checked` in `locales/en.ts`, D76).
+
+### D89. Razorpay credentials, read-only, key handling (M11, BUILD_SPEC 8.4)
+- An Owner enters a **key id** (`rzp_live_…` or `rzp_test_…`) and the **key secret**. The secret is checked with one
+  read (`GET /payments?count=1`) **before** anything is saved, then encrypted in the secret store (purpose
+  `razorpay_key_secret`, bound to the workspace and row). The key id is not a secret and sits in the connection's
+  `config` next to the mode (live/test); the API and the screens show it masked (`rzp_live_AbCd••••`). The secret is
+  write-only, never in a response, log or activity entry (`connection.added` records type, name and mode only).
+- **Read-only twice:** the connector uses `ReadOnlyHttpClient` with no allowed POSTs (GET only; the wrapper and the
+  request hook both refuse anything else; tested). Razorpay keys cannot be limited to read-only, so the dialog and the
+  connection page say so and recommend a dedicated key. Test-mode keys are labelled as such.
+- Replacing a key (revoked, rotated) checks the new key first, stores a new secret, deletes the old one and reads again;
+  nothing changes if the new key is refused. Key checks: 20 per workspace per hour.
+- **Left out on purpose:** subscriptions (optional in the spec), customers, and any personal data (email, phone, card
+  and UPI details): the four tables hold only what an analysis needs. Razorpay's lists are all `GET`.
+
+### D90. Razorpay reading: windows, incremental, refresh (M11, BUILD_SPEC 8.1, 8.4)
+- A read pages with `count=100` and `skip` inside **31-day windows** (`from`/`to`), newest window first, so `skip` never
+  gets deep and a row cap drops the oldest rows. The first read goes back `RAZORPAY_HISTORY_DAYS` (365).
+- **Incremental:** the cursor is the newest `created_at`. A payment changes after creation (authorized → captured →
+  refunded), so the next read starts `RAZORPAY_REFRESH_LOOKBACK_DAYS` (30) before the cursor and its rows replace
+  earlier copies by `id`. Refunds and settlements that appear later than that window after a payment are still found
+  in their own tables. A payment whose status changes more than 30 days after its creation is not noticed until
+  "Refresh now" (a full read of the history window).
+- "Refresh now" is a **full** read (the cache's `force`), not incremental. Questions asked after the cache time passes
+  use the incremental read.
+- Razorpay cannot say "nothing changed", so `source_version` is empty and an expired cache always asks for the delta.
+- Retries (429/5xx with backoff, `Retry-After`) come from the shared read-only client. A 401/403 is `needs_reauth`.
+
+### D91. Money in paise, declared by the source (M11)
+- Razorpay money columns are **whole paise** and stay so in the stored table: payments `amount`, `amount_refunded`,
+  `fee`, `tax`; orders `amount`, `amount_paid`, `amount_due`; refunds `amount`; settlements `amount`, `fees`, `tax`.
+- The connector marks these columns `stored_in="paise"` (new optional field on `ColumnInfo`); the profiler turns that
+  into `INR`, `divide_by: 100` with the evidence `source_paise` ("Razorpay sends this amount in paise"). Before this,
+  only a payments table recognised by its column names was detected, so `settlements` (no currency column) would have
+  been missed. The dictionary and every metric, as for the demo CSV, divide by 100 (`app/dictionary/units.py`).
+- **Development stand-in:** keys starting `rzp_test_demo` are answered by a local stand-in serving the demo
+  `razorpay_payments.csv` (orders, refunds and settlements derived from it) in Razorpay's format. It exists only when
+  `APP_ENV=development`; every other key goes to the real Razorpay. CI and tests use a fake Razorpay, never the network.

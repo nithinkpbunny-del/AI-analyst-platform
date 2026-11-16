@@ -11,11 +11,11 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from app.schemas.auth import _Strict
 
-ConnectionTypeName = Literal["file", "google_sheets"]
+ConnectionTypeName = Literal["file", "google_sheets", "razorpay"]
 StatusName = Literal["active", "error", "needs_reauth", "disabled"]
 SyncStateName = Literal["idle", "queued", "running"]
 AccessName = Literal["all", "selected"]
@@ -86,6 +86,11 @@ class GoogleOut(BaseModel):
     spreadsheets: list[SpreadsheetOut]
 
 
+class RazorpayOut(BaseModel):
+    key_id_masked: str
+    mode: Literal["live", "test"]
+
+
 class ConnectionOut(BaseModel):
     id: uuid.UUID
     type: ConnectionTypeName
@@ -101,6 +106,7 @@ class ConnectionOut(BaseModel):
     warnings_count: int
     file: FileOut | None = None
     google: GoogleOut | None = None
+    razorpay: RazorpayOut | None = None
 
 
 class DictionaryMoveOut(BaseModel):
@@ -128,9 +134,15 @@ class GoogleSourceOut(BaseModel):
     stand_in: bool
 
 
+class RazorpaySourceOut(BaseModel):
+    available: bool
+    stand_in: bool
+
+
 class SourcesOut(BaseModel):
     upload_max_mb: int
     google_sheets: GoogleSourceOut
+    razorpay: RazorpaySourceOut
 
 
 class ConnectionList(BaseModel):
@@ -207,6 +219,35 @@ class GoogleStartOut(BaseModel):
 class GoogleFinishRequest(_Strict):
     state: str = Field(min_length=16, max_length=200)
     code: str = Field(min_length=1, max_length=2048)
+
+
+class RazorpayKeyRequest(_Strict):
+    """A Razorpay API key. The secret is write-only: it is checked, encrypted and never returned."""
+
+    key_id: str = Field(min_length=10, max_length=64)
+    key_secret: SecretStr = Field(min_length=8, max_length=128)
+    name: str | None = Field(default=None, max_length=120)
+
+    @field_validator("key_id")
+    @classmethod
+    def _key_id(cls, value: str) -> str:
+        value = value.strip()
+        if not re.fullmatch(r"rzp_(live|test)_[A-Za-z0-9]{4,}", value):
+            raise ValueError("The key id starts with rzp_live_ or rzp_test_.")
+        return value
+
+    @field_validator("key_secret")
+    @classmethod
+    def _secret(cls, value: SecretStr) -> SecretStr:
+        text = value.get_secret_value().strip()
+        if not text.isascii() or " " in text:
+            raise ValueError("The key secret has no spaces.")
+        return SecretStr(text)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str | None) -> str | None:
+        return value.strip() or None if value else None
 
 
 class PickerOut(BaseModel):

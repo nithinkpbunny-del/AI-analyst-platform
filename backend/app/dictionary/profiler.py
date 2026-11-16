@@ -160,7 +160,10 @@ def money_evidence(
     whole = bool(len(present)) and bool((present == present.round()).all())
     if "rupee_marker" not in evidence:
         # No ₹ in the data: whole numbers in a payments table (or named "paise") are most likely paise.
-        if "paise" in name.lower():
+        if info.get("stored_in") == "paise" and kind == "integer":
+            evidence.append("source_paise")  # the source (Razorpay's API) says so itself
+            unit, divide_by, reason = "INR", 100, "paise"
+        elif "paise" in name.lower():
             evidence.append("paise_name")
             unit, divide_by, reason = "INR", 100, "paise"
         elif payments and kind == "integer" and PAISE_COLUMN.search(name) and whole:
