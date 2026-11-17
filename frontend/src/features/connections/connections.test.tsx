@@ -12,6 +12,7 @@ import {
   demoOrders,
   demoOrdersDetail,
   demoRazorpay,
+  demoShopify,
   demoDatasetPreview,
   demoTargets,
 } from '../../testing/connectionFixtures'
@@ -183,6 +184,7 @@ describe('Google Sheets', () => {
             upload_max_mb: 50,
             google_sheets: { available: false, stand_in: false },
             razorpay: { available: true, stand_in: false },
+            shopify: { available: true, stand_in: false },
           },
         },
       },
@@ -659,5 +661,143 @@ describe('Razorpay', () => {
     renderApp('/connections/c4', { session: analyst })
     await screen.findByText(/Razorpay key rzp_live_AbCd••••/)
     expect(screen.queryByRole('button', { name: 'Replace the API key' })).not.toBeInTheDocument()
+  })
+})
+
+describe('Shopify', () => {
+  const open = async () => {
+    renderApp('/connections')
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect Shopify' }))
+    return screen.findByRole('dialog', { name: 'Connect Shopify' })
+  }
+
+  it('asks for the store address and checks it before going to Shopify', async () => {
+    const api = routes()
+    const dialog = await open()
+    expect(within(dialog).getByText(/never changes anything in your store/)).toBeVisible()
+    await userEvent.type(within(dialog).getByLabelText('Store address'), 'not a store!')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue to Shopify' }))
+    expect(await within(dialog).findByText(/Enter the store address/)).toBeVisible()
+    expect(api.count('POST /connections/shopify/start')).toBe(0)
+  })
+
+  it('sends the Owner to Shopify to approve read-only access', async () => {
+    const url = 'https://urbancart.myshopify.com/admin/oauth/authorize?state=s'
+    const api = routes({
+      'POST /connections/shopify/start': { status: 200, body: { authorization_url: url } },
+    })
+    const dialog = await open()
+    await userEvent.type(within(dialog).getByLabelText('Store address'), 'urbancart')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue to Shopify' }))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(url))
+    expect(api.body('POST /connections/shopify/start')).toEqual({ shop: 'urbancart' })
+  })
+
+  it('shows the server’s answer about the address in the field', async () => {
+    routes({
+      'POST /connections/shopify/start': apiError(
+        422,
+        'validation_error',
+        'Check the store address.',
+        {
+          shop: 'Enter the store’s address, for example your-store.myshopify.com.',
+        },
+      ),
+    })
+    const dialog = await open()
+    await userEvent.type(within(dialog).getByLabelText('Store address'), 'closed-store')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue to Shopify' }))
+    expect(await within(dialog).findByText(/Enter the store’s address/)).toBeVisible()
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('is offered as a stand-in in development and disabled without an app', async () => {
+    routes({
+      'GET /connections': {
+        status: 200,
+        body: {
+          ...demoConnectionList,
+          sources: {
+            ...demoConnectionList.sources,
+            shopify: { available: false, stand_in: false },
+          },
+        },
+      },
+    })
+    renderApp('/connections')
+    expect(await screen.findByRole('button', { name: 'Connect Shopify' })).toBeDisabled()
+    expect(screen.getByText(/docs\/SETUP_SHOPIFY.md/)).toBeInTheDocument()
+  })
+
+  it('finishes the connection when Shopify sends the Owner back', async () => {
+    const api = routes({
+      'POST /connections/shopify/finish': {
+        status: 200,
+        body: { connection: { ...demoShopify, sync_state: 'queued' }, reconnected: false },
+      },
+      'GET /connections/c5': { status: 200, body: { ...demoShopify, datasets: [], versions: [] } },
+    })
+    renderApp('/connections/shopify/return#state=state-0123456789abcdef&code=abc')
+    expect(await screen.findByRole('heading', { name: 'Shopify (UrbanCart)' })).toBeVisible()
+    expect(api.body('POST /connections/shopify/finish')).toEqual({
+      state: 'state-0123456789abcdef',
+      code: 'abc',
+    })
+  })
+
+  it('explains a cancelled approval and offers a way back', async () => {
+    const api = routes()
+    renderApp('/connections/shopify/return#error=access_denied')
+    expect(await screen.findByText(/was not approved in Shopify/)).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Back to connections' })).toBeVisible()
+    expect(api.count('POST /connections/shopify/finish')).toBe(0)
+  })
+
+  it('shows the store, the 60-day limit and the read-only note on the connection page', async () => {
+    routes({
+      'GET /connections/c5': { status: 200, body: { ...demoShopify, datasets: [], versions: [] } },
+    })
+    renderApp('/connections/c5')
+    expect(await screen.findByText(/Store urbancart.myshopify.com/)).toBeVisible()
+    expect(screen.getByText(/last 60 days/)).toBeVisible()
+    expect(screen.getByText(/Amounts are kept in rupees/)).toBeVisible()
+  })
+
+  it('offers to sign in to Shopify again when Shopify stopped sharing data', async () => {
+    const url = 'https://urbancart.myshopify.com/admin/oauth/authorize?state=t'
+    const api = routes({
+      'GET /connections/c5': {
+        status: 200,
+        body: {
+          ...demoShopify,
+          status: 'needs_reauth',
+          last_error: 'Shopify stopped sharing data. Sign in to Shopify again to reconnect.',
+          datasets: [],
+          versions: [],
+        },
+      },
+      'POST /connections/shopify/start': { status: 200, body: { authorization_url: url } },
+    })
+    renderApp('/connections/c5')
+    const alert = (await screen.findByText(/Shopify stopped sharing data/)).closest(
+      '[role="alert"]',
+    )
+    const button = within(alert as HTMLElement).getByRole('button', {
+      name: 'Sign in to Shopify again',
+    })
+    await userEvent.click(button)
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(url))
+    expect(api.body('POST /connections/shopify/start')).toEqual({ connection_id: 'c5' })
+  })
+
+  it('does not offer Analysts a sign-in', async () => {
+    routes({
+      'GET /connections/c5': { status: 200, body: { ...demoShopify, datasets: [], versions: [] } },
+    })
+    renderApp('/connections/c5', { session: analyst })
+    await screen.findByText(/Store urbancart.myshopify.com/)
+    expect(
+      screen.queryByRole('button', { name: 'Sign in to Shopify again' }),
+    ).not.toBeInTheDocument()
   })
 })

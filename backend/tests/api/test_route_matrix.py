@@ -48,6 +48,8 @@ from tests.datasources import (
 )
 from tests.recorded_google import NO_ACCESS_ID, SHEET_ID
 from tests.recorded_razorpay import KEY_ID, KEY_SECRET
+from tests.recorded_shopify import SHOP
+from tests.recorded_shopify import code as shopify_code
 from tests.tenancy import World, add_member, build_world, token_for
 
 P = Permission
@@ -81,6 +83,8 @@ PUBLIC = {
     ("POST", "/invitations/accept-sign-in"),
     # The browser returns from Google; nothing is exchanged here (tested in test_connections_google).
     ("GET", "/connections/google/callback"),
+    # The browser returns from Shopify; only the HMAC is checked here (tested in test_connections_shopify).
+    ("GET", "/connections/shopify/callback"),
 }
 
 # Signed in, but about the person rather than a workspace: tested in test_auth/test_two_factor/test_devices,
@@ -163,6 +167,7 @@ class Fixtures:
     dict_version_b: str = ""
     draft_a: dict[str, Any] = field(default_factory=dict)  # org A's dictionary draft (content)
     google_state: str = ""
+    shopify_state: str = ""
 
     def placeholders(self, *, theirs: bool) -> dict[str, str]:
         side = "b" if theirs else "a"
@@ -449,6 +454,22 @@ CASES: dict[tuple[str, str], Case] = {
         body_from=lambda ids: {"state": ids.google_state, "code": "4/test-code"},
         invalid_body={"state": "short", "code": ""},
     ),
+    ("POST", "/connections/shopify/start"): Case(
+        "POST",
+        "/connections/shopify/start",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={"shop": "urbancart-demo"},
+        invalid_body={"connection_id": "not-a-uuid"},
+    ),
+    ("POST", "/connections/shopify/finish"): Case(
+        "POST",
+        "/connections/shopify/finish",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body_from=lambda ids: {"state": ids.shopify_state, "code": shopify_code()},
+        invalid_body={"state": "short", "code": ""},
+    ),
     ("POST", "/connections/razorpay"): Case(
         "POST",
         "/connections/razorpay",
@@ -637,8 +658,23 @@ def ids(
             }
         ),
     )
+    # A Shopify sign-in started by owner_a whose callback passed the HMAC check, which finish() completes.
+    shopify_state = "matrix-shopify-state-000000000"
+    fake_redis.set(
+        f"shopify:state:{shopify_state}",
+        json.dumps(
+            {
+                "org_id": str(world.org_a.id),
+                "user_id": str(world.owner_a.id),
+                "shop": SHOP,
+                "connection_id": None,
+                "verified": True,
+            }
+        ),
+    )
     return Fixtures(
         world=world,
+        shopify_state=shopify_state,
         member_a=membership(world.analyst_a.id),
         member_b=membership(world.analyst_b.id),
         invitation_a=invitations[world.org_a.id],

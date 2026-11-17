@@ -1,11 +1,14 @@
-**Next milestone: M12: Shopify connector** (M11 is built and waits for the human's check and commit). **M10b (public website, then the Phase 1 review) is still not built**; the human chose to go on with M11 first, ask before skipping it for good.
-**Unfinished work:** none for M11. Carry into M10b and later:
+**Next milestone: M13: Zoho Books connector** (M12 is built and waits for the human's check and commit; M11 is committed,
+4653f4f). **M10b (public website, then the Phase 1 review) is still not built**; the human chose to go on with Phase 2
+first, ask before skipping it for good.
+**Unfinished work:** none for M12. Carry into M10b and later:
 - **Never run against a real model yet** (M8-M10): the agent, the briefing writer and `make eval` are tested with the
-  fake client only. Phase 1 sign-off needs >= 85% on `make eval` with a real model (BUILD_SPEC 12.2): run it by name
-  when you are ready (`make eval LIST=1` lists the 48 questions; `make eval ONLY=south_q3_why,youtube_roas` runs a few).
+  fake client only. The real-AI checks of M10 (AI-written briefing, health check, export and share of a real answer, a
+  long task) are still untested (Gemini was overloaded). Phase 1 sign-off needs >= 85% on `make eval` with a real model
+  (BUILD_SPEC 12.2): run it by name when you are ready (`make eval LIST=1` lists the 48 questions).
 - M10b's final design QA (11a.9) should look again at the Today, Briefings, Tasks and report screens on phones.
-- The app shell is at 195.2 KB of its 200 KB budget: the next screens must load lazily; splitting `locales/en.ts` by
-  screen is the next lever.
+- The app shell is at **197.4 KB** of its 200 KB budget (196.1 after M11): the next screens must load lazily; splitting
+  `locales/en.ts` by screen is the next lever and will be needed soon.
 - New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`); questions and long tasks run through
   `agent.service.run_agent`. Every number comes from code and cites a result id (D67).
 - Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants; every new route goes in
@@ -18,6 +21,10 @@
 - Dictionary metric label confirmed: it stays "Checked" (D88); no code change.
 - Real Razorpay is untested (no key used): the connector is tested against a fake Razorpay in Razorpay's format. When you
   have a key, try a **test-mode** key first (Connections > Add data > Connect Razorpay).
+- **Real Shopify is untested** (no app credentials, no store): the connector is tested against a local imitation of
+  Shopify's OAuth and Admin GraphQL API whose schema copy was written from Shopify's documentation. Before launch,
+  create the app (docs/SETUP_SHOPIFY.md Part B), connect a development store once and compare a few orders with the
+  Shopify admin. Shopify's expiring offline tokens are not used yet (D92).
 - Small fix asked for later: removing a source and uploading the same file again loses its dictionary edits (D76).
 **Deferred:** multilingual answers, briefings and UI translations (D41): everything is in English, all UI text in
 `locales/en.ts`. Pin to dashboard and goals (M15). What-if levers for stock, staffing and product mix (D71).
@@ -40,7 +47,7 @@
 
 ### Phase 2
 - [x] M11: Razorpay connector
-- [ ] M12: Shopify connector
+- [x] M12: Shopify connector
 - [ ] M13: Zoho Books connector
 - [ ] M14: PostgreSQL/MySQL connector
 - [ ] M15: Goals, pinned dashboard, UI translations (translations deferred, D41) (then Phase 2 review, stop)
@@ -874,3 +881,69 @@ check" that could not be found or cleared, with Confirm disabled.
 - Subscriptions are not read (optional in the spec). Payments whose status changes more than 30 days after creation
   appear after "Refresh now" (D90).
 - No Storybook story for the key dialog.
+
+
+---
+
+## M12: Shopify connector (done)
+
+**Built**
+- **Connector** (`app/connectors/shopify.py`): five tables, `orders`, `order_items`, `customers`, `products`,
+  `variants`. Shopify's OAuth (store address → Shopify's approval page → callback checked with Shopify's HMAC → token
+  exchange), read scopes only (`read_orders`, `read_products`, `read_customers`, `read_inventory`, plus
+  `read_all_orders` when Shopify approves it); a granted scope that is not `read_*` refuses the connection. The token
+  is checked with one read, then stored encrypted. No names, e-mail addresses, phone numbers or street addresses are
+  requested (city, state and country only). D92.
+- **GraphQL queries only** (`app/connectors/graphql_guard.py`): every document is parsed before sending and again in
+  the read-only HTTP client (new `post_guard`); every mutation is refused except `bulkOperationRunQuery` in its exact
+  shape with a pure query inside (the Owner's decision). D93.
+- **Reading:** paged queries for small tables and incremental reads, **one bulk export** for a first read of a table
+  over 1,000 rows (JSONL streamed, line items rebuilt), Shopify's cost bucket respected (waits, `THROTTLED` retries),
+  incremental by `updated_at`, test orders left out, 730 days of history. D94.
+- **Money in rupees**, declared by the source (`stored_in="rupees"`, evidence `source_rupees`): nothing is divided,
+  unlike Razorpay's paise. Uploaded `shopify_orders.csv` files keep working next to the connector. D95.
+- **API:** `POST /connections/shopify/start`, `GET /connections/shopify/callback` (public, HMAC-checked),
+  `POST /connections/shopify/finish`; connection answers carry `shopify: {shop, shop_name, currency, all_orders}`; the
+  list says whether Shopify is available. Migration `0012` (reversible) allows the new type. New dependency
+  `graphql-core`. New env (in `.env.example`, all optional): `SHOPIFY_SCOPES`, `SHOPIFY_API_VERSION`,
+  `SHOPIFY_HISTORY_DAYS`, `SHOPIFY_BULK_THRESHOLD`, `SHOPIFY_BULK_TIMEOUT_SECONDS` (`SHOPIFY_API_KEY`/`_SECRET` existed).
+- **Development stand-in** (`app/connectors/shopify_stand_in.py`): without app credentials and with
+  `APP_ENV=development`, "Connect Shopify" opens a local approval page and reads the demo store (28,540 orders, the same
+  totals as `shopify_orders.csv`) through an imitation of Shopify's OAuth and GraphQL API, bulk exports included. Tests
+  use the same stand-in behind a "real" setup.
+- **Web app:** "Connect Shopify" on Add data (the address dialog loads on demand), the return page
+  `/connections/shopify/return` (loads on demand), store, currency, the 60-day note and the read-only note on the
+  connection page, "Sign in to Shopify again" (also when Shopify stops sharing data), a removal note to uninstall the
+  app in Shopify. Strings in `locales/en.ts`; test-check labels for orders and all orders; "Signed in to Google" became
+  "Signed in to the source". `docs/SETUP_SHOPIFY.md`.
+- **Also fixed:** `test_envelopes_fail_closed[wrapped_dek]` (and `[ciphertext]`) now flip a bit instead of writing a
+  fixed byte, which was a no-op about 1 run in 256. The Ask fixture's fetch time (2026-11-12) showed "N days ago" and
+  changed the phone "Show my work" screenshot every day; it is now more than a week old (a fixed date). The Add data
+  intro now names Razorpay and Shopify. The "Checked" label (D88) needed no change.
+
+**Test status**
+- Backend: **2171 passed** (2005 in M11); ruff, ruff format and mypy (strict) clean. New: the guard (56: queries, every
+  kind of mutation incl. `orderUpdate`, `customerDelete`, `bulkOperationCancel`, a write beside the bulk read, every
+  wrong bulk shape, the body check and the HTTP client); the connector against the stand-in (58: store addresses,
+  HMAC, scopes, code exchange once, tables and rupees, no personal fields in any query, paging, many line items, row
+  cap, throttling, bulk export = paged result, waiting for another export, failed and slow exports, incremental,
+  errors, no writes); API (31 + 4 for the stand-in: start, callback with forged HMAC / other store / unknown state, finish once and only by
+  the starter, write scopes refused, secrets never in responses/logs/audit/DB, preview in rupees, incremental refresh,
+  bulk per table, revoked token and signing in again, cross-workspace 404, removal, dictionary units, the uploaded CSV
+  next to the connector, modes); the stand-in flow end to end; security (writes through every connector incl. Razorpay
+  and Shopify mutations); profiler units; route matrix for the 2 new routes (+1 public).
+- Frontend: vitest **352 passed** (343 in M11); eslint, prettier, tsc, tokens:check clean; build OK, first-load shell
+  **197.4 KB of 200 KB** (196.1 before; the dialog and the return page are separate chunks). Storybook builds.
+- Playwright: `make e2e` once: 291 passed, 10 failed: the 8 Connections baselines (the Shopify block) and the phone
+  "Show my work" drawer (the drifting date above). Those were re-recorded and reviewed, and a full re-run passed **301,
+  31 skipped by design**.
+- **No AI calls were made.** `make eval` and `make llm-check` were not run.
+
+**How to try it:** see the testing steps given at the end of M12 (summary: `make dev`, Connections > Add data >
+Connect Shopify, any store address, Install app on the stand-in page).
+
+**Known gaps / notes**
+- **Never run against real Shopify** (no app, no store): see "Unfinished work" above and docs/SETUP_SHOPIFY.md.
+- Removing a connection does not uninstall the app in Shopify (that is a write); the page says to uninstall it there.
+- Expiring offline tokens are not used; a deleted line item can stay until "Refresh now" (D94).
+- No Storybook story for the Shopify dialog (as for Razorpay's).

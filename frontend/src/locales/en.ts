@@ -444,7 +444,7 @@ const en = {
     add: {
       title: 'Add data',
       intro:
-        'Upload a spreadsheet or connect Google Sheets. Each sheet or tab becomes a table you can ask about.',
+        'Upload a spreadsheet, or connect Google Sheets, Razorpay or Shopify. Each sheet, tab or kind of record becomes a table you can ask about.',
       uploadTitle: 'Excel or CSV file',
       uploadHint:
         '.xlsx or .csv, up to {{mb}} MB. Every sheet is read; dates like 05/01/2026 are read day first.',
@@ -468,6 +468,42 @@ const en = {
       connectRazorpay: 'Connect Razorpay',
       razorpayStandIn:
         'Development: a key id starting with rzp_test_demo reads demo payments on this computer.',
+      shopifyTitle: 'Shopify',
+      shopifyHint:
+        'Orders, order items, customers and products. Approve read-only access in Shopify.',
+      connectShopify: 'Connect Shopify',
+      shopifyStandIn: 'Development: Shopify is simulated on this computer with the demo store.',
+      shopifyOff: 'Shopify is not set up on this server yet (docs/SETUP_SHOPIFY.md).',
+    },
+    shopify: {
+      title: 'Connect Shopify',
+      intro:
+        'Enter your store address. Shopify then asks you to approve read-only access to orders, products and customers. This app never changes anything in your store and does not read customer names, e-mail addresses or phone numbers.',
+      shop: 'Store address',
+      shopHint: 'For example your-store.myshopify.com, or just your-store.',
+      shopInvalid: 'Enter the store address, for example your-store.myshopify.com.',
+      start: 'Continue to Shopify',
+      opening: 'Opening Shopify…',
+      failed: 'Shopify could not be opened. Try again.',
+      returnTitle: 'Connecting Shopify',
+      working: 'Finishing the connection with Shopify…',
+      startAgain: 'Back to connections',
+      errors: {
+        expired:
+          'This Shopify sign-in expired or was already used. Start again with Connect Shopify.',
+        shopify_failed: 'Shopify could not confirm the approval. Start again with Connect Shopify.',
+        access_denied: 'The app was not approved in Shopify, so nothing was connected.',
+      },
+      storeLine: 'Store {{shop}}',
+      currencyLine: 'amounts in {{currency}}',
+      allOrders: 'All orders can be read.',
+      recentOrders:
+        'Only orders from the last 60 days can be read: Shopify has not given this app access to older orders.',
+      readOnlyNote:
+        'This app only reads from Shopify. Amounts are kept in rupees, as Shopify sends them.',
+      reconnect: 'Sign in to Shopify again',
+      removeNote:
+        'To stop the app completely, also uninstall it in your Shopify admin (Settings, Apps).',
     },
     razorpay: {
       title: 'Connect Razorpay',
@@ -496,7 +532,12 @@ const en = {
         'This app only reads from Razorpay. Amounts are kept in paise, as Razorpay sends them.',
       replaceButton: 'Replace the API key',
     },
-    types: { file: 'Excel or CSV file', google_sheets: 'Google Sheets', razorpay: 'Razorpay' },
+    types: {
+      file: 'Excel or CSV file',
+      google_sheets: 'Google Sheets',
+      razorpay: 'Razorpay',
+      shopify: 'Shopify',
+    },
     status: { active: 'Live', needs_reauth: 'Needs sign-in', error: 'Error', disabled: 'Paused' },
     reading: 'Reading the data…',
     updated: 'Updated {{when}}',
@@ -521,8 +562,11 @@ const en = {
       checks: {
         file_readable: 'The file opens',
         read_only: 'Read-only access',
-        signed_in: 'Signed in to Google',
+        signed_in: 'Signed in to the source',
         spreadsheets_readable: 'The spreadsheets can be read',
+        payments_readable: 'Payments can be read',
+        orders_readable: 'Orders can be read',
+        all_orders: 'Orders older than 60 days can be read',
       },
       rename: 'Rename',
       renameTitle: 'Rename {{name}}',
@@ -828,6 +872,7 @@ const en = {
       money_name: 'a money-like name',
       paise_name: 'the name says paise',
       source_paise: 'Razorpay sends this amount in paise',
+      source_rupees: 'Shopify sends this amount in rupees',
       paise_signature: 'a payments table with whole-number amounts',
       paise_amount: 'a whole-number amount next to INR',
       percent_marker: 'a % in the values',

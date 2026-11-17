@@ -34,8 +34,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.models.mixins import IdMixin, TimestampMixin
 
-ConnectionType = Literal["file", "google_sheets", "razorpay"]
-CONNECTION_TYPES: tuple[ConnectionType, ...] = ("file", "google_sheets", "razorpay")
+ConnectionType = Literal["file", "google_sheets", "razorpay", "shopify"]
+CONNECTION_TYPES: tuple[ConnectionType, ...] = ("file", "google_sheets", "razorpay", "shopify")
 ConnectionStatus = Literal["active", "error", "needs_reauth", "disabled"]
 SyncState = Literal["idle", "queued", "running"]
 # needs_confirmation: readable, but it differs from the version in use (sheets or columns gone, types changed),
@@ -55,7 +55,7 @@ def _org_fk() -> Mapped[uuid.UUID]:
 class Connection(IdMixin, TimestampMixin, Base):
     __tablename__ = "connections"
     __table_args__ = (
-        CheckConstraint("type IN ('file', 'google_sheets', 'razorpay')", name="type"),
+        CheckConstraint("type IN ('file', 'google_sheets', 'razorpay', 'shopify')", name="type"),
         CheckConstraint("status IN ('active', 'error', 'needs_reauth', 'disabled')", name="status"),
         CheckConstraint("sync_state IN ('idle', 'queued', 'running')", name="sync_state"),
     )

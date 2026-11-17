@@ -559,6 +559,11 @@ export function ConnectionDetailPage() {
     onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
     onError: fail,
   })
+  const reconnectShopify = useMutation({
+    mutationFn: () => connectionsApi.shopifyStart({ connection_id: connectionId }),
+    onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
+    onError: fail,
+  })
   const saveSheets = useMutation({
     mutationFn: (ids: string[]) => connectionsApi.setSpreadsheets(connectionId, ids),
     onSuccess: () => {
@@ -664,6 +669,21 @@ export function ConnectionDetailPage() {
               {t('connections.razorpay.readOnlyNote')}
             </p>
           ) : null}
+          {connection.shopify ? (
+            <p className="m-0 mt-2 text-small text-ink-muted">
+              {t('connections.shopify.storeLine', { shop: connection.shopify.shop })}
+              {connection.shopify.currency
+                ? ` · ${t('connections.shopify.currencyLine', { currency: connection.shopify.currency })}`
+                : null}
+              {'. '}
+              {t(
+                connection.shopify.all_orders
+                  ? 'connections.shopify.allOrders'
+                  : 'connections.shopify.recentOrders',
+              )}{' '}
+              {t('connections.shopify.readOnlyNote')}
+            </p>
+          ) : null}
           {paused ? (
             <p className="m-0 mt-2 text-small text-ink-muted">
               {t('connections.detail.pausedNote')}
@@ -689,6 +709,16 @@ export function ConnectionDetailPage() {
                   connection.type === 'razorpay' ? (
                   <Button size="sm" onClick={() => setKeyDialog(true)}>
                     {t('connections.razorpay.reconnect')}
+                  </Button>
+                ) : canManage &&
+                  connection.status === 'needs_reauth' &&
+                  connection.type === 'shopify' ? (
+                  <Button
+                    size="sm"
+                    disabled={reconnectShopify.isPending}
+                    onClick={() => reconnectShopify.mutate()}
+                  >
+                    {t('connections.shopify.reconnect')}
                   </Button>
                 ) : null
               }
@@ -743,6 +773,15 @@ export function ConnectionDetailPage() {
               {connection.type === 'razorpay' ? (
                 <Button variant="ghost" onClick={() => setKeyDialog(true)}>
                   {t('connections.razorpay.replaceButton')}
+                </Button>
+              ) : null}
+              {connection.type === 'shopify' ? (
+                <Button
+                  variant="ghost"
+                  disabled={reconnectShopify.isPending}
+                  onClick={() => reconnectShopify.mutate()}
+                >
+                  {t('connections.shopify.reconnect')}
                 </Button>
               ) : null}
               <Button variant="ghost" onClick={() => setReplacing(true)}>

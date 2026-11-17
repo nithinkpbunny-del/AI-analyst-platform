@@ -92,6 +92,14 @@ def test_envelope_round_trip_with_the_master_key() -> None:
     )
 
 
+def _flip(data: bytes, index: int) -> bytes:
+    """``data`` with one bit of one byte flipped: always a change (writing a fixed byte was a no-op whenever the
+    random byte already had that value, about 1 run in 256)."""
+    changed = bytearray(data)
+    changed[index] ^= 0x01
+    return bytes(changed)
+
+
 @pytest.mark.parametrize(
     "change",
     ["context", "ciphertext", "wrapped_dek", "key", "version"],
@@ -104,11 +112,11 @@ def test_envelopes_fail_closed(change: str) -> None:
         context = "ctx-b"
     elif change == "ciphertext":
         envelope = crypto.Envelope(
-            envelope.ciphertext[:-1] + b"x", envelope.wrapped_dek, envelope.key_version
+            _flip(envelope.ciphertext, -1), envelope.wrapped_dek, envelope.key_version
         )
     elif change == "wrapped_dek":
         envelope = crypto.Envelope(
-            envelope.ciphertext, b"x" + envelope.wrapped_dek[1:], envelope.key_version
+            envelope.ciphertext, _flip(envelope.wrapped_dek, 0), envelope.key_version
         )
     elif change == "key":
         wrapper = crypto.MasterKeyWrapper("another-master-key-00000000000000000000")

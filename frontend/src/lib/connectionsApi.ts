@@ -2,7 +2,7 @@ import { API_BASE_URL, ApiError, authedRequest, getAccessToken, NETWORK_ERROR_CO
 import type { Role } from './role'
 
 // Shapes as the API sends them (backend app/schemas/connections.py).
-export type ConnectionType = 'file' | 'google_sheets' | 'razorpay'
+export type ConnectionType = 'file' | 'google_sheets' | 'razorpay' | 'shopify'
 export type ConnectionStatus = 'active' | 'error' | 'needs_reauth' | 'disabled'
 export type SyncState = 'idle' | 'queued' | 'running'
 export type ColumnType = 'boolean' | 'integer' | 'number' | 'date' | 'datetime' | 'text'
@@ -92,6 +92,16 @@ export interface Connection {
   google: { account_email: string | null; spreadsheets: Spreadsheet[] } | null
   /** Razorpay: the key id is shown masked; the secret is never returned. */
   razorpay?: { key_id_masked: string; mode: 'live' | 'test' } | null
+  /** Shopify: the store's address (not a secret); the access token is never returned. */
+  shopify?: ShopifyStore | null
+}
+
+export interface ShopifyStore {
+  shop: string
+  shop_name: string | null
+  currency: string | null
+  /** Shopify's "all orders" access: without it only the last 60 days of orders can be read. */
+  all_orders: boolean
 }
 
 /** What removing a connection does to the business dictionary (shown before removing it). */
@@ -113,6 +123,7 @@ export interface Sources {
   upload_max_mb: number
   google_sheets: { available: boolean; stand_in: boolean }
   razorpay: { available: boolean; stand_in: boolean }
+  shopify: { available: boolean; stand_in: boolean }
 }
 
 export interface ConnectionList {
@@ -162,6 +173,11 @@ export interface RazorpayKey {
   key_id: string
   key_secret: string
   name?: string
+}
+
+export interface ShopifyFinish {
+  connection: Connection
+  reconnected: boolean
 }
 
 export interface GoogleFinish {
@@ -217,6 +233,17 @@ export const connectionsApi = {
     }),
   googleFinish: (state: string, code: string) =>
     authedRequest<GoogleFinish>('/connections/google/finish', {
+      method: 'POST',
+      body: { state, code },
+    }),
+  /** Start connecting a store (`shop`), or signing in again for a connection. Returns Shopify's approval page. */
+  shopifyStart: (target: { shop: string } | { connection_id: string }) =>
+    authedRequest<{ authorization_url: string }>('/connections/shopify/start', {
+      method: 'POST',
+      body: target,
+    }),
+  shopifyFinish: (state: string, code: string) =>
+    authedRequest<ShopifyFinish>('/connections/shopify/finish', {
       method: 'POST',
       body: { state, code },
     }),

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -40,8 +40,11 @@ class ReadOnlyHttpClient:
         allowed_posts: Iterable[str] = (),
         sleep: Callable[[float], None] = time.sleep,
         delays: tuple[float, ...] = DEFAULT_DELAYS,
+        post_guard: Callable[[httpx.Request], None] | None = None,
     ) -> None:
         self._allowed_posts = frozenset(_endpoint(u) for u in allowed_posts)
+        # Looks at the body of every allowed POST before it is sent (e.g. refuses a GraphQL mutation).
+        self._post_guard = post_guard
         self.__client = client
         self._sleep = sleep
         self._delays = delays
@@ -57,6 +60,8 @@ class ReadOnlyHttpClient:
     def _guard(self, request: httpx.Request) -> None:
         if not self._allowed(request.method, request.url):
             raise ReadOnlyViolation(f"{request.method} {_endpoint(request.url)} is not a read")
+        if request.method.upper() == "POST" and self._post_guard is not None:
+            self._post_guard(request)
 
     def check(self, method: str, url: str) -> None:
         if not self._allowed(method, url):
@@ -106,6 +111,13 @@ class ReadOnlyHttpClient:
 
     def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         return self._send(method, url, **kwargs)
+
+    def stream_lines(self, url: str) -> Iterator[str]:
+        """The lines of a large ``GET`` answer, read as they arrive (e.g. a bulk export file). Not retried."""
+        self.check("GET", url)
+        with self.__client.stream("GET", url) as response:
+            response.raise_for_status()
+            yield from response.iter_lines()
 
     def close(self) -> None:
         self.__client.close()

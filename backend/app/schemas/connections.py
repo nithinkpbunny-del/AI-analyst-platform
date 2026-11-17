@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from app.schemas.auth import _Strict
 
-ConnectionTypeName = Literal["file", "google_sheets", "razorpay"]
+ConnectionTypeName = Literal["file", "google_sheets", "razorpay", "shopify"]
 StatusName = Literal["active", "error", "needs_reauth", "disabled"]
 SyncStateName = Literal["idle", "queued", "running"]
 AccessName = Literal["all", "selected"]
@@ -91,6 +91,14 @@ class RazorpayOut(BaseModel):
     mode: Literal["live", "test"]
 
 
+class ShopifyOut(BaseModel):
+    shop: str  # the store's *.myshopify.com address (not a secret)
+    shop_name: str | None
+    currency: str | None
+    # Shopify's "read_all_orders" access: without it only the last 60 days of orders can be read.
+    all_orders: bool
+
+
 class ConnectionOut(BaseModel):
     id: uuid.UUID
     type: ConnectionTypeName
@@ -107,6 +115,7 @@ class ConnectionOut(BaseModel):
     file: FileOut | None = None
     google: GoogleOut | None = None
     razorpay: RazorpayOut | None = None
+    shopify: ShopifyOut | None = None
 
 
 class DictionaryMoveOut(BaseModel):
@@ -139,10 +148,16 @@ class RazorpaySourceOut(BaseModel):
     stand_in: bool
 
 
+class ShopifySourceOut(BaseModel):
+    available: bool
+    stand_in: bool
+
+
 class SourcesOut(BaseModel):
     upload_max_mb: int
     google_sheets: GoogleSourceOut
     razorpay: RazorpaySourceOut
+    shopify: ShopifySourceOut
 
 
 class ConnectionList(BaseModel):
@@ -278,3 +293,24 @@ class SpreadsheetsRequest(_Strict):
             if item not in out:
                 out.append(item)
         return out
+
+
+class ShopifyStartRequest(_Strict):
+    """Start connecting a Shopify store (``shop``), or signing in again for a connection (``connection_id``)."""
+
+    shop: str | None = Field(default=None, max_length=200)
+    connection_id: uuid.UUID | None = None
+
+
+class ShopifyStartOut(BaseModel):
+    authorization_url: str
+
+
+class ShopifyFinishRequest(_Strict):
+    state: str = Field(min_length=16, max_length=200)
+    code: str = Field(min_length=1, max_length=2048)
+
+
+class ShopifyFinishOut(BaseModel):
+    connection: ConnectionOut
+    reconnected: bool

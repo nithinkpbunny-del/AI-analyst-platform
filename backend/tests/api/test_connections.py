@@ -430,6 +430,7 @@ class TestWhoSeesWhat:
             "upload_max_mb": 50,
             "google_sheets": {"available": True, "stand_in": False},
             "razorpay": {"available": True, "stand_in": False},
+            "shopify": {"available": True, "stand_in": False},
         }
 
 

@@ -19,6 +19,7 @@ from app.data.objects import file_key
 from app.models import Connection, FileVersion
 from tests.recorded_google import ACCOUNT, REFRESH_TOKEN, SHEET_ID
 from tests.recorded_razorpay import KEY_ID, KEY_SECRET
+from tests.recorded_shopify import SHOP, TOKEN
 
 SALES_CSV = (
     "UrbanCart outlet sales\n"
@@ -169,6 +170,35 @@ def make_razorpay_connection(
         name=name,
         status="active",
         config={"key_id": key_id, "mode": "live" if key_id.startswith("rzp_live_") else "test"},
+        secret_ref=secret.id,
+        sync_state="idle",
+    )
+    db.add(connection)
+    db.commit()
+    if sync:
+        service.sync_connection(runtime, org_id=org_id, connection_id=connection.id)
+        db.expire_all()
+    return connection
+
+
+def make_shopify_connection(
+    db: DbSession,
+    runtime: ConnectorRuntime,
+    org_id: uuid.UUID,
+    *,
+    shop: str = SHOP,
+    token: str = TOKEN,
+    scopes: tuple[str, ...] = ("read_customers", "read_inventory", "read_orders", "read_products"),
+    name: str = "Shopify (UrbanCart)",
+    sync: bool = True,
+) -> Connection:
+    secret = runtime.secrets.put(db, org_id=org_id, purpose=SECRET_PURPOSES["shopify"], value=token)
+    connection = Connection(
+        org_id=org_id,
+        type="shopify",
+        name=name,
+        status="active",
+        config={"shop": shop, "shop_name": "UrbanCart", "currency": "INR", "scopes": list(scopes)},
         secret_ref=secret.id,
         sync_state="idle",
     )

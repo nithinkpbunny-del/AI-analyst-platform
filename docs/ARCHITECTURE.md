@@ -82,8 +82,10 @@ flowchart LR
 
 - A **connector** (`app/connectors/`) is built per connection with its decrypted credentials, lists the source's
   tables as datasets and fetches one as a typed table. Network access goes through `ReadOnlyHttpClient` (GET, plus
-  POST to allow-listed token endpoints only). Files and Google Sheets exist; Razorpay, Shopify, Zoho, databases
-  and Tally follow in Phase 2/3.
+  POST to allow-listed endpoints only: OAuth token endpoints and, for Shopify, the GraphQL endpoint, whose request
+  bodies a `post_guard` parses so that no mutation leaves the process, D93). Files, Google Sheets, Razorpay (M11) and
+  Shopify (M12: OAuth, GraphQL queries, bulk exports for large first reads, D92-D95) exist; Zoho, databases and
+  Tally follow in Phase 2/3.
 - **Typed tables** (`connectors/tabular.py`): header detection, Indian dates and amounts, units, type per column.
 - **Cache** (`data/cache.py`): reuse a Parquet snapshot within `CACHE_TTL_SECONDS`; afterwards ask the source for
   its version and keep the snapshot if unchanged; fetch incrementally where supported; otherwise read everything.

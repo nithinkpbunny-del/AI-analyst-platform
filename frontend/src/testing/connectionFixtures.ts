@@ -117,12 +117,36 @@ export const demoRazorpay: Connection = {
   razorpay: { key_id_masked: 'rzp_live_AbCd••••', mode: 'live' },
 }
 
+export const demoShopify: Connection = {
+  id: 'c5',
+  type: 'shopify',
+  name: 'Shopify (UrbanCart)',
+  status: 'active',
+  sync_state: 'idle',
+  last_success_at: '2026-10-30T04:30:00+00:00',
+  last_error: null,
+  created_at: '2026-10-30T04:25:00+00:00',
+  created_by_name: 'Asha Rao',
+  datasets_count: 5,
+  rows_total: 60_212,
+  warnings_count: 0,
+  file: null,
+  google: null,
+  shopify: {
+    shop: 'urbancart.myshopify.com',
+    shop_name: 'UrbanCart',
+    currency: 'INR',
+    all_orders: false,
+  },
+}
+
 export const demoConnectionList: ConnectionList = {
   connections: [demoOrders, demoMarketing, demoTargets],
   sources: {
     upload_max_mb: 50,
     google_sheets: { available: true, stand_in: false },
     razorpay: { available: true, stand_in: false },
+    shopify: { available: true, stand_in: false },
   },
 }
 

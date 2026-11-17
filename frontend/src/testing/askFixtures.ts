@@ -1,7 +1,8 @@
 import type { ChatMessage, Conversation, ConversationSummary, SavedQuestion } from '../lib/chatApi'
 
 /** The demo company's planted finding 1 (eval/fixtures/ANSWER_KEY.md), as the agent answers it. */
-const fetchedAt = '2026-11-12T09:58:00Z'
+// More than a week old, so screens show a fixed date ("29 Oct 2026") and screenshots do not drift day by day.
+const fetchedAt = '2026-10-29T09:58:00Z'
 
 export const demoQuestion: ChatMessage = {
   id: 'm1',

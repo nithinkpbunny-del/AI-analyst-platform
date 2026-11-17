@@ -22,6 +22,7 @@ from app.connectors.base import Connector, ConnectorError
 from app.connectors.files import FileConnector, StoredFile
 from app.connectors.google_sheets import GoogleSheetsConnector, GoogleSheetsSetup, Spreadsheet
 from app.connectors.razorpay import RazorpayConnector, RazorpaySetup
+from app.connectors.shopify import ShopifyConnector, ShopifySetup
 from app.data.objects import ObjectStore
 from app.email.sender import EmailSender
 from app.models import Connection, FileVersion
@@ -31,11 +32,13 @@ from app.security.secrets import SecretStore, SecretUnavailable
 SECRET_PURPOSES = {
     "google_sheets": "google_sheets_refresh_token",
     "razorpay": "razorpay_key_secret",
+    "shopify": "shopify_access_token",
 }
 TYPE_LABELS = {
     "file": "Excel or CSV file",
     "google_sheets": "Google Sheets",
     "razorpay": "Razorpay",
+    "shopify": "Shopify",
 }
 
 
@@ -51,6 +54,7 @@ class ConnectorRuntime:
     # Emails from background jobs (briefings, finished long tasks, shares): SMTP in the worker, memory in tests.
     email: EmailSender | None = None
     razorpay: RazorpaySetup = field(default_factory=RazorpaySetup)
+    shopify: ShopifySetup = field(default_factory=ShopifySetup)
 
 
 def version_in_use(connection: Connection, versions: list[FileVersion]) -> FileVersion | None:
@@ -157,7 +161,49 @@ def build_connector(
             max_rows=max_rows,
             clock=runtime.clock,
         )
+    if connection.type == "shopify":
+        return _shopify(db, connection, runtime, timezone=timezone, max_rows=max_rows)
     raise ConnectorError("invalid", "This kind of connection is not supported.")  # pragma: no cover
+
+
+def shopify_scopes(connection: Connection) -> frozenset[str]:
+    return frozenset(str(s) for s in connection.config.get("scopes", []))
+
+
+def _shopify(
+    db: DbSession,
+    connection: Connection,
+    runtime: ConnectorRuntime,
+    *,
+    timezone: str,
+    max_rows: int,
+) -> ShopifyConnector:
+    if not runtime.shopify.available:
+        raise ConnectorError(
+            "unavailable", "Shopify is not set up on this server. Ask your administrator."
+        )
+    shop = str(connection.config.get("shop") or "")
+    reconnect = "Sign in to Shopify again to reconnect."
+    if connection.secret_ref is None or not shop:
+        raise ConnectorError("needs_reauth", reconnect)
+    try:
+        token = runtime.secrets.reveal(
+            db,
+            org_id=connection.org_id,
+            secret_id=connection.secret_ref,
+            purpose=SECRET_PURPOSES["shopify"],
+        )
+    except SecretUnavailable as error:
+        raise ConnectorError("needs_reauth", reconnect, detail=str(error)) from error
+    return ShopifyConnector(
+        setup=runtime.shopify,
+        shop=shop,
+        access_token=token,
+        scopes=shopify_scopes(connection),
+        timezone=timezone,
+        max_rows=max_rows,
+        clock=runtime.clock,
+    )
 
 
 def close_connector(connector: Connector) -> None:

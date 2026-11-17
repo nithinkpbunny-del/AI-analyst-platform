@@ -148,7 +148,11 @@ def money_evidence(
             "reason": None,
         }
     named_money = bool(MONEY_NAME.search(name)) and not NOT_MONEY_NAME.search(name)
-    if declared == "INR":
+    if info.get("stored_in") == "rupees":
+        # The source (Shopify's API) says the amount is in rupees: nothing to divide (D95).
+        evidence.append("source_rupees")
+        unit = "INR"
+    elif declared == "INR":
         evidence.append("rupee_marker")
         unit = "INR"
     if named_money:
@@ -158,7 +162,7 @@ def money_evidence(
         unit = "INR"
     present = series.dropna()
     whole = bool(len(present)) and bool((present == present.round()).all())
-    if "rupee_marker" not in evidence:
+    if "rupee_marker" not in evidence and "source_rupees" not in evidence:
         # No ₹ in the data: whole numbers in a payments table (or named "paise") are most likely paise.
         if info.get("stored_in") == "paise" and kind == "integer":
             evidence.append("source_paise")  # the source (Razorpay's API) says so itself

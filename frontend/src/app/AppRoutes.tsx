@@ -27,6 +27,11 @@ import { adminNav, mainNav } from './nav'
 import { RedirectIfSignedIn, RequireAuth } from './RequireAuth'
 
 // The What-if screen loads on first visit: it brings the chart code and keeps the shell under its budget.
+const ShopifyReturnPage = lazy(() =>
+  import('../features/connections/ShopifyReturnPage').then((m) => ({
+    default: m.ShopifyReturnPage,
+  })),
+)
 const WhatIfPage = lazy(() =>
   import('../features/whatif/WhatIfPage').then((m) => ({ default: m.WhatIfPage })),
 )
@@ -161,6 +166,14 @@ export function AppRoutes() {
           <Route path="/connections" element={<ConnectionsPage />} />
           <Route path="/dictionary" element={<DictionaryPage />} />
           <Route path="/connections/google/return" element={<SheetsReturnPage />} />
+          <Route
+            path="/connections/shopify/return"
+            element={
+              <Lazy>
+                <ShopifyReturnPage />
+              </Lazy>
+            }
+          />
           <Route path="/connections/:connectionId" element={<ConnectionDetailPage />} />
           <Route path="*" element={<Navigate to="/today" replace />} />
         </Route>

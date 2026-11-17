@@ -82,6 +82,17 @@ class Settings(BaseSettings):
     razorpay_history_days: int = Field(default=365, ge=1, le=3650)
     razorpay_refresh_lookback_days: int = Field(default=30, ge=1, le=365)
 
+    # --- Shopify connector (M12; docs/SETUP_SHOPIFY.md) ---
+    # The app's key and secret are ``shopify_api_key`` / ``shopify_api_secret`` below. Without them, development
+    # uses a local stand-in store; anywhere else Shopify stays off.
+    shopify_scopes: str = "read_orders,read_products,read_customers,read_inventory"
+    shopify_api_version: str = "2026-07"
+    # How far back the first read of orders goes (Shopify gives only 60 days without the read_all_orders scope).
+    shopify_history_days: int = Field(default=730, ge=1, le=3650)
+    # A first read of a table with more rows than this uses a Shopify bulk operation instead of paged queries.
+    shopify_bulk_threshold: int = Field(default=1000, ge=1)
+    shopify_bulk_timeout_seconds: int = Field(default=900, ge=10)
+
     # --- AI ---
     llm_default_provider: Literal["gemini", "claude"] = "gemini"
     gemini_api_key: SecretStr = SecretStr("")

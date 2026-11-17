@@ -215,3 +215,38 @@ class TestStructureHash:
         assert structure_hash(self.profiles(more_rows)) == base
         assert structure_hash(self.profiles(extra)) != base
         assert structure_hash(self.profiles(other_currency)) != base
+
+
+class TestSourceUnits:
+    """An API source can say the unit itself (DECISIONS D91, D95): Razorpay paise, Shopify rupees."""
+
+    def _money(self, frame: pd.DataFrame, name: str, stored_in: str, unit: str | None) -> Any:
+        columns = infos(frame)
+        for info in columns:
+            if info["name"] == name:
+                info["stored_in"] = stored_in
+                info["unit"] = unit
+        return column(profile_frame(frame, columns, name="t"), name)["money"]
+
+    def test_shopify_rupees_are_never_divided(self) -> None:
+        # whole numbers in a table that looks like payments would otherwise be taken for paise
+        frame = pd.DataFrame(
+            {
+                "id": ["a", "b"],
+                "amount": [49_900, 12_000],
+                "currency": ["INR", "INR"],
+                "status": ["paid", "paid"],
+                "method": ["upi", "card"],
+                "order_id": ["o1", "o2"],
+            }
+        )
+        result = self._money(frame, "amount", "rupees", "INR")
+        assert result["unit"] == "INR" and result["divide_by"] is None
+        assert result["evidence"][0] == "source_rupees"
+        for name in ("total_price", "unit_price", "total_spent"):
+            result = self._money(pd.DataFrame({name: [689.0, 1299.5]}), name, "rupees", "INR")
+            assert (result["unit"], result["divide_by"]) == ("INR", None), name
+
+    def test_razorpay_paise_are_still_divided(self) -> None:
+        result = self._money(pd.DataFrame({"amount": [49_900, 12_000]}), "amount", "paise", None)
+        assert (result["unit"], result["divide_by"]) == ("INR", 100)

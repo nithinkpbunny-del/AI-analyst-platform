@@ -62,6 +62,8 @@ from app.auth import passwords  # noqa: E402
 from app.connectors.google_sheets import GoogleSheetsSetup  # noqa: E402
 from app.connectors.razorpay import RazorpaySetup  # noqa: E402
 from app.connectors.registry import ConnectorRuntime  # noqa: E402
+from app.connectors.shopify import ShopifySetup  # noqa: E402
+from app.connectors.shopify_stand_in import StandInShopifyTransport, sample_data  # noqa: E402
 from app.data.objects import MemoryObjectStore  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import make_engine, make_session_factory  # noqa: E402
@@ -73,6 +75,7 @@ from app.security.secrets import SecretStore, key_wrapper  # noqa: E402
 from tests.recorded_google import RecordedGoogle, recorded_setup  # noqa: E402
 from tests.recorded_razorpay import FakeRazorpay  # noqa: E402
 from tests.recorded_razorpay import setup as razorpay_test_setup  # noqa: E402
+from tests.recorded_shopify import shopify_test_setup  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -207,6 +210,17 @@ def razorpay_setup(fake_razorpay: FakeRazorpay) -> RazorpaySetup:
 
 
 @pytest.fixture
+def fake_shopify() -> StandInShopifyTransport:
+    """Shopify's OAuth and Admin GraphQL API, answered by the stand-in from a small sample store."""
+    return StandInShopifyTransport(sample_data(orders=40))
+
+
+@pytest.fixture
+def shopify_setup(fake_shopify: StandInShopifyTransport) -> ShopifySetup:
+    return shopify_test_setup(fake_shopify)
+
+
+@pytest.fixture
 def runtime(
     settings: Settings,
     session_factory: sessionmaker[Session],
@@ -214,6 +228,7 @@ def runtime(
     object_store: MemoryObjectStore,
     google_setup: GoogleSheetsSetup,
     razorpay_setup: RazorpaySetup,
+    shopify_setup: ShopifySetup,
     clock: FakeClock,
     outbox: MemoryEmailSender,
 ) -> ConnectorRuntime:
@@ -226,6 +241,7 @@ def runtime(
         secrets=SecretStore(key_wrapper(settings)),
         google=google_setup,
         razorpay=razorpay_setup,
+        shopify=shopify_setup,
         clock=clock,
         email=outbox,
     )
@@ -242,6 +258,7 @@ def client(
     object_store: MemoryObjectStore,
     google_setup: GoogleSheetsSetup,
     razorpay_setup: RazorpaySetup,
+    shopify_setup: ShopifySetup,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings,
@@ -254,6 +271,7 @@ def client(
         object_store=object_store,
         google_sheets=google_setup,
         razorpay=razorpay_setup,
+        shopify=shopify_setup,
         inline_jobs=True,  # background jobs run at once, in the test
     )
     with TestClient(app, base_url="http://localhost:8000") as test_client:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import openpyxl.xml
@@ -31,7 +32,14 @@ from app.models import (
 )
 from app.security.redaction import Redactor
 from tests.conftest import FakeClock
-from tests.datasources import csv_bytes, make_file_connection, make_sheets_connection, upload
+from tests.datasources import (
+    csv_bytes,
+    make_file_connection,
+    make_razorpay_connection,
+    make_sheets_connection,
+    make_shopify_connection,
+    upload,
+)
 from tests.recorded_google import REFRESH_TOKEN, RecordedGoogle
 from tests.tenancy import World, build_world
 
@@ -47,8 +55,13 @@ class TestReadOnly:
         self, kind: str, db: DbSession, runtime: ConnectorRuntime, world: World
     ) -> None:
         """BUILD_SPEC 6.3 rule 6: try writes through every connector and see them blocked."""
-        make = make_file_connection if kind == "file" else make_sheets_connection
-        connection = make(db, runtime, world.org_a.id)
+        makers: dict[str, Callable[..., Connection]] = {
+            "file": make_file_connection,
+            "google_sheets": make_sheets_connection,
+            "razorpay": make_razorpay_connection,
+            "shopify": make_shopify_connection,
+        }
+        connection = makers[kind](db, runtime, world.org_a.id)
         scope_to_org(db, world.org_a.id)
         connector = build_connector(db, connection, runtime, timezone="Asia/Kolkata")
         http = getattr(connector, "_http", None)
@@ -64,6 +77,17 @@ class TestReadOnly:
                 http.request(
                     method, "https://sheets.googleapis.com/v4/spreadsheets/x:batchUpdate", json={}
                 )
+        if kind == "shopify":
+            # The GraphQL endpoint takes a POST, but never a mutation (DECISIONS D93).
+            url = runtime.shopify.graphql_url(connection.config["shop"])
+            for document in (
+                'mutation { orderUpdate(input: {id: "gid://shopify/Order/1", note: "x"}) '
+                "{ userErrors { message } } }",
+                'mutation { productDelete(input: {id: "gid://shopify/Product/1"}) '
+                "{ deletedProductId } }",
+            ):
+                with pytest.raises(ReadOnlyViolation):
+                    http.request("POST", url, json={"query": document})
 
     def test_the_uploaded_original_is_never_changed(
         self, client: TestClient, world: World, db: DbSession, object_store: MemoryObjectStore

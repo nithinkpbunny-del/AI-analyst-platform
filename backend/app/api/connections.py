@@ -43,7 +43,7 @@ from app.api.errors import ApiError
 from app.audit import writer as audit
 from app.auth.permissions import Permission
 from app.auth.ratelimit import FixedWindowLimiter
-from app.connectors import access, file_formats
+from app.connectors import access, file_formats, shopify_stand_in
 from app.connectors.base import ConnectorError
 from app.connectors.file_formats import FileFormatError
 from app.connectors.google_sheets import (
@@ -61,10 +61,20 @@ from app.connectors.registry import (
     build_connector,
     close_connector,
     file_in_use,
+    shopify_scopes,
     spreadsheets,
     version_in_use,
 )
 from app.connectors.service import remove_connection
+from app.connectors.shopify import (
+    ALL_ORDERS_SCOPE,
+    ShopifyConnector,
+    ShopifySetup,
+    normalize_shop,
+    verify_callback,
+)
+from app.connectors.shopify import authorization_url as shopify_authorization_url
+from app.connectors.shopify import exchange_code as shopify_exchange_code
 from app.data.cache import DatasetCache, DatasetMissing
 from app.data.objects import file_key
 from app.dictionary import replace as dictionary_replace
@@ -103,6 +113,12 @@ from app.schemas.connections import (
     RazorpayKeyRequest,
     RazorpayOut,
     RazorpaySourceOut,
+    ShopifyFinishOut,
+    ShopifyFinishRequest,
+    ShopifyOut,
+    ShopifySourceOut,
+    ShopifyStartOut,
+    ShopifyStartRequest,
     SourcesOut,
     SpreadsheetOut,
     SpreadsheetsRequest,
@@ -122,6 +138,7 @@ TESTS_PER_HOUR = 30
 UPLOADS_PER_HOUR = 60
 GOOGLE_STATE_TTL_SECONDS = 600
 _GOOGLE_STATE = "gsheets:state:"
+_SHOPIFY_STATE = "shopify:state:"
 # A sync that has not finished after this long is assumed lost (a worker restarted); it may be started again.
 STALE_SYNC = timedelta(minutes=15)
 _MULTIPART_OVERHEAD = 64 * 1024
@@ -325,6 +342,19 @@ def _connection_out(connection: Connection, loaded: _Loaded) -> ConnectionOut:
         else None,
         google=google,
         razorpay=_razorpay_out(connection),
+        shopify=_shopify_out(connection),
+    )
+
+
+def _shopify_out(connection: Connection) -> ShopifyOut | None:
+    if connection.type != "shopify":
+        return None
+    config = connection.config
+    return ShopifyOut(
+        shop=str(config.get("shop") or ""),
+        shop_name=config.get("shop_name"),
+        currency=config.get("currency"),
+        all_orders=ALL_ORDERS_SCOPE in shopify_scopes(connection),
     )
 
 
@@ -427,6 +457,10 @@ def list_connections(request: Request, tenant: ViewConnections) -> ConnectionLis
             ),
             razorpay=RazorpaySourceOut(
                 available=True, stand_in=_runtime(request).razorpay.stand_in_prefix is not None
+            ),
+            shopify=ShopifySourceOut(
+                available=_runtime(request).shopify.available,
+                stand_in=_runtime(request).shopify.stand_in,
             ),
         ),
     )
@@ -946,6 +980,223 @@ def _mark_reauth(tenant: Tenant, connection: Connection, error: ConnectorError) 
         tenant.db.commit()
 
 
+# -------------------------------------------------------------------------------------------- Shopify
+SHOPIFY_STARTS_PER_HOUR = 30
+
+
+def _shopify_setup(request: Request) -> ShopifySetup:
+    setup = _runtime(request).shopify
+    if not setup.available:
+        raise ApiError(
+            409,
+            "shopify_unavailable",
+            "Shopify is not set up on this server yet. See docs/SETUP_SHOPIFY.md.",
+        )
+    return setup
+
+
+def _shopify_connection(
+    tenant: Tenant, connection_id: uuid.UUID, *, lock: bool = False
+) -> Connection:
+    connection = access.visible_connection(tenant.db, tenant.auth, connection_id, lock=lock)
+    if connection.type != "shopify":
+        raise ApiError(409, "not_shopify", "This is not a Shopify connection.")
+    return connection
+
+
+@router.post(
+    "/shopify/start",
+    response_model=ShopifyStartOut,
+    responses=_ERRORS,
+    summary="Start connecting a Shopify store (or signing in again): returns Shopify's approval page",
+)
+def shopify_start(
+    body: ShopifyStartRequest, request: Request, tenant: ManageConnections
+) -> ShopifyStartOut:
+    setup = _shopify_setup(request)
+    if body.connection_id is not None:
+        connection = _shopify_connection(tenant, body.connection_id)
+        shop = normalize_shop(str(connection.config.get("shop") or ""))
+    else:
+        shop = normalize_shop(body.shop or "")
+    if shop is None:
+        raise ApiError(
+            422,
+            "validation_error",
+            "Check the store address.",
+            fields={"shop": "Enter the store's address, for example your-store.myshopify.com."},
+        )
+    _limit(
+        request,
+        tenant,
+        "shopify-starts",
+        SHOPIFY_STARTS_PER_HOUR,
+        "Shopify sign-ins were started too often in the last hour. Try again later.",
+    )
+    state = secrets.token_urlsafe(32)
+    request.app.state.redis.set(
+        f"{_SHOPIFY_STATE}{state}",
+        json.dumps(
+            {
+                "org_id": str(tenant.org_id),
+                "user_id": str(tenant.auth.user.id),
+                "shop": shop,
+                "connection_id": str(body.connection_id) if body.connection_id else None,
+                "verified": False,
+            }
+        ),
+        ex=GOOGLE_STATE_TTL_SECONDS,
+    )
+    return ShopifyStartOut(
+        authorization_url=shopify_authorization_url(setup, shop=shop, state=state)
+    )
+
+
+@router.get(
+    "/shopify/callback",
+    summary="Shopify sends the browser back here; it continues in the web app",
+    response_class=RedirectResponse,
+    status_code=303,
+)
+def shopify_callback(request: Request) -> RedirectResponse:
+    """Public: the browser arrives from Shopify without our access token. The query string must carry Shopify's
+    HMAC (signed with the app secret), a known ``state`` and the same store the flow started with; then the state
+    is marked verified and the code goes to the web app in the URL fragment (never logged). The signed-in Owner
+    who started the flow finishes it with ``POST /connections/shopify/finish``."""
+    params = dict(request.query_params.items())
+    state = params.get("state", "")
+    key = f"{_SHOPIFY_STATE}{state}"
+    raw = request.app.state.redis.get(key) if state else None
+    setup = _runtime(request).shopify
+    if raw is None:
+        fragment = {"error": "expired"}
+    elif not setup.available or not verify_callback(setup, params):
+        fragment = {"error": "shopify_failed"}
+    else:
+        saved = json.loads(raw)
+        if normalize_shop(params.get("shop", "")) != saved["shop"] or not params.get("code"):
+            fragment = {"error": "shopify_failed"}
+        else:
+            saved["verified"] = True
+            ttl = request.app.state.redis.ttl(key)
+            request.app.state.redis.set(
+                key, json.dumps(saved), ex=ttl if ttl and ttl > 0 else GOOGLE_STATE_TTL_SECONDS
+            )
+            fragment = {"state": state, "code": params["code"]}
+    base = request.app.state.settings.app_base_url.rstrip("/")
+    response = RedirectResponse(f"{base}/connections/shopify/return#{urlencode(fragment)}", 303)
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.post(
+    "/shopify/finish",
+    response_model=ShopifyFinishOut,
+    responses=_ERRORS,
+    summary="Finish connecting Shopify with the code Shopify returned (checked with one read, then stored "
+    "encrypted)",
+)
+def shopify_finish(
+    body: ShopifyFinishRequest, request: Request, tenant: ManageConnections
+) -> ShopifyFinishOut:
+    setup = _shopify_setup(request)
+    raw = request.app.state.redis.getdel(f"{_SHOPIFY_STATE}{body.state}")
+    expired = ApiError(
+        400,
+        "shopify_link_expired",
+        "This Shopify sign-in expired or was already used. Start again with 'Connect Shopify'.",
+    )
+    if raw is None:
+        raise expired
+    saved = json.loads(raw)
+    if (
+        saved["org_id"] != str(tenant.org_id)
+        or saved["user_id"] != str(tenant.auth.user.id)
+        or not saved.get("verified")
+    ):
+        raise expired
+    shop = str(saved["shop"])
+    http = setup.http(shop, purpose="oauth")
+    try:
+        token = shopify_exchange_code(setup, http, shop=shop, code=body.code)
+    except ConnectorError as error:
+        raise ApiError(422, "shopify_refused", error.message) from error
+    finally:
+        http.close()
+    runtime = _runtime(request)
+    connector = ShopifyConnector(
+        setup=setup,
+        shop=shop,
+        access_token=token.access_token,
+        scopes=token.scopes,
+        timezone=_timezone(tenant),
+        max_rows=runtime.settings.max_rows_per_dataset,
+        clock=runtime.clock,
+    )
+    try:
+        result = connector.test()
+    finally:
+        connector.close()
+    if not result.ok:
+        raise ApiError(422, "shopify_refused", result.message)
+    config = {
+        "shop": shop,
+        "shop_name": result.details.get("shop_name"),
+        "currency": result.details.get("currency"),
+        "scopes": sorted(token.scopes),
+    }
+    secret_id = runtime.secrets.put(
+        tenant.db,
+        org_id=tenant.org_id,
+        purpose=SECRET_PURPOSES["shopify"],
+        value=token.access_token,
+    ).id
+    if saved["connection_id"]:
+        connection = _shopify_connection(tenant, uuid.UUID(saved["connection_id"]), lock=True)
+        old_secret = connection.secret_ref
+        connection.secret_ref = secret_id
+        connection.config = {**connection.config, **config}
+        if connection.status != "disabled":
+            connection.status = "active"
+            connection.last_error = None
+        tenant.db.flush()
+        if old_secret is not None:
+            runtime.secrets.delete(tenant.db, org_id=tenant.org_id, secret_id=old_secret)
+        _audit(
+            tenant,
+            "connection.reauthorized",
+            connection,
+            {"type": "shopify", "name": connection.name},
+        )
+        if connection.status != "disabled" and not _syncing(tenant, connection):
+            _queue_sync(request, tenant, connection, force=True)
+        else:
+            tenant.db.commit()
+        return ShopifyFinishOut(connection=_one(tenant, connection), reconnected=True)
+    label = f"Shopify ({config['shop_name']})" if config["shop_name"] else f"Shopify ({shop})"
+    connection = Connection(
+        org_id=tenant.org_id,
+        type="shopify",
+        name=label[:120],
+        status="active",
+        config=config,
+        secret_ref=secret_id,
+        sync_state="idle",
+        created_by=tenant.auth.user.id,
+    )
+    tenant.db.add(connection)
+    tenant.db.flush()
+    _audit(
+        tenant,
+        "connection.added",
+        connection,
+        {"type": "shopify", "name": connection.name, "shop": shop},
+    )
+    _queue_sync(request, tenant, connection)
+    return ShopifyFinishOut(connection=_one(tenant, connection), reconnected=False)
+
+
 # ------------------------------------------------------------------------------------------- Razorpay
 RAZORPAY_CHECKS_PER_HOUR = 20
 
@@ -1425,3 +1676,71 @@ async def stand_in_decide(request: Request) -> RedirectResponse:
     else:
         query["error"] = "access_denied"
     return RedirectResponse(f"{_google(request).redirect_uri()}?{urlencode(query)}", 303)
+
+
+_SHOPIFY_STAND_IN_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shopify stand-in</title>
+<style>
+body{{margin:0;font:16px/1.55 system-ui,sans-serif;background:#F5F6FA;color:#1E1C3A}}
+main{{max-width:440px;margin:48px 16px;padding:24px;background:#fff;border:1px solid #E2E4EE;border-radius:16px}}
+h1{{font-size:24px;line-height:1.15;margin:0 0 8px}} p{{margin:0 0 16px;color:#5A5874}}
+ul{{margin:0 0 16px;padding-left:20px}} label{{display:flex;gap:8px;align-items:center;margin:16px 0}}
+.actions{{display:flex;gap:12px;margin-top:24px}}
+button{{min-height:44px;padding:0 20px;border-radius:10px;font:inherit;font-weight:600}}
+.allow{{border:0;background:#3A36A8;color:#fff}} .deny{{border:1px solid #85839F;background:#fff;color:#1E1C3A}}
+</style></head><body><main>
+<h1>Shopify stand-in</h1>
+<p>Local development only. Nothing goes to Shopify: the store's data comes from the demo files on this computer.
+Add a real Shopify app with docs/SETUP_SHOPIFY.md.</p>
+<p>Install Analyst on <strong>{shop}</strong>. It wants to:</p>
+<ul>{scopes}</ul>
+<form method="post" action="/connections/shopify/stand-in">
+<input type="hidden" name="state" value="{state}"><input type="hidden" name="shop" value="{shop}">
+<input type="hidden" name="scope" value="{scope}">
+<label><input type="checkbox" name="all_orders" value="1"> Also allow orders older than 60 days
+(read_all_orders)</label>
+<div class="actions"><button class="allow" type="submit" name="decision" value="allow">Install app</button>
+<button class="deny" type="submit" name="decision" value="deny">Cancel</button></div>
+</form></main></body></html>"""
+
+
+def _shopify_stand_in_only(request: Request) -> ShopifySetup:
+    setup = _runtime(request).shopify
+    if not setup.stand_in:
+        raise access.not_found()
+    return setup
+
+
+@router.get("/shopify/stand-in", include_in_schema=False)
+def shopify_stand_in_consent(
+    request: Request, state: str = "", shop: str = "", scope: str = ""
+) -> HTMLResponse:
+    _shopify_stand_in_only(request)
+    store = normalize_shop(shop) or "unknown.myshopify.com"
+    items = "".join(f"<li>{html.escape(s.strip())}</li>" for s in scope.split(",") if s.strip())
+    page = _SHOPIFY_STAND_IN_PAGE.format(
+        state=html.escape(state), shop=html.escape(store), scope=html.escape(scope), scopes=items
+    )
+    return HTMLResponse(page, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/shopify/stand-in", include_in_schema=False)
+async def shopify_stand_in_decide(request: Request) -> RedirectResponse:
+    setup = _shopify_stand_in_only(request)
+    form = {k: v[0] for k, v in parse_qs((await request.body()).decode()).items()}
+    shop = normalize_shop(form.get("shop", "")) or "unknown.myshopify.com"
+    if form.get("decision") != "allow":
+        base = request.app.state.settings.app_base_url.rstrip("/")
+        return RedirectResponse(f"{base}/connections/shopify/return#error=access_denied", 303)
+    scope = form.get("scope", "")
+    if form.get("all_orders"):
+        scope = f"{scope},{ALL_ORDERS_SCOPE}"
+    params = shopify_stand_in.signed_callback(
+        shop,
+        form.get("state", ""),
+        shopify_stand_in.issue_code(shop, scope),
+        setup.client_secret,
+        int(_runtime(request).clock().timestamp()),
+    )
+    return RedirectResponse(f"{setup.redirect_uri()}?{urlencode(params)}", 303)

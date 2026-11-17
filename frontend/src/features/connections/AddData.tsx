@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CreditCard, FileSpreadsheet, Sheet, Upload } from 'lucide-react'
+import { CreditCard, FileSpreadsheet, Sheet, ShoppingBag, Upload } from 'lucide-react'
 import { lazy, Suspense, useId, useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormAlert } from '../../components/FormAlert'
@@ -12,6 +12,10 @@ import { CONNECTIONS, fileProblem } from './keys'
 // The key form loads when first opened: the Connections screen is part of the app's first load.
 const RazorpayDialog = lazy(() =>
   import('./RazorpayDialog').then((m) => ({ default: m.RazorpayDialog })),
+)
+
+const ShopifyDialog = lazy(() =>
+  import('./ShopifyDialog').then((m) => ({ default: m.ShopifyDialog })),
 )
 
 const ACCEPT =
@@ -95,6 +99,8 @@ export function AddData({ sources }: { sources: Sources }) {
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [uploading, setUploading] = useState<string | null>(null)
   const [razorpayOpen, setRazorpayOpen] = useState(false)
+  const [shopifyOpen, setShopifyOpen] = useState(false)
+  const shopify = sources.shopify
   const upload = useMutation({
     mutationFn: (file: File) => uploadFile(file),
     onMutate: (file) => {
@@ -146,7 +152,7 @@ export function AddData({ sources }: { sources: Sources }) {
           {t('connections.add.uploading', { name: uploading })}
         </p>
       ) : null}
-      <div className="mt-4 grid grid-cols-1 gap-4 tablet:grid-cols-2 desktop:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-4 tablet:grid-cols-2">
         <div className="flex flex-col gap-3">
           <h3 className="flex items-center gap-2 font-sans text-body font-semibold tracking-normal">
             <FileSpreadsheet className="size-5 text-neel" aria-hidden strokeWidth={1.5} />
@@ -190,7 +196,30 @@ export function AddData({ sources }: { sources: Sources }) {
             </p>
           </div>
         </div>
+        <div className="flex flex-col gap-3">
+          <h3 className="flex items-center gap-2 font-sans text-body font-semibold tracking-normal">
+            <ShoppingBag className="size-5 text-neel" aria-hidden strokeWidth={1.5} />
+            {t('connections.add.shopifyTitle')}
+          </h3>
+          <div className="flex flex-col items-start gap-2">
+            <Button disabled={!shopify.available} onClick={() => setShopifyOpen(true)}>
+              {t('connections.add.connectShopify')}
+            </Button>
+            <p className="m-0 text-caption text-ink-muted">
+              {!shopify.available
+                ? t('connections.add.shopifyOff')
+                : shopify.stand_in
+                  ? t('connections.add.shopifyStandIn')
+                  : t('connections.add.shopifyHint')}
+            </p>
+          </div>
+        </div>
       </div>
+      {shopifyOpen ? (
+        <Suspense fallback={null}>
+          <ShopifyDialog open={shopifyOpen} onOpenChange={setShopifyOpen} />
+        </Suspense>
+      ) : null}
       {razorpayOpen ? (
         <Suspense fallback={null}>
           <RazorpayDialog

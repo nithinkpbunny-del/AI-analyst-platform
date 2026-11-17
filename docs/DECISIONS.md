@@ -1236,3 +1236,92 @@ a missing one.
 - **Development stand-in:** keys starting `rzp_test_demo` are answered by a local stand-in serving the demo
   `razorpay_payments.csv` (orders, refunds and settlements derived from it) in Razorpay's format. It exists only when
   `APP_ENV=development`; every other key goes to the real Razorpay. CI and tests use a fake Razorpay, never the network.
+
+### D92. Shopify sign-in, scopes and personal data (M12, BUILD_SPEC 8.5)
+- **OAuth authorization-code flow** of a Shopify app (custom or public distribution; client id and secret from
+  `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET`). The Owner types the store address (`your-store`, `your-store.myshopify.com`
+  or an `admin.shopify.com/store/…` address; anything that is not a `*.myshopify.com` host is refused, so the token
+  request cannot be sent elsewhere). `POST /connections/shopify/start` keeps a 10-minute state in Redis with the
+  workspace, person and store.
+- **Callback** (`GET /connections/shopify/callback`, public): Shopify's HMAC over the query string (signed with the
+  app secret) must be valid, the `state` known and the `shop` the one the flow started with; only then is the state
+  marked verified. The code travels to the web app in the URL fragment (as for Google, D55) and the signed-in Owner
+  who started the flow finishes it (`POST /connections/shopify/finish`, single use). Finish refuses a state that was
+  never verified, so a code can only come back through a callback Shopify signed.
+- **Scopes:** `read_orders`, `read_products`, `read_customers`, `read_inventory` (+ `read_all_orders` when Shopify
+  approved it; without it Shopify returns only the last 60 days of orders, which the test result and the connection
+  page say). `SHOPIFY_SCOPES` can change the list but anything that is not `read_*` is dropped. After the token
+  exchange the granted scopes are checked: any scope that is not `read_*` refuses the connection and nothing is stored;
+  orders, products and customers are required. `read_inventory` is optional (variant cost is then left empty).
+- The token is checked with one read (shop name and currency) before it is stored encrypted (purpose
+  `shopify_access_token`); `config` keeps the store address, shop name, currency and granted scopes (not secrets).
+  Signing in again (needs sign-in, or "Sign in to Shopify again") replaces the token and deletes the old secret.
+- **Personal data:** never requested: customer names, e-mail addresses, phone numbers, street addresses, postcodes,
+  notes, billing addresses. Customers carry only their default address's **city, state and country**, and orders the
+  shipping **city, state and country** (regional analysis such as "South revenue fell" needs the state). A test
+  checks that no query asks for the personal fields.
+- **Removing** a Shopify connection deletes its token and cached data at once. The app is not uninstalled in Shopify:
+  that needs a write (Shopify revokes a token with a DELETE), which the read-only client never sends. The connection
+  page tells the Owner to uninstall the app in the Shopify admin to stop it completely.
+- Shopify's newer **expiring offline tokens** (with refresh tokens) are not used yet: the flow asks for a normal
+  offline token. When Shopify stops accepting a token, the connection shows "Sign in to Shopify again".
+
+### D93. GraphQL queries only, with one read-only exception (M12, BUILD_SPEC 6.3, 8.5; approved by the Owner)
+- Every GraphQL document is parsed with `graphql-core` before it is sent (`app/connectors/graphql_guard.py`): exactly
+  one operation; a **query** passes; a **subscription** or any **mutation** raises `ReadOnlyViolation`.
+- **The exception:** large histories need Shopify's bulk export, which is started with the mutation
+  `bulkOperationRunQuery`. It only reads (it creates an export job on Shopify's side and works with read-only scopes).
+  The Owner chose (2026-11-16) to allow **only this mutation, only in its exact shape**: one root field of that name,
+  no alias or directives, the single argument `query` (a string or a variable holding one), a selection of
+  `bulkOperation { id status … }` and `userErrors { field message … }` only, no fragments, and the inner document must
+  itself pass as a pure query. `orderUpdate`, `customerDelete`, `productCreate`, `orderCancel`, `bulkOperationCancel`,
+  `bulkOperationRunMutation`, a bulk read with a write beside it, and every other mutation are refused (tested).
+- **Checked twice:** by the connector before sending, and again in `ReadOnlyHttpClient` (a new `post_guard` hook that
+  parses the JSON body of every POST to a `graphql.json` endpoint), so even code that skipped the first check cannot
+  send a mutation. The connector's client allows POST only to the store's GraphQL endpoint; the sign-in client only to
+  its token endpoint. PUT, PATCH, DELETE and REST POSTs are refused as for every connector.
+
+### D94. Shopify reading: tables, paging, bulk exports, cost limits, incremental (M12, BUILD_SPEC 8.1, 8.5)
+- **Five tables:** `orders` (one row per order; test orders left out), `order_items` (one row per line item, with the
+  order's id and dates, product type and SKU), `customers`, `products`, `variants` (price, cost per item, stock).
+  Ids are Shopify's numeric ids (the end of the GID), times are converted to the workspace's time zone.
+  `total_line_items_price` = subtotal + discounts (Shopify's GraphQL has no such field; the same meaning as the CSV
+  export and the demo file).
+- **Paged queries** (`first`/`after`, newest first by `UPDATED_AT` where Shopify can sort that way) for small tables and
+  every incremental read. An order with more line items than one page holds gets its remaining items with a small
+  follow-up query.
+- **Bulk export** for a **first read** of a table with more rows than `SHOPIFY_BULK_THRESHOLD` (1,000; counted with
+  `ordersCount` etc.): start the export (D93), poll `currentBulkOperation` until it is done (`SHOPIFY_BULK_TIMEOUT_SECONDS`,
+  900), stream the JSONL file and rebuild nested line items from `__parentId`. If another export of this app is running,
+  wait for it and start again once. A failed or timed-out export is a plain "try again later" error.
+- **Cost-based limits:** every answer reports Shopify's cost bucket; before the next request the connector waits while
+  the bucket cannot pay for another request like the last one; a `THROTTLED` answer waits and retries (up to 6 times,
+  then "Shopify is limiting requests"). 429/5xx retries come from the shared client.
+- **Incremental:** the cursor is the newest `updatedAt`; later reads ask for `updated_at:>=` the cursor minus one hour
+  and the rows replace earlier copies by `id`. A deleted line item (an order edited after it was read) can stay until
+  "Refresh now" (a full read). The first read of orders goes back `SHOPIFY_HISTORY_DAYS` (730).
+- **Errors:** 401/403 → needs sign-in ("Shopify stopped sharing data. Sign in to Shopify again to reconnect.");
+  404 → store not found; 402 → store not active; `ACCESS_DENIED` → "Shopify did not allow reading this data".
+- **Development stand-in** (`app/connectors/shopify_stand_in.py`): with `APP_ENV=development` and no app credentials,
+  "Connect Shopify" opens a local approval page, the callback is signed like Shopify's, and the token endpoint and the
+  Admin GraphQL API are imitated from the demo `shopify_*.csv` files (one line item per order, as in the file). Its
+  GraphQL documents are validated against a small copy of Shopify's schema; paging, search filters, counts, cost
+  extensions and bulk exports behave like Shopify's; any other mutation is refused and counted. Tests use the same
+  stand-in behind a "real" setup (`tests/recorded_shopify.py`), never the network. The schema copy is hand-written from
+  Shopify's documentation: **re-check the queries against a real store** before launch (docs/SETUP_SHOPIFY.md).
+- **API version** `SHOPIFY_API_VERSION` (2026-07). Shopify supports each version for about a year: move it forward
+  then.
+
+### D95. Money in rupees, declared by the source (M12)
+- Shopify sends money as a decimal in the shop's currency, i.e. **rupees** for an Indian store (not paise). The
+  connector marks every money column `unit="INR"`, `stored_in="rupees"`: orders `total_price`, `total_refunds`,
+  `total_discounts`, `total_line_items_price`, `total_shipping`, `total_tax`; order items `unit_price`,
+  `total_discount`; customers `total_spent`; products `price`, `price_max`; variants `price`, `cost_per_item`.
+- The profiler turns `stored_in="rupees"` into `INR` with **no** `divide_by`, evidence `source_rupees` ("Shopify sends
+  this amount in rupees"), and skips the paise guesses, so a whole-number amount in a payments-like table is never
+  divided by 100. Razorpay keeps `stored_in="paise"` (D91). Counts (`items_count`, `orders_count`) are not money.
+- A store selling in another currency: the columns get no unit and carry the currency code, and the dictionary leaves
+  the unit for the Owner, as for any non-rupee file.
+- **Uploaded Shopify files keep working** next to the connector: an uploaded `shopify_orders.csv` stays its own
+  connection with its own table; both appear in the dictionary (same-named tables follow D64) and both are in rupees.
+

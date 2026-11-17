@@ -42,6 +42,8 @@ from app.connectors.google_sheets import GoogleSheetsSetup, default_setup
 from app.connectors.razorpay import RazorpaySetup
 from app.connectors.razorpay import default_setup as razorpay_default_setup
 from app.connectors.registry import ConnectorRuntime
+from app.connectors.shopify import ShopifySetup
+from app.connectors.shopify import default_setup as shopify_default_setup
 from app.data.objects import ObjectStore, S3ObjectStore
 from app.db.session import make_engine, make_session_factory
 from app.email.sender import EmailSender, SmtpEmailSender
@@ -91,6 +93,7 @@ def create_app(
     object_store: ObjectStore | None = None,
     google_sheets: GoogleSheetsSetup | None = None,
     razorpay: RazorpaySetup | None = None,
+    shopify: ShopifySetup | None = None,
     job_queue: JobQueue | None = None,
     inline_jobs: bool = False,
 ) -> FastAPI:
@@ -135,6 +138,7 @@ def create_app(
         secrets=app.state.secret_store,
         google=google_sheets or default_setup(settings),
         razorpay=razorpay or razorpay_default_setup(settings),
+        shopify=shopify or shopify_default_setup(settings),
         clock=app.state.clock,
         email=app.state.email_sender,
     )
