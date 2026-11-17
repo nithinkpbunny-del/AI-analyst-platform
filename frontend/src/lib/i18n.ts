@@ -11,4 +11,12 @@ void i18n.use(initReactI18next).init({
   initAsync: false,
 })
 
+/**
+ * Add a screen's strings (`locales/en/<screen>.ts`) when its code loads, so they are not part of the app shell's
+ * first download (DECISIONS D99). Deep-merged: a screen may add keys under a section the shell already has.
+ */
+export function addStrings(bundle: Record<string, unknown>): void {
+  i18n.addResourceBundle('en', 'translation', bundle, true, false)
+}
+
 export default i18n

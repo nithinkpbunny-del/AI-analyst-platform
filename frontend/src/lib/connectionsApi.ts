@@ -2,7 +2,8 @@ import { API_BASE_URL, ApiError, authedRequest, getAccessToken, NETWORK_ERROR_CO
 import type { Role } from './role'
 
 // Shapes as the API sends them (backend app/schemas/connections.py).
-export type ConnectionType = 'file' | 'google_sheets' | 'razorpay' | 'shopify'
+export type ConnectionType =
+  'file' | 'google_sheets' | 'razorpay' | 'shopify' | 'zoho_books' | 'sql_database'
 export type ConnectionStatus = 'active' | 'error' | 'needs_reauth' | 'disabled'
 export type SyncState = 'idle' | 'queued' | 'running'
 export type ColumnType = 'boolean' | 'integer' | 'number' | 'date' | 'datetime' | 'text'
@@ -94,6 +95,59 @@ export interface Connection {
   razorpay?: { key_id_masked: string; mode: 'live' | 'test' } | null
   /** Shopify: the store's address (not a secret); the access token is never returned. */
   shopify?: ShopifyStore | null
+  /** Zoho Books: the organisation read and Zoho's data centre; the refresh token is never returned. */
+  zoho?: ZohoBooks | null
+  /** PostgreSQL or MySQL: where it is and which tables are used; the password is never returned. */
+  database?: DatabaseInfo | null
+}
+
+export type DatabaseEngine = 'postgresql' | 'mysql'
+export type SslMode = 'verify-full' | 'require' | 'disable'
+
+export interface DatabaseInfo {
+  engine: DatabaseEngine
+  host: string
+  port: number
+  database: string
+  username_masked: string
+  ssl_mode: SslMode
+  tables: string[]
+  /** The connection check found that the user can change data (the session is read-only anyway). */
+  can_write: boolean
+  write_reasons: string[]
+  server_version: string | null
+}
+
+export interface DatabaseRequest {
+  engine: DatabaseEngine
+  host: string
+  port?: number
+  database: string
+  username: string
+  password: string
+  ssl_mode: SslMode
+  name?: string
+}
+
+export interface DatabaseTable {
+  ref: string
+  name: string
+  kind: 'table' | 'view'
+  rows_estimate: number | null
+  chosen: boolean
+}
+
+export interface ZohoBooks {
+  region: string
+  region_name: string
+  organization_id: string
+  organization_name: string | null
+  currency: string | null
+  /** Other organisations the signed-in Zoho account can see. */
+  organizations: { id: string; name: string }[]
+  /** Zoho API calls today for the organisation (on the connection page only). */
+  calls_today?: number | null
+  daily_limit: number
 }
 
 export interface ShopifyStore {
@@ -124,6 +178,8 @@ export interface Sources {
   google_sheets: { available: boolean; stand_in: boolean }
   razorpay: { available: boolean; stand_in: boolean }
   shopify: { available: boolean; stand_in: boolean }
+  zoho_books?: { available: boolean; stand_in: boolean; region: string }
+  database?: { available: boolean; ssl_off_allowed: boolean; demo_hosts: string[] }
 }
 
 export interface ConnectionList {
@@ -246,6 +302,38 @@ export const connectionsApi = {
     authedRequest<ShopifyFinish>('/connections/shopify/finish', {
       method: 'POST',
       body: { state, code },
+    }),
+  /** Start connecting Zoho Books, or signing in again for a connection. Returns Zoho's consent page. */
+  zohoStart: (connectionId?: string) =>
+    authedRequest<{ authorization_url: string }>('/connections/zoho/start', {
+      method: 'POST',
+      body: connectionId ? { connection_id: connectionId } : {},
+    }),
+  zohoFinish: (state: string, code: string) =>
+    authedRequest<ShopifyFinish>('/connections/zoho/finish', {
+      method: 'POST',
+      body: { state, code },
+    }),
+  zohoOrganization: (connectionId: string, organizationId: string) =>
+    authedRequest<Connection>(`/connections/${id(connectionId)}/zoho/organization`, {
+      method: 'PUT',
+      body: { organization_id: organizationId },
+    }),
+  addDatabase: (body: DatabaseRequest) =>
+    authedRequest<Connection>('/connections/database', { method: 'POST', body }),
+  replaceDatabaseCredentials: (connectionId: string, body: DatabaseRequest) =>
+    authedRequest<Connection>(`/connections/${id(connectionId)}/database/credentials`, {
+      method: 'PUT',
+      body,
+    }),
+  databaseTables: (connectionId: string) =>
+    authedRequest<{ tables: DatabaseTable[]; max_tables: number }>(
+      `/connections/${id(connectionId)}/database/tables`,
+    ),
+  chooseDatabaseTables: (connectionId: string, tables: string[]) =>
+    authedRequest<Connection>(`/connections/${id(connectionId)}/database/tables`, {
+      method: 'PUT',
+      body: { tables },
     }),
   addRazorpay: (body: RazorpayKey) =>
     authedRequest<Connection>('/connections/razorpay', { method: 'POST', body }),

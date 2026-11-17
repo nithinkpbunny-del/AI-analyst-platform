@@ -1,3 +1,4 @@
+import './strings'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import { useState } from 'react'

@@ -23,11 +23,16 @@ class ReadOnlyViolation(Exception):
 
 
 class ConnectorError(Exception):
-    def __init__(self, kind: ErrorKind, message: str, *, detail: str = "") -> None:
+    def __init__(
+        self, kind: ErrorKind, message: str, *, detail: str = "", stale_ok: bool = False
+    ) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
         self.detail = detail  # for the log only; never shown, never contains tokens
+        # The source refused because of its own usage limits: the copy already stored may be used instead
+        # (Zoho's daily API quota, DECISIONS D97).
+        self.stale_ok = stale_ok
 
 
 @dataclass(frozen=True)

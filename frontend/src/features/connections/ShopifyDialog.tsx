@@ -1,3 +1,4 @@
+import './strings'
 import { useMutation } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'

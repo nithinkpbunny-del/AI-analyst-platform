@@ -43,7 +43,7 @@ from app.api.errors import ApiError
 from app.audit import writer as audit
 from app.auth.permissions import Permission
 from app.auth.ratelimit import FixedWindowLimiter
-from app.connectors import access, file_formats, shopify_stand_in
+from app.connectors import access, file_formats, shopify_stand_in, zoho_stand_in
 from app.connectors.base import ConnectorError
 from app.connectors.file_formats import FileFormatError
 from app.connectors.google_sheets import (
@@ -60,10 +60,13 @@ from app.connectors.registry import (
     ConnectorRuntime,
     build_connector,
     close_connector,
+    database_connector,
+    database_params,
     file_in_use,
     shopify_scopes,
     spreadsheets,
     version_in_use,
+    zoho_quota,
 )
 from app.connectors.service import remove_connection
 from app.connectors.shopify import (
@@ -75,6 +78,22 @@ from app.connectors.shopify import (
 )
 from app.connectors.shopify import authorization_url as shopify_authorization_url
 from app.connectors.shopify import exchange_code as shopify_exchange_code
+from app.connectors.sql_database import (
+    DEFAULT_PORTS,
+    MAX_TABLES_EXPOSED,
+    SqlDatabaseConnector,
+    mask_user,
+)
+from app.connectors.zoho_books import (
+    REGION_NAMES,
+    REGIONS,
+    ZohoBooksConnector,
+    ZohoSetup,
+    region_for_accounts_server,
+)
+from app.connectors.zoho_books import authorization_url as zoho_authorization_url
+from app.connectors.zoho_books import exchange_code as zoho_exchange_code
+from app.data import snapshots as snapshot_store
 from app.data.cache import DatasetCache, DatasetMissing
 from app.data.objects import file_key
 from app.dictionary import replace as dictionary_replace
@@ -86,6 +105,7 @@ from app.models import (
     Dataset,
     FileVersion,
     Membership,
+    Snapshot,
     User,
 )
 from app.schemas.connections import (
@@ -96,6 +116,12 @@ from app.schemas.connections import (
     ConnectionList,
     ConnectionOut,
     ConnectionPatch,
+    DatabaseOut,
+    DatabaseRequest,
+    DatabaseSourceOut,
+    DatabaseTableOut,
+    DatabaseTablesOut,
+    DatabaseTablesRequest,
     DatasetOut,
     DictionaryImpactOut,
     FileOut,
@@ -124,6 +150,14 @@ from app.schemas.connections import (
     SpreadsheetsRequest,
     TestCheckOut,
     TestOut,
+    ZohoFinishOut,
+    ZohoFinishRequest,
+    ZohoOrganizationOut,
+    ZohoOrganizationRequest,
+    ZohoOut,
+    ZohoSourceOut,
+    ZohoStartOut,
+    ZohoStartRequest,
 )
 from app.tasks.queue import JobQueue
 
@@ -139,6 +173,7 @@ UPLOADS_PER_HOUR = 60
 GOOGLE_STATE_TTL_SECONDS = 600
 _GOOGLE_STATE = "gsheets:state:"
 _SHOPIFY_STATE = "shopify:state:"
+_ZOHO_STATE = "zoho:state:"
 # A sync that has not finished after this long is assumed lost (a worker restarted); it may be started again.
 STALE_SYNC = timedelta(minutes=15)
 _MULTIPART_OVERHEAD = 64 * 1024
@@ -343,6 +378,48 @@ def _connection_out(connection: Connection, loaded: _Loaded) -> ConnectionOut:
         google=google,
         razorpay=_razorpay_out(connection),
         shopify=_shopify_out(connection),
+        zoho=_zoho_out(connection),
+        database=_database_out(connection),
+    )
+
+
+def _database_out(connection: Connection) -> DatabaseOut | None:
+    if connection.type != "sql_database":
+        return None
+    config = connection.config
+    return DatabaseOut(
+        engine=config.get("engine", "postgresql"),
+        host=str(config.get("host") or ""),
+        port=int(config.get("port") or 0),
+        database=str(config.get("database") or ""),
+        username_masked=mask_user(str(config.get("username") or "")),
+        ssl_mode=config.get("ssl_mode", "require"),
+        tables=[str(t) for t in config.get("tables", [])],
+        can_write=bool(config.get("can_write")),
+        write_reasons=[str(r) for r in config.get("write_reasons", [])],
+        server_version=config.get("server_version"),
+    )
+
+
+def _zoho_out(connection: Connection, calls_today: int | None = None) -> ZohoOut | None:
+    if connection.type != "zoho_books":
+        return None
+    config = connection.config
+    region = str(config.get("region") or "in")
+    current = str(config.get("organization_id") or "")
+    return ZohoOut(
+        region=region,
+        region_name=REGION_NAMES.get(region, region),
+        organization_id=current,
+        organization_name=config.get("organization_name"),
+        currency=config.get("currency"),
+        organizations=[
+            ZohoOrganizationOut(id=str(o.get("id")), name=str(o.get("name") or ""))
+            for o in config.get("organizations", [])
+            if isinstance(o, dict) and str(o.get("id")) != current
+        ],
+        calls_today=calls_today,
+        daily_limit=int(config.get("daily_limit") or 0),
     )
 
 
@@ -370,9 +447,15 @@ def _one(tenant: Tenant, connection: Connection) -> ConnectionOut:
     return _connection_out(connection, _Loaded(tenant, [connection]))
 
 
-def _detail(tenant: Tenant, connection: Connection) -> ConnectionDetailOut:
+def _detail(
+    tenant: Tenant, connection: Connection, runtime: ConnectorRuntime | None = None
+) -> ConnectionDetailOut:
     loaded = _Loaded(tenant, [connection])
     base = _connection_out(connection, loaded)
+    if base.zoho is not None and runtime is not None:
+        quota = zoho_quota(runtime)
+        base.zoho.calls_today = quota.used(base.zoho.organization_id)
+        base.zoho.daily_limit = quota.daily_limit
     versions = loaded.versions.get(connection.id, [])
     chosen = version_in_use(connection, versions)
     in_use = chosen.id if chosen else None
@@ -461,6 +544,16 @@ def list_connections(request: Request, tenant: ViewConnections) -> ConnectionLis
             shopify=ShopifySourceOut(
                 available=_runtime(request).shopify.available,
                 stand_in=_runtime(request).shopify.stand_in,
+            ),
+            database=DatabaseSourceOut(
+                available=True,
+                ssl_off_allowed=_runtime(request).database.development,
+                demo_hosts=sorted(_runtime(request).database.dev_allowed_hosts),
+            ),
+            zoho_books=ZohoSourceOut(
+                available=_runtime(request).zoho.available,
+                stand_in=_runtime(request).zoho.stand_in,
+                region=_runtime(request).zoho.region,
             ),
         ),
     )
@@ -1197,6 +1290,561 @@ def shopify_finish(
     return ShopifyFinishOut(connection=_one(tenant, connection), reconnected=False)
 
 
+# ----------------------------------------------------------------------------------------- Zoho Books
+ZOHO_STARTS_PER_HOUR = 30
+
+
+def _zoho_setup(request: Request) -> ZohoSetup:
+    setup = _runtime(request).zoho
+    if not setup.available:
+        raise ApiError(
+            409,
+            "zoho_unavailable",
+            "Zoho Books is not set up on this server yet. See docs/SETUP_ZOHO.md.",
+        )
+    return setup
+
+
+def _zoho_connection(tenant: Tenant, connection_id: uuid.UUID, *, lock: bool = False) -> Connection:
+    connection = access.visible_connection(tenant.db, tenant.auth, connection_id, lock=lock)
+    if connection.type != "zoho_books":
+        raise ApiError(409, "not_zoho", "This is not a Zoho Books connection.")
+    return connection
+
+
+@router.post(
+    "/zoho/start",
+    response_model=ZohoStartOut,
+    responses=_ERRORS,
+    summary="Start connecting Zoho Books (or signing in again): returns Zoho's consent page",
+)
+def zoho_start(body: ZohoStartRequest, request: Request, tenant: ManageConnections) -> ZohoStartOut:
+    setup = _zoho_setup(request)
+    if body.connection_id is not None:
+        _zoho_connection(tenant, body.connection_id)
+    _limit(
+        request,
+        tenant,
+        "zoho-starts",
+        ZOHO_STARTS_PER_HOUR,
+        "Zoho sign-ins were started too often in the last hour. Try again later.",
+    )
+    state = secrets.token_urlsafe(32)
+    request.app.state.redis.set(
+        f"{_ZOHO_STATE}{state}",
+        json.dumps(
+            {
+                "org_id": str(tenant.org_id),
+                "user_id": str(tenant.auth.user.id),
+                "connection_id": str(body.connection_id) if body.connection_id else None,
+                "region": None,
+            }
+        ),
+        ex=GOOGLE_STATE_TTL_SECONDS,
+    )
+    return ZohoStartOut(authorization_url=zoho_authorization_url(setup, state=state))
+
+
+@router.get(
+    "/zoho/callback",
+    summary="Zoho sends the browser back here; it continues in the web app",
+    response_class=RedirectResponse,
+    status_code=303,
+)
+def zoho_callback(request: Request) -> RedirectResponse:
+    """Public: the browser arrives from Zoho without our access token. The ``state`` must be one this server
+    issued; Zoho's ``accounts-server`` (the person's data centre) must be one of Zoho's own, and is remembered
+    with the state. The code goes to the web app in the URL fragment (never logged); the signed-in Owner who
+    started the flow finishes it with ``POST /connections/zoho/finish``."""
+    params = dict(request.query_params.items())
+    state = params.get("state", "")
+    key = f"{_ZOHO_STATE}{state}"
+    raw = request.app.state.redis.get(key) if state else None
+    setup = _runtime(request).zoho
+    fragment: dict[str, str]
+    if raw is None:
+        fragment = {"error": "expired"}
+    elif params.get("error"):
+        fragment = {"error": "access_denied"}
+    elif not setup.available or not params.get("code"):
+        fragment = {"error": "zoho_failed"}
+    else:
+        server = params.get("accounts-server")
+        region = region_for_accounts_server(server) if server else setup.region
+        if region is None:
+            fragment = {"error": "zoho_failed"}
+        else:
+            saved = json.loads(raw)
+            saved["region"] = region
+            ttl = request.app.state.redis.ttl(key)
+            request.app.state.redis.set(
+                key, json.dumps(saved), ex=ttl if ttl and ttl > 0 else GOOGLE_STATE_TTL_SECONDS
+            )
+            fragment = {"state": state, "code": params["code"]}
+    base = request.app.state.settings.app_base_url.rstrip("/")
+    response = RedirectResponse(f"{base}/connections/zoho/return#{urlencode(fragment)}", 303)
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _zoho_config(
+    connector: ZohoBooksConnector,
+    organizations: list[dict[str, Any]],
+    *,
+    region: str,
+    api_domain: str,
+    daily_limit: int,
+) -> dict[str, Any]:
+    chosen = next(o for o in organizations if o["id"] == connector.organization_id)
+    return {
+        "region": region,
+        "api_domain": api_domain,
+        "organization_id": chosen["id"],
+        "organization_name": chosen["name"],
+        "currency": chosen["currency"],
+        "organizations": [{"id": o["id"], "name": o["name"]} for o in organizations][:50],
+        "daily_limit": daily_limit,
+    }
+
+
+@router.post(
+    "/zoho/finish",
+    response_model=ZohoFinishOut,
+    responses=_ERRORS,
+    summary="Finish connecting Zoho Books with the code Zoho returned (checked with one read, then stored "
+    "encrypted)",
+)
+def zoho_finish(
+    body: ZohoFinishRequest, request: Request, tenant: ManageConnections
+) -> ZohoFinishOut:
+    setup = _zoho_setup(request)
+    raw = request.app.state.redis.getdel(f"{_ZOHO_STATE}{body.state}")
+    expired = ApiError(
+        400,
+        "zoho_link_expired",
+        "This Zoho sign-in expired or was already used. Start again with 'Connect Zoho Books'.",
+    )
+    if raw is None:
+        raise expired
+    saved = json.loads(raw)
+    region = saved.get("region")
+    if (
+        saved["org_id"] != str(tenant.org_id)
+        or saved["user_id"] != str(tenant.auth.user.id)
+        or region not in REGIONS
+    ):
+        raise expired
+    runtime = _runtime(request)
+    http = setup.http(region)
+    try:
+        tokens = zoho_exchange_code(setup, http, region=region, code=body.code)
+    except ConnectorError as error:
+        raise ApiError(422, "zoho_refused", error.message) from error
+    finally:
+        http.close()
+    reconnect_id = uuid.UUID(saved["connection_id"]) if saved.get("connection_id") else None
+    existing = _zoho_connection(tenant, reconnect_id, lock=True) if reconnect_id else None
+    connector = ZohoBooksConnector(
+        setup=setup,
+        refresh_token=tokens.refresh_token,
+        access_token=tokens.access_token,
+        api_domain=tokens.api_domain,
+        region=region,
+        organization_id="",
+        timezone=_timezone(tenant),
+        max_rows=runtime.settings.max_rows_per_dataset,
+        clock=runtime.clock,
+        quota=zoho_quota(runtime),
+    )
+    try:
+        try:
+            organizations = connector.organizations()
+        except ConnectorError as error:
+            raise ApiError(422, "zoho_refused", error.message) from error
+        if not organizations:
+            raise ApiError(
+                422,
+                "zoho_refused",
+                "This Zoho account has no Zoho Books organisation. Sign in with the account that uses "
+                "Zoho Books.",
+            )
+        wanted = str(existing.config.get("organization_id") or "") if existing else ""
+        chosen = next(
+            (o for o in organizations if o["id"] == wanted),
+            next((o for o in organizations if o["default"]), organizations[0]),
+        )
+        connector.use_organization(chosen["id"], chosen["currency"])
+        result = connector.test()
+    finally:
+        connector.close()
+    if not result.ok:
+        raise ApiError(422, "zoho_refused", result.message)
+    config = _zoho_config(
+        connector,
+        organizations,
+        region=region,
+        api_domain=tokens.api_domain,
+        daily_limit=setup.daily_call_limit,
+    )
+    secret_id = runtime.secrets.put(
+        tenant.db,
+        org_id=tenant.org_id,
+        purpose=SECRET_PURPOSES["zoho_books"],
+        value=tokens.refresh_token,
+    ).id
+    if existing is not None:
+        old_secret = existing.secret_ref
+        changed_org = existing.config.get("organization_id") != config["organization_id"]
+        existing.secret_ref = secret_id
+        existing.config = {**existing.config, **config}
+        if existing.status != "disabled":
+            existing.status = "active"
+            existing.last_error = None
+        tenant.db.flush()
+        if old_secret is not None:
+            runtime.secrets.delete(tenant.db, org_id=tenant.org_id, secret_id=old_secret)
+        if changed_org:
+            _drop_snapshots(tenant, request, existing)
+        _audit(
+            tenant,
+            "connection.reauthorized",
+            existing,
+            {"type": "zoho_books", "name": existing.name},
+        )
+        if existing.status != "disabled" and not _syncing(tenant, existing):
+            _queue_sync(request, tenant, existing, force=True)
+        else:
+            tenant.db.commit()
+        return ZohoFinishOut(connection=_one(tenant, existing), reconnected=True)
+    label = (
+        f"Zoho Books ({config['organization_name']})"
+        if config["organization_name"]
+        else "Zoho Books"
+    )
+    connection = Connection(
+        org_id=tenant.org_id,
+        type="zoho_books",
+        name=label[:120],
+        status="active",
+        config=config,
+        secret_ref=secret_id,
+        sync_state="idle",
+        created_by=tenant.auth.user.id,
+    )
+    tenant.db.add(connection)
+    tenant.db.flush()
+    _audit(
+        tenant,
+        "connection.added",
+        connection,
+        {"type": "zoho_books", "name": connection.name, "region": region},
+    )
+    _queue_sync(request, tenant, connection)
+    return ZohoFinishOut(connection=_one(tenant, connection), reconnected=False)
+
+
+def _drop_snapshots(tenant: Tenant, request: Request, connection: Connection) -> None:
+    """Another organisation's data must not be merged into this one's stored copies."""
+    datasets = list(
+        tenant.db.scalars(select(Dataset.id).where(Dataset.connection_id == connection.id))
+    )
+    if datasets:
+        snapshot_store.delete_snapshots(
+            tenant.db,
+            _runtime(request).objects,
+            list(tenant.db.scalars(select(Snapshot).where(Snapshot.dataset_id.in_(datasets)))),
+        )
+
+
+@router.put(
+    "/{connection_id}/zoho/organization",
+    response_model=ConnectionOut,
+    responses=_ERRORS,
+    summary="Read another Zoho Books organisation that the signed-in Zoho account can see",
+)
+def zoho_organization(
+    connection_id: uuid.UUID,
+    body: ZohoOrganizationRequest,
+    request: Request,
+    tenant: ManageConnections,
+) -> ConnectionOut:
+    connection = _zoho_connection(tenant, connection_id, lock=True)
+    known = {
+        str(o.get("id")): o
+        for o in connection.config.get("organizations", [])
+        if isinstance(o, dict)
+    }
+    chosen = known.get(body.organization_id)
+    if chosen is None:
+        raise ApiError(
+            422,
+            "validation_error",
+            "Choose one of the organisations this Zoho account can see.",
+            fields={
+                "organization_id": "This organisation is not available to the signed-in Zoho account."
+            },
+        )
+    if body.organization_id == connection.config.get("organization_id"):
+        return _one(tenant, connection)
+    if _syncing(tenant, connection):
+        raise ApiError(
+            409, "sync_running", "The data is being read. Try again when it has finished."
+        )
+    previous = connection.config.get("organization_name")
+    connection.config = {
+        **connection.config,
+        "organization_id": body.organization_id,
+        "organization_name": chosen.get("name"),
+    }
+    _drop_snapshots(tenant, request, connection)
+    tenant.db.flush()
+    _audit(
+        tenant,
+        "connection.organization_changed",
+        connection,
+        {"type": "zoho_books", "name": connection.name, "from": previous, "to": chosen.get("name")},
+    )
+    if connection.status != "disabled":
+        _queue_sync(request, tenant, connection, force=True)
+    else:
+        tenant.db.commit()
+    return _one(tenant, connection)
+
+
+# --------------------------------------------------------------------------------- PostgreSQL / MySQL
+DATABASE_CHECKS_PER_HOUR = 20
+ENGINE_LABELS = {"postgresql": "PostgreSQL", "mysql": "MySQL"}
+
+
+def _check_database(
+    request: Request, tenant: Tenant, body: DatabaseRequest, exposed: list[str]
+) -> tuple[dict[str, Any], str]:
+    """Connect once (read-only), list the tables and check what the user could change, before anything is
+    saved. Returns the connection's config and the password. Raises ``ApiError`` 422 with a plain reason."""
+    _limit(
+        request,
+        tenant,
+        "database-checks",
+        DATABASE_CHECKS_PER_HOUR,
+        f"Databases were checked {DATABASE_CHECKS_PER_HOUR} times in the last hour. Try again later.",
+    )
+    runtime = _runtime(request)
+    config: dict[str, Any] = {
+        "engine": body.engine,
+        "host": body.host,
+        "port": body.port or DEFAULT_PORTS[body.engine],
+        "database": body.database,
+        "username": body.username,
+        "ssl_mode": body.ssl_mode,
+        "tables": exposed,
+    }
+    password = body.password.get_secret_value()
+    connector = SqlDatabaseConnector(
+        setup=runtime.database,
+        params=database_params(config, password),
+        exposed=exposed,
+        timezone=_timezone(tenant),
+        max_rows=runtime.settings.max_rows_per_dataset,
+    )
+    try:
+        result = connector.test()
+    finally:
+        connector.close()
+    if not result.ok:
+        raise ApiError(422, "database_refused", result.message)
+    config["can_write"] = bool(result.details.get("can_write"))
+    config["write_reasons"] = list(result.details.get("write_reasons") or [])
+    config["server_version"] = result.details.get("server_version")
+    return config, password
+
+
+@router.post(
+    "/database",
+    response_model=ConnectionOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_ERRORS,
+    summary="Connect a PostgreSQL or MySQL database (checked read-only, then the password is stored encrypted)",
+)
+def add_database(
+    body: DatabaseRequest, request: Request, tenant: ManageConnections
+) -> ConnectionOut:
+    config, password = _check_database(request, tenant, body, [])
+    runtime = _runtime(request)
+    row = runtime.secrets.put(
+        tenant.db, org_id=tenant.org_id, purpose=SECRET_PURPOSES["sql_database"], value=password
+    )
+    label = ENGINE_LABELS[body.engine]
+    name = body.name or f"{label} ({body.database})"
+    connection = Connection(
+        org_id=tenant.org_id,
+        type="sql_database",
+        name=name[:120],
+        status="active",
+        config=config,
+        secret_ref=row.id,
+        sync_state="idle",
+        created_by=tenant.auth.user.id,
+    )
+    tenant.db.add(connection)
+    tenant.db.flush()
+    _audit(
+        tenant,
+        "connection.added",
+        connection,
+        {"type": "sql_database", "name": connection.name, "engine": body.engine, "host": body.host},
+    )
+    tenant.db.commit()  # nothing to read until the Owner chooses tables
+    return _one(tenant, connection)
+
+
+def _database_connection(
+    tenant: Tenant, connection_id: uuid.UUID, *, lock: bool = False
+) -> Connection:
+    connection = access.visible_connection(tenant.db, tenant.auth, connection_id, lock=lock)
+    if connection.type != "sql_database":
+        raise ApiError(409, "not_database", "This is not a database connection.")
+    return connection
+
+
+@router.put(
+    "/{connection_id}/database/credentials",
+    response_model=ConnectionOut,
+    responses=_ERRORS,
+    summary="Replace a database connection's address, user or password (checked first)",
+)
+def replace_database_credentials(
+    connection_id: uuid.UUID, body: DatabaseRequest, request: Request, tenant: ManageConnections
+) -> ConnectionOut:
+    connection = _database_connection(tenant, connection_id, lock=True)
+    if body.engine != connection.config.get("engine"):
+        raise ApiError(
+            422,
+            "validation_error",
+            "A connection keeps its kind of database. Add a new connection for another kind.",
+            fields={"engine": "This connection is for another kind of database."},
+        )
+    tables = [str(t) for t in connection.config.get("tables", [])]
+    config, password = _check_database(request, tenant, body, tables)
+    runtime = _runtime(request)
+    old_secret = connection.secret_ref
+    connection.secret_ref = runtime.secrets.put(
+        tenant.db, org_id=tenant.org_id, purpose=SECRET_PURPOSES["sql_database"], value=password
+    ).id
+    moved = any(connection.config.get(k) != config[k] for k in ("host", "port", "database"))
+    connection.config = {**connection.config, **config}
+    if connection.status != "disabled":
+        connection.status = "active"
+        connection.last_error = None
+    tenant.db.flush()
+    if old_secret is not None:
+        runtime.secrets.delete(tenant.db, org_id=tenant.org_id, secret_id=old_secret)
+    if moved:
+        _drop_snapshots(tenant, request, connection)  # another database's rows are never merged in
+    _audit(
+        tenant,
+        "connection.reauthorized",
+        connection,
+        {"type": "sql_database", "name": connection.name},
+    )
+    if tables and connection.status != "disabled" and not _syncing(tenant, connection):
+        _queue_sync(request, tenant, connection, force=True)
+    else:
+        tenant.db.commit()
+    return _one(tenant, connection)
+
+
+def _live_tables(request: Request, tenant: Tenant, connection: Connection) -> list[Any]:
+    try:
+        connector = database_connector(
+            tenant.db, connection, _runtime(request), timezone=_timezone(tenant)
+        )
+    except ConnectorError as error:
+        raise _source_error(error) from error
+    try:
+        return connector.available_tables()
+    except ConnectorError as error:
+        _mark_reauth(tenant, connection, error)
+        raise _source_error(error) from error
+    finally:
+        connector.close()
+
+
+@router.get(
+    "/{connection_id}/database/tables",
+    response_model=DatabaseTablesOut,
+    responses=_ERRORS,
+    summary="The tables and views the database user can read, and which ones are used",
+)
+def database_tables(
+    connection_id: uuid.UUID, request: Request, tenant: ManageConnections
+) -> DatabaseTablesOut:
+    connection = _database_connection(tenant, connection_id)
+    chosen = {str(t) for t in connection.config.get("tables", [])}
+    tables = _live_tables(request, tenant, connection)
+    return DatabaseTablesOut(
+        tables=[
+            DatabaseTableOut(
+                ref=t.ref,
+                name=t.name if t.schema in ("public", connection.config.get("database")) else t.ref,
+                kind=t.kind,
+                rows_estimate=t.rows_estimate,
+                chosen=t.ref in chosen,
+            )
+            for t in tables
+        ],
+        max_tables=MAX_TABLES_EXPOSED,
+    )
+
+
+@router.put(
+    "/{connection_id}/database/tables",
+    response_model=ConnectionOut,
+    responses=_ERRORS,
+    summary="Choose which tables and views questions may use (each is then read in the background)",
+)
+def choose_database_tables(
+    connection_id: uuid.UUID,
+    body: DatabaseTablesRequest,
+    request: Request,
+    tenant: ManageConnections,
+) -> ConnectionOut:
+    connection = _database_connection(tenant, connection_id, lock=True)
+    known = {t.ref for t in _live_tables(request, tenant, connection)}
+    unknown = [t for t in body.tables if t not in known]
+    if unknown:
+        raise ApiError(
+            422,
+            "validation_error",
+            "Choose tables the database user can read.",
+            fields={"tables": f"Not found or not readable: {', '.join(unknown[:5])}"},
+        )
+    before = [str(t) for t in connection.config.get("tables", [])]
+    connection.config = {**connection.config, "tables": body.tables}
+    tenant.db.flush()
+    _audit(
+        tenant,
+        "connection.tables_changed",
+        connection,
+        {
+            "type": "sql_database",
+            "name": connection.name,
+            "added": len(set(body.tables) - set(before)),
+            "removed": len(set(before) - set(body.tables)),
+        },
+    )
+    if connection.status != "disabled" and not _syncing(tenant, connection):
+        _queue_sync(request, tenant, connection, force=True)
+    else:
+        tenant.db.commit()
+    # The removed tables leave the business dictionary's draft.
+    if set(before) - set(body.tables) and dictionary_service.mark_queued(
+        _runtime(request), tenant.org_id
+    ):
+        _jobs(request).draft_dictionary(org_id=tenant.org_id, user_id=tenant.auth.user.id)
+    return _one(tenant, connection)
+
+
 # ------------------------------------------------------------------------------------------- Razorpay
 RAZORPAY_CHECKS_PER_HOUR = 20
 
@@ -1389,8 +2037,14 @@ def set_spreadsheets(
     responses=_ERRORS,
     summary="A connection with its datasets (columns, data notes) and file versions",
 )
-def get_connection(connection_id: uuid.UUID, tenant: ViewConnections) -> ConnectionDetailOut:
-    return _detail(tenant, access.visible_connection(tenant.db, tenant.auth, connection_id))
+def get_connection(
+    connection_id: uuid.UUID, request: Request, tenant: ViewConnections
+) -> ConnectionDetailOut:
+    return _detail(
+        tenant,
+        access.visible_connection(tenant.db, tenant.auth, connection_id),
+        _runtime(request),
+    )
 
 
 @router.patch(
@@ -1744,3 +2398,58 @@ async def shopify_stand_in_decide(request: Request) -> RedirectResponse:
         int(_runtime(request).clock().timestamp()),
     )
     return RedirectResponse(f"{setup.redirect_uri()}?{urlencode(params)}", 303)
+
+
+_ZOHO_STAND_IN_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zoho stand-in</title>
+<style>
+body{{margin:0;font:16px/1.55 system-ui,sans-serif;background:#F5F6FA;color:#1E1C3A}}
+main{{max-width:440px;margin:48px 16px;padding:24px;background:#fff;border:1px solid #E2E4EE;border-radius:16px}}
+h1{{font-size:24px;line-height:1.15;margin:0 0 8px}} p{{margin:0 0 16px;color:#5A5874}}
+ul{{margin:0 0 16px;padding-left:20px}}
+.actions{{display:flex;gap:12px;margin-top:24px}}
+button{{min-height:44px;padding:0 20px;border-radius:10px;font:inherit;font-weight:600}}
+.allow{{border:0;background:#3A36A8;color:#fff}} .deny{{border:1px solid #85839F;background:#fff;color:#1E1C3A}}
+</style></head><body><main>
+<h1>Zoho stand-in</h1>
+<p>Local development only. Nothing goes to Zoho: the demo organisation's books come from the demo files on this
+computer. Add a real Zoho client with docs/SETUP_ZOHO.md.</p>
+<p>Analyst would like to read your Zoho Books data (data centre: India). It asks for:</p>
+<ul>{scopes}</ul>
+<form method="post" action="/connections/zoho/stand-in">
+<input type="hidden" name="state" value="{state}"><input type="hidden" name="scope" value="{scope}">
+<div class="actions"><button class="allow" type="submit" name="decision" value="allow">Accept</button>
+<button class="deny" type="submit" name="decision" value="deny">Reject</button></div>
+</form></main></body></html>"""
+
+
+def _zoho_stand_in_only(request: Request) -> ZohoSetup:
+    setup = _runtime(request).zoho
+    if not setup.stand_in:
+        raise access.not_found()
+    return setup
+
+
+@router.get("/zoho/stand-in", include_in_schema=False)
+def zoho_stand_in_consent(request: Request, state: str = "", scope: str = "") -> HTMLResponse:
+    _zoho_stand_in_only(request)
+    items = "".join(f"<li>{html.escape(s.strip())}</li>" for s in scope.split(",") if s.strip())
+    page = _ZOHO_STAND_IN_PAGE.format(
+        state=html.escape(state), scope=html.escape(scope), scopes=items
+    )
+    return HTMLResponse(page, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/zoho/stand-in", include_in_schema=False)
+async def zoho_stand_in_decide(request: Request) -> RedirectResponse:
+    setup = _zoho_stand_in_only(request)
+    form = {k: v[0] for k, v in parse_qs((await request.body()).decode()).items()}
+    query: dict[str, str] = {"state": form.get("state", "")}
+    if form.get("decision") == "allow":
+        query["code"] = zoho_stand_in.issue_code()
+        query["location"] = setup.region
+        query["accounts-server"] = setup.accounts_url(setup.region)
+    else:
+        query["error"] = "access_denied"
+    return RedirectResponse(f"{setup.redirect_uri()}?{urlencode(query)}", 303)

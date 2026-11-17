@@ -431,6 +431,8 @@ class TestWhoSeesWhat:
             "google_sheets": {"available": True, "stand_in": False},
             "razorpay": {"available": True, "stand_in": False},
             "shopify": {"available": True, "stand_in": False},
+            "zoho_books": {"available": True, "stand_in": False, "region": "in"},
+            "database": {"available": True, "ssl_off_allowed": False, "demo_hosts": []},
         }
 
 

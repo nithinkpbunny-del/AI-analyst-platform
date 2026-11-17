@@ -5,7 +5,10 @@
   ``flag_pct`` (5%, the Financial lens) over or under budget are flagged.
 * **Receivables ageing:** a table with a due date and an outstanding amount: buckets 0-30, 31-60, 61-90 and over
   90 days overdue on ``as_of``.
-* **P&L:** needs ledger data (Zoho Books, Tally: M13, M16); until then it says so.
+* **P&L:** a profit and loss table with one row per account line (section, account, amount and a month), e.g.
+  Zoho Books' report (M13): lines summed for the period, then gross profit (operating income - cost of goods
+  sold), operating profit (- operating expenses) and net profit (all income - all costs), with margins as a share of
+  operating income. Without such a table it says that accounting data is needed.
 """
 
 from __future__ import annotations
@@ -160,5 +163,79 @@ def receivables_ageing(
     return Result(table_out, facts, [], [key], list(analysis.sql_log))
 
 
+_SECTION = re.compile(r"(section|group|category|type)", re.I)
+_ACCOUNT = re.compile(r"(account|line|ledger|head)", re.I)
+
+
+def pnl_tables(analysis: Analysis) -> list[str]:
+    out = []
+    for key, entry in analysis.dictionary.datasets.items():
+        columns = list(entry.columns)
+        money = _money_columns(entry)
+        if (
+            money
+            and any(_SECTION.search(c) for c in columns)
+            and any(_ACCOUNT.search(c) and c not in money for c in columns)
+            and ("profit" in key.lower() or "pnl" in key.lower() or "p_l" in key.lower())
+        ):
+            out.append(key)
+    return out
+
+
+def _kind(section: str) -> str:
+    lowered = section.lower()
+    if "cost of goods" in lowered or "cogs" in lowered:
+        return "cogs"
+    if "income" in lowered or "revenue" in lowered or "sales" in lowered:
+        return "other_income" if "non" in lowered else "income"
+    return "other_expense" if "non" in lowered else "expense"
+
+
 def pnl(analysis: Analysis, period: Period | None = None) -> Result:
-    raise AnalyticsError("needs_accounting_data", "pnl")
+    key = next(iter(pnl_tables(analysis)), None)
+    if key is None:
+        raise AnalyticsError("needs_accounting_data", "pnl")
+    entry = analysis.dictionary.datasets[key]
+    columns = list(entry.columns)
+    money = _money_columns(entry)
+    amount = next((c for c in money if "amount" in c.lower()), money[0])
+    section = next(c for c in columns if _SECTION.search(c))
+    account = next(c for c in columns if _ACCOUNT.search(c) and c not in money)
+    analysis.table(key)
+    clause, params = "", []
+    if period is not None:
+        if not entry.time_column:
+            raise AnalyticsError("no_time_column", key)
+        clause = f"WHERE {q(entry.time_column)} >= ? AND {q(entry.time_column)} < ?"
+        params = [period.start, period.end_exclusive]
+    sql = (
+        f"SELECT CAST({q(section)} AS VARCHAR) AS section, CAST({q(account)} AS VARCHAR) AS line, "  # noqa: S608
+        f"SUM({q(amount)}) AS amount FROM {q(key)} {clause} GROUP BY 1, 2 ORDER BY 1, 3 DESC"
+    )
+    table_out = analysis.frame(sql, params)
+    table_out["amount"] = pd.to_numeric(table_out["amount"], errors="coerce").astype("float64")
+    by_kind: dict[str, float] = {}
+    for sec, value in zip(table_out["section"], table_out["amount"], strict=True):
+        by_kind[_kind(str(sec))] = by_kind.get(_kind(str(sec)), 0.0) + float(value)
+    income = by_kind.get("income", 0.0)
+    gross = income - by_kind.get("cogs", 0.0)
+    operating = gross - by_kind.get("expense", 0.0)
+    net = operating + by_kind.get("other_income", 0.0) - by_kind.get("other_expense", 0.0)
+
+    def margin(value: float) -> float | None:
+        return round(value / income * 100, 1) if income else None
+
+    facts: dict[str, Any] = {
+        "table": key,
+        "period": period.as_json() if period else None,
+        "operating_income": income,
+        "cost_of_goods_sold": by_kind.get("cogs", 0.0),
+        "gross_profit": gross,
+        "gross_margin_pct": margin(gross),
+        "operating_expenses": by_kind.get("expense", 0.0),
+        "operating_profit": operating,
+        "operating_margin_pct": margin(operating),
+        "net_profit": net,
+        "net_margin_pct": margin(net),
+    }
+    return Result(table_out, facts, [], [key], list(analysis.sql_log))

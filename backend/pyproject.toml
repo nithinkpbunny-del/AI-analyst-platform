@@ -39,6 +39,7 @@ dependencies = [
     "sqlglot>=26",
     "weasyprint>=63",
     "graphql-core>=3.3.2",
+    "pymysql>=1.1",
 ]
 
 [dependency-groups]
@@ -95,7 +96,7 @@ explicit_package_bases = true
 exclude = ["alembic/versions"]
 
 [[tool.mypy.overrides]]
-module = ["celery.*", "boto3.*", "botocore.*", "kombu.*", "testcontainers.*", "authlib.*"]
+module = ["celery.*", "boto3.*", "botocore.*", "kombu.*", "testcontainers.*", "authlib.*", "pymysql.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

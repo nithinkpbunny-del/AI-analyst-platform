@@ -13,6 +13,10 @@ import {
   demoOrdersDetail,
   demoRazorpay,
   demoShopify,
+  demoZoho,
+  demoDatabase,
+  demoDatabaseDetail,
+  demoDatabaseTables,
   demoDatasetPreview,
   demoTargets,
 } from '../../testing/connectionFixtures'
@@ -191,7 +195,7 @@ describe('Google Sheets', () => {
     })
     renderApp('/connections')
     expect(await screen.findByRole('button', { name: 'Connect Google Sheets' })).toBeDisabled()
-    expect(screen.getByText(/not set up on this server yet/)).toBeInTheDocument()
+    expect(screen.getByText(/Google Sheets is not set up on this server yet/)).toBeInTheDocument()
   })
 
   it('finishes the sign-in, lets the Owner choose spreadsheets and opens the connection', async () => {
@@ -799,5 +803,273 @@ describe('Shopify', () => {
     expect(
       screen.queryByRole('button', { name: 'Sign in to Shopify again' }),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('Zoho Books', () => {
+  const zohoDetail = (extra: object = {}) => ({
+    status: 200,
+    body: { ...demoZoho, datasets: [], versions: [], ...extra },
+  })
+
+  it('sends the Owner to Zoho to accept read-only access', async () => {
+    const url = 'https://accounts.zoho.in/oauth/v2/auth?state=s'
+    const api = routes({
+      'POST /connections/zoho/start': { status: 200, body: { authorization_url: url } },
+    })
+    renderApp('/connections')
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect Zoho Books' }))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(url))
+    expect(api.body('POST /connections/zoho/start')).toEqual({})
+  })
+
+  it('is disabled without a Zoho client and says how to set it up', async () => {
+    routes({
+      'GET /connections': {
+        status: 200,
+        body: {
+          ...demoConnectionList,
+          sources: {
+            ...demoConnectionList.sources,
+            zoho_books: { available: false, stand_in: false, region: 'in' },
+          },
+        },
+      },
+    })
+    renderApp('/connections')
+    expect(await screen.findByRole('button', { name: 'Connect Zoho Books' })).toBeDisabled()
+    expect(screen.getByText(/docs\/SETUP_ZOHO.md/)).toBeInTheDocument()
+  })
+
+  it('finishes the connection when Zoho sends the Owner back', async () => {
+    const api = routes({
+      'POST /connections/zoho/finish': {
+        status: 200,
+        body: { connection: { ...demoZoho, sync_state: 'queued' }, reconnected: false },
+      },
+      'GET /connections/c6': zohoDetail(),
+    })
+    renderApp('/connections/zoho/return#state=state-0123456789abcdef&code=abc')
+    expect(await screen.findByRole('heading', { name: 'Zoho Books (UrbanCart)' })).toBeVisible()
+    expect(api.body('POST /connections/zoho/finish')).toEqual({
+      state: 'state-0123456789abcdef',
+      code: 'abc',
+    })
+  })
+
+  it('explains a refusal in Zoho and offers a way back', async () => {
+    const api = routes()
+    renderApp('/connections/zoho/return#error=access_denied')
+    expect(await screen.findByText(/Access was not accepted in Zoho/)).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Back to connections' })).toBeVisible()
+    expect(api.count('POST /connections/zoho/finish')).toBe(0)
+  })
+
+  it('shows the organisation, data centre, API calls and the read-only note', async () => {
+    routes({ 'GET /connections/c6': zohoDetail() })
+    renderApp('/connections/c6')
+    expect(await screen.findByText(/Organisation UrbanCart/)).toBeVisible()
+    expect(screen.getByText(/Zoho data centre: India/)).toBeVisible()
+    expect(screen.getByText(/Zoho API calls today: 57 of 1,000/)).toBeVisible()
+    expect(screen.getByText(/phone numbers and addresses are never read/)).toBeVisible()
+  })
+
+  it('lets the Owner read another organisation', async () => {
+    const api = routes({
+      'GET /connections/c6': zohoDetail(),
+      'PUT /connections/c6/zoho/organization': {
+        status: 200,
+        body: {
+          ...demoZoho,
+          zoho: { ...demoZoho.zoho!, organization_name: 'UrbanCart Labs', organizations: [] },
+        },
+      },
+    })
+    renderApp('/connections/c6')
+    expect(await screen.findByLabelText('Read another organisation')).toHaveValue('60010000002')
+    await userEvent.click(screen.getByRole('button', { name: 'Read this organisation' }))
+    expect(await screen.findByText(/Now reading UrbanCart Labs/)).toBeVisible()
+    expect(api.body('PUT /connections/c6/zoho/organization')).toEqual({
+      organization_id: '60010000002',
+    })
+  })
+
+  it('offers to sign in to Zoho again when Zoho stopped sharing data', async () => {
+    const url = 'https://accounts.zoho.in/oauth/v2/auth?state=t'
+    const api = routes({
+      'GET /connections/c6': zohoDetail({
+        status: 'needs_reauth',
+        last_error: 'Zoho Books stopped sharing data. Sign in to Zoho again to reconnect.',
+      }),
+      'POST /connections/zoho/start': { status: 200, body: { authorization_url: url } },
+    })
+    renderApp('/connections/c6')
+    const alert = (await screen.findByText(/Zoho Books stopped sharing data/)).closest(
+      '[role="alert"]',
+    )
+    await userEvent.click(
+      within(alert as HTMLElement).getByRole('button', { name: 'Sign in to Zoho again' }),
+    )
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(url))
+    expect(api.body('POST /connections/zoho/start')).toEqual({ connection_id: 'c6' })
+  })
+
+  it('shows analysts the organisation without the controls', async () => {
+    routes({ 'GET /connections/c6': zohoDetail() })
+    renderApp('/connections/c6', { session: analyst })
+    expect(await screen.findByText(/Organisation UrbanCart/)).toBeVisible()
+    expect(screen.queryByLabelText('Read another organisation')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sign in to Zoho again' })).toBeNull()
+  })
+})
+
+describe('Databases', () => {
+  const open = async () => {
+    renderApp('/connections')
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect a database' }))
+    return screen.findByRole('dialog', { name: 'Connect a database' })
+  }
+
+  it('asks for the details, checks them and opens the new connection', async () => {
+    const api = routes({
+      'POST /connections/database': {
+        status: 201,
+        body: { ...demoDatabase, database: { ...demoDatabase.database!, tables: [] } },
+      },
+      'GET /connections/c7': {
+        status: 200,
+        body: {
+          ...demoDatabaseDetail,
+          datasets: [],
+          database: { ...demoDatabase.database!, tables: [] },
+        },
+      },
+      'GET /connections/c7/database/tables': { status: 200, body: demoDatabaseTables },
+    })
+    const dialog = await open()
+    expect(within(dialog).getByText(/Create a read-only user/)).toBeVisible()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Check and connect' }))
+    expect(within(dialog).getAllByText('Fill this in.')).toHaveLength(4)
+    expect(api.count('POST /connections/database')).toBe(0)
+    await userEvent.type(within(dialog).getByLabelText('Host'), 'db.urbancart.in')
+    await userEvent.type(within(dialog).getByLabelText('Database name'), 'urbancart_demo')
+    await userEvent.type(within(dialog).getByLabelText('User name'), 'analyst_ro')
+    await userEvent.type(within(dialog).getByLabelText('Password'), 'secret-pass')
+    expect(within(dialog).queryByRole('option', { name: /Not encrypted/ })).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Check and connect' }))
+    expect(await screen.findByText(/No tables are chosen yet/)).toBeVisible()
+    expect(api.body('POST /connections/database')).toEqual({
+      engine: 'postgresql',
+      host: 'db.urbancart.in',
+      database: 'urbancart_demo',
+      username: 'analyst_ro',
+      password: 'secret-pass',
+      ssl_mode: 'require',
+    })
+  })
+
+  it('shows the server’s reason when the database is refused', async () => {
+    routes({
+      'POST /connections/database': apiError(
+        422,
+        'database_refused',
+        'This address is private or internal (for example localhost, 10.x, 192.168.x or 169.254.x).',
+      ),
+    })
+    const dialog = await open()
+    await userEvent.type(within(dialog).getByLabelText('Host'), 'localhost')
+    await userEvent.type(within(dialog).getByLabelText('Database name'), 'shop')
+    await userEvent.type(within(dialog).getByLabelText('User name'), 'u')
+    await userEvent.type(within(dialog).getByLabelText('Password'), 'p')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Check and connect' }))
+    expect(await within(dialog).findByText(/private or internal/)).toBeVisible()
+  })
+
+  it('offers unencrypted connections and the demo details only in development', async () => {
+    routes({
+      'GET /connections': {
+        status: 200,
+        body: {
+          ...demoConnectionList,
+          sources: {
+            ...demoConnectionList.sources,
+            database: {
+              available: true,
+              ssl_off_allowed: true,
+              demo_hosts: ['demo-mysql', 'demo-postgres'],
+            },
+          },
+        },
+      },
+    })
+    const dialog = await open()
+    expect(within(dialog).getByRole('option', { name: /Not encrypted/ })).toBeInTheDocument()
+    expect(within(dialog).getByText(/demo-mysql or demo-postgres/)).toBeVisible()
+  })
+
+  it('shows where the database is, the write warning and lets the Owner choose tables', async () => {
+    const api = routes({
+      'GET /connections/c7': { status: 200, body: demoDatabaseDetail },
+      'GET /connections/c7/database/tables': { status: 200, body: demoDatabaseTables },
+      'PUT /connections/c7/database/tables': { status: 200, body: demoDatabase },
+    })
+    renderApp('/connections/c7')
+    expect(await screen.findByText(/PostgreSQL at db.urbancart.in:5432/)).toBeVisible()
+    expect(screen.getByText(/user an••••/)).toBeVisible()
+    expect(screen.getByText(/This database user can change data/)).toBeVisible()
+    const list = await screen.findByRole('list', { name: 'Tables in the database' })
+    expect(within(list).getByLabelText('orders')).toBeChecked()
+    expect(within(list).getByLabelText('monthly_sales')).not.toBeChecked()
+    await userEvent.click(within(list).getByLabelText('monthly_sales'))
+    await userEvent.click(screen.getByRole('button', { name: 'Save tables' }))
+    expect(await screen.findByText(/Reading the chosen tables now/)).toBeVisible()
+    expect(api.body('PUT /connections/c7/database/tables')).toEqual({
+      tables: ['public.orders', 'public.customers', 'public.monthly_sales'],
+    })
+  })
+
+  it('asks for the credentials again when the database refuses them', async () => {
+    const api = routes({
+      'GET /connections/c7': {
+        status: 200,
+        body: {
+          ...demoDatabaseDetail,
+          status: 'needs_reauth',
+          last_error:
+            'The database did not accept the user name or password. Enter the credentials again.',
+        },
+      },
+      'GET /connections/c7/database/tables': { status: 200, body: demoDatabaseTables },
+      'PUT /connections/c7/database/credentials': { status: 200, body: demoDatabase },
+    })
+    renderApp('/connections/c7')
+    const alert = (await screen.findByText(/did not accept the user name/)).closest(
+      '[role="alert"]',
+    )
+    await userEvent.click(
+      within(alert as HTMLElement).getByRole('button', { name: 'Enter the credentials again' }),
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'Replace the database credentials' })
+    expect(within(dialog).getByLabelText('Host')).toHaveValue('db.urbancart.in')
+    expect(within(dialog).getByLabelText('Database')).toBeDisabled()
+    await userEvent.type(within(dialog).getByLabelText('User name'), 'analyst_ro')
+    await userEvent.type(within(dialog).getByLabelText('Password'), 'new-pass')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Check and save' }))
+    expect(await screen.findByText(/The new credentials work/)).toBeVisible()
+    expect(api.body('PUT /connections/c7/database/credentials')).toMatchObject({
+      engine: 'postgresql',
+      host: 'db.urbancart.in',
+      port: 5432,
+      ssl_mode: 'verify-full',
+      password: 'new-pass',
+    })
+  })
+
+  it('shows analysts the database without the controls', async () => {
+    routes({ 'GET /connections/c7': { status: 200, body: demoDatabaseDetail } })
+    renderApp('/connections/c7', { session: analyst })
+    expect(await screen.findByText(/PostgreSQL at db.urbancart.in/)).toBeVisible()
+    expect(screen.queryByRole('list', { name: 'Tables in the database' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Replace credentials' })).toBeNull()
   })
 })

@@ -34,10 +34,12 @@ from app.security.redaction import Redactor
 from tests.conftest import FakeClock
 from tests.datasources import (
     csv_bytes,
+    make_database_connection,
     make_file_connection,
     make_razorpay_connection,
     make_sheets_connection,
     make_shopify_connection,
+    make_zoho_connection,
     upload,
 )
 from tests.recorded_google import REFRESH_TOKEN, RecordedGoogle
@@ -60,10 +62,31 @@ class TestReadOnly:
             "google_sheets": make_sheets_connection,
             "razorpay": make_razorpay_connection,
             "shopify": make_shopify_connection,
+            "zoho_books": make_zoho_connection,
+            "sql_database": make_database_connection,
         }
         connection = makers[kind](db, runtime, world.org_a.id)
         scope_to_org(db, world.org_a.id)
         connector = build_connector(db, connection, runtime, timezone="Asia/Kolkata")
+        if kind == "sql_database":
+            # No HTTP: the session is read-only and every statement passes the SELECT-only guard (D100).
+            from app.connectors.sql_database import SqlDatabaseConnector
+            from app.security.sql_guard import UnsafeSql
+
+            assert isinstance(connector, SqlDatabaseConnector)
+            for sql in (
+                "DELETE FROM public.orders",
+                "UPDATE public.orders SET amount = 0",
+                "INSERT INTO public.orders (id) VALUES (1)",
+                "DROP TABLE public.orders",
+                "TRUNCATE public.orders",
+                "SELECT * FROM public.orders FOR UPDATE",
+                "SET TRANSACTION READ WRITE",
+            ):
+                with pytest.raises(UnsafeSql):
+                    connector.query(sql, max_rows=5)
+            connector.close()
+            return
         http = getattr(connector, "_http", None)
         if http is None:
             # Files: the connector has no network client and no way to write. The stored original is unchanged

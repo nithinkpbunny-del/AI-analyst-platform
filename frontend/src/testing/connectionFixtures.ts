@@ -140,6 +140,172 @@ export const demoShopify: Connection = {
   },
 }
 
+export const demoZoho: Connection = {
+  id: 'c6',
+  type: 'zoho_books',
+  name: 'Zoho Books (UrbanCart)',
+  status: 'active',
+  sync_state: 'idle',
+  last_success_at: '2026-10-30T04:30:00+00:00',
+  last_error: null,
+  created_at: '2026-10-30T04:25:00+00:00',
+  created_by_name: 'Asha Rao',
+  datasets_count: 7,
+  rows_total: 4_376,
+  warnings_count: 0,
+  file: null,
+  google: null,
+  zoho: {
+    region: 'in',
+    region_name: 'India',
+    organization_id: '60010000001',
+    organization_name: 'UrbanCart',
+    currency: 'INR',
+    organizations: [{ id: '60010000002', name: 'UrbanCart Labs' }],
+    calls_today: 57,
+    daily_limit: 1000,
+  },
+}
+
+const zohoColumn = (name: string, type: string, unit: string | null = null) => ({
+  name,
+  label: name,
+  type,
+  unit,
+  date_format: type === 'date' ? 'ISO 8601' : null,
+})
+
+export const demoZohoDetail: ConnectionDetail = {
+  ...demoZoho,
+  datasets: [
+    {
+      id: 'z1',
+      name: 'invoices',
+      row_count: 3_759,
+      columns: [
+        zohoColumn('invoice_number', 'text'),
+        zohoColumn('date', 'date'),
+        zohoColumn('due_date', 'date'),
+        zohoColumn('status', 'text'),
+        zohoColumn('total', 'number', 'INR'),
+        zohoColumn('balance', 'number', 'INR'),
+      ],
+      last_fetched_at: '2026-10-30T04:30:00+00:00',
+      quality: [],
+      last_error: null,
+    },
+    {
+      id: 'z2',
+      name: 'expenses',
+      row_count: 315,
+      columns: [
+        zohoColumn('date', 'date'),
+        zohoColumn('account_name', 'text'),
+        zohoColumn('total', 'number', 'INR'),
+      ],
+      last_fetched_at: '2026-10-30T04:30:00+00:00',
+      quality: [],
+      last_error: null,
+    },
+    {
+      id: 'z3',
+      name: 'profit and loss',
+      row_count: 147,
+      columns: [
+        zohoColumn('month', 'date'),
+        zohoColumn('section', 'text'),
+        zohoColumn('account_name', 'text'),
+        zohoColumn('amount', 'number', 'INR'),
+      ],
+      last_fetched_at: '2026-10-30T04:30:00+00:00',
+      quality: [],
+      last_error: null,
+    },
+  ],
+  versions: [],
+}
+
+export const demoDatabase: Connection = {
+  id: 'c7',
+  type: 'sql_database',
+  name: 'PostgreSQL (urbancart_demo)',
+  status: 'active',
+  sync_state: 'idle',
+  last_success_at: '2026-10-30T04:30:00+00:00',
+  last_error: null,
+  created_at: '2026-10-30T04:25:00+00:00',
+  created_by_name: 'Asha Rao',
+  datasets_count: 2,
+  rows_total: 31_540,
+  warnings_count: 0,
+  file: null,
+  google: null,
+  database: {
+    engine: 'postgresql',
+    host: 'db.urbancart.in',
+    port: 5432,
+    database: 'urbancart_demo',
+    username_masked: 'an••••',
+    ssl_mode: 'verify-full',
+    tables: ['public.orders', 'public.customers'],
+    can_write: true,
+    write_reasons: ['rows'],
+    server_version: 'PostgreSQL 16.4',
+  },
+}
+
+export const demoDatabaseDetail: ConnectionDetail = {
+  ...demoDatabase,
+  datasets: [
+    {
+      id: 'b1',
+      name: 'orders',
+      row_count: 28_540,
+      columns: [
+        zohoColumn('id', 'integer'),
+        zohoColumn('created_at', 'datetime'),
+        zohoColumn('shipping_region', 'text'),
+        zohoColumn('total_price', 'number', 'INR'),
+      ],
+      last_fetched_at: '2026-10-30T04:30:00+00:00',
+      quality: [],
+      last_error: null,
+    },
+    {
+      id: 'b2',
+      name: 'customers',
+      row_count: 3_000,
+      columns: [zohoColumn('id', 'integer'), zohoColumn('segment', 'text')],
+      last_fetched_at: '2026-10-30T04:30:00+00:00',
+      quality: [],
+      last_error: null,
+    },
+  ],
+  versions: [],
+}
+
+export const demoDatabaseTables = {
+  max_tables: 100,
+  tables: [
+    {
+      ref: 'public.customers',
+      name: 'customers',
+      kind: 'table',
+      rows_estimate: 3_000,
+      chosen: true,
+    },
+    {
+      ref: 'public.monthly_sales',
+      name: 'monthly_sales',
+      kind: 'view',
+      rows_estimate: null,
+      chosen: false,
+    },
+    { ref: 'public.orders', name: 'orders', kind: 'table', rows_estimate: 28_540, chosen: true },
+    { ref: 'public.products', name: 'products', kind: 'table', rows_estimate: 40, chosen: false },
+  ],
+} as const
+
 export const demoConnectionList: ConnectionList = {
   connections: [demoOrders, demoMarketing, demoTargets],
   sources: {
@@ -147,6 +313,8 @@ export const demoConnectionList: ConnectionList = {
     google_sheets: { available: true, stand_in: false },
     razorpay: { available: true, stand_in: false },
     shopify: { available: true, stand_in: false },
+    zoho_books: { available: true, stand_in: false, region: 'in' },
+    database: { available: true, ssl_off_allowed: false, demo_hosts: [] },
   },
 }
 

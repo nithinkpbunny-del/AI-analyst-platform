@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agent import answer as answers
-from app.agent.tools import SPECS, ToolContext, execute
+from app.agent.tools import ToolContext, execute, specs
 from app.llm.base import (
     AssistantMessage,
     LLMClient,
@@ -68,8 +68,8 @@ class Limits:
     max_output_tokens: int = 3000
 
 
-def _tool_specs(final: bool) -> list[ToolSpec]:
-    return [answers.ANSWER_TOOL] if final else [*SPECS.values(), answers.ANSWER_TOOL]
+def _tool_specs(final: bool, ctx: ToolContext) -> list[ToolSpec]:
+    return [answers.ANSWER_TOOL] if final else [*specs(ctx), answers.ANSWER_TOOL]
 
 
 def run(
@@ -104,7 +104,7 @@ def run(
         ctx.progress({"code": "thinking"} if outcome.calls == 0 else {"code": "working"})
         try:
             response = client.generate(
-                system, messages, _tool_specs(final), limits.max_output_tokens
+                system, messages, _tool_specs(final, ctx), limits.max_output_tokens
             )
         except LLMError as error:
             switched = outcome.models and client.model not in outcome.models

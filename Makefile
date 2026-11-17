@@ -25,6 +25,7 @@ dev: env ## Build and start every service in the background, wait until healthy
 	@echo "  API              http://localhost:8000   (docs: /docs, health: /health, readiness: /health/ready)"
 	@echo "  Emails (Mailpit) http://localhost:8025"
 	@echo "  File storage     http://localhost:9001   (console, log in with S3_ACCESS_KEY / S3_SECRET_KEY)"
+	@echo "  Demo databases   127.0.0.1:5433 (PostgreSQL), 127.0.0.1:3307 (MySQL); docs/SETUP_DATABASES.md"
 	@echo ""
 	@echo "Follow logs with 'make logs'. Stop with 'make down'."
 

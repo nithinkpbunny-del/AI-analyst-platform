@@ -93,6 +93,29 @@ class Settings(BaseSettings):
     shopify_bulk_threshold: int = Field(default=1000, ge=1)
     shopify_bulk_timeout_seconds: int = Field(default=900, ge=10)
 
+    # --- Zoho Books connector (M13; docs/SETUP_ZOHO.md) ---
+    # The app's client id and secret are ``zoho_client_id`` / ``zoho_client_secret`` below. Without them,
+    # development uses a local stand-in organisation; anywhere else Zoho Books stays off.
+    # Zoho data centre for sign-in: in (India, default), com, eu, com.au, jp, ca, sa. People whose Zoho account
+    # lives in another data centre are sent back with theirs and it is used for them.
+    zoho_region: Literal["in", "com", "eu", "com.au", "jp", "ca", "sa"] = "in"
+    # Read scopes only; anything that is not ZohoBooks.<module>.READ is dropped. Empty = the defaults.
+    zoho_scopes: str = ""
+    # How far back the first read of invoices, bills and expenses goes; months of profit and loss read.
+    zoho_history_days: int = Field(default=730, ge=1, le=3650)
+    zoho_report_months: int = Field(default=24, ge=1, le=60)
+    # Zoho's daily API calls per organisation for your plan (1,000 on Free; Standard 2,000; Professional 5,000;
+    # Premium and above 10,000). Reading stops at 90% of it and the stored copy is used until tomorrow.
+    zoho_daily_call_limit: int = Field(default=1000, ge=10)
+
+    # --- PostgreSQL / MySQL connector (M14; docs/SETUP_DATABASES.md) ---
+    # Development only: host names of the local demo databases that may be private addresses. Everywhere else
+    # private and internal addresses (localhost, 10.x, 192.168.x, 169.254.x, the Docker network) are refused.
+    db_dev_allowed_hosts: str = "demo-postgres,demo-mysql"
+    db_connect_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    # Rows read from the database per round trip while a table is read in chunks.
+    db_fetch_chunk_rows: int = Field(default=10_000, ge=100, le=100_000)
+
     # --- AI ---
     llm_default_provider: Literal["gemini", "claude"] = "gemini"
     gemini_api_key: SecretStr = SecretStr("")

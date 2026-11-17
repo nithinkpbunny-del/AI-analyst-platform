@@ -42,7 +42,7 @@ NOT_MONEY_NAME = re.compile(
 CURRENCY_COLUMN = re.compile(r"^(currency|currency_code|curr)$", re.IGNORECASE)
 RUPEE_VALUES = frozenset({"inr", "₹", "rs", "rs.", "rupee", "rupees"})
 PII_NAME = re.compile(
-    r"(email|e_mail|phone|mobile|contact_no|first_name|last_name|full_name|customer_name|"
+    r"(email|e_mail|phone|mobile|contact_no|first_name|last_name|full_name|customer_name|contact_name|"
     r"address|street|gstin|aadhaar|aadhar|(^|_)pan($|_)|vpa|(^|_)card($|_)|ip_address|password)",
     re.IGNORECASE,
 )

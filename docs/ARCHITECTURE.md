@@ -84,13 +84,16 @@ flowchart LR
   tables as datasets and fetches one as a typed table. Network access goes through `ReadOnlyHttpClient` (GET, plus
   POST to allow-listed endpoints only: OAuth token endpoints and, for Shopify, the GraphQL endpoint, whose request
   bodies a `post_guard` parses so that no mutation leaves the process, D93). Files, Google Sheets, Razorpay (M11) and
-  Shopify (M12: OAuth, GraphQL queries, bulk exports for large first reads, D92-D95) exist; Zoho, databases and
-  Tally follow in Phase 2/3.
+  Shopify (M12: OAuth, GraphQL queries, bulk exports for large first reads, D92-D95) and Zoho Books (M13: region-aware
+  OAuth, read scopes, per-organisation daily call quota with the stored copy used near the limit, P&L report,
+  D96-D98) and PostgreSQL/MySQL (M14: read-only in four layers, public addresses only, SSL by default, chosen
+  tables, push-down `query_source`, D100-D102) exist; Tally follows in Phase 3.
 - **Typed tables** (`connectors/tabular.py`): header detection, Indian dates and amounts, units, type per column.
 - **Cache** (`data/cache.py`): reuse a Parquet snapshot within `CACHE_TTL_SECONDS`; afterwards ask the source for
   its version and keep the snapshot if unchanged; fetch incrementally where supported; otherwise read everything.
   A Redis lock prevents duplicate reads. Snapshots live in object storage under `orgs/<org>/` and expire after
-  `SNAPSHOT_MAX_AGE_HOURS` (beat purge).
+  `SNAPSHOT_MAX_AGE_HOURS` (beat purge). A source at its own usage limit (`ConnectorError.stale_ok`, Zoho) gets the
+  stored snapshot whatever its age (D97).
 - **Quality** (`data/quality.py`) runs on every new snapshot; findings travel with the dataset.
 - **Access** (`connectors/access.py`): Owners see every connection; others see all or only their grants. The agent
   will use the same function.

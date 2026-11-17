@@ -10,6 +10,9 @@ import {
   demoConnectionList,
   demoOrdersDetail,
   demoDatasetPreview,
+  demoZohoDetail,
+  demoDatabaseDetail,
+  demoDatabaseTables,
 } from '../testing/connectionFixtures'
 import { dark, phone } from './variants'
 
@@ -19,6 +22,9 @@ const replies: Record<string, unknown> = {
   '/connections/access': { people: demoAccess },
   '/connections/c1': demoOrdersDetail,
   '/connections/c1/datasets/d1/preview': demoDatasetPreview,
+  '/connections/c6': demoZohoDetail,
+  '/connections/c7': demoDatabaseDetail,
+  '/connections/c7/database/tables': demoDatabaseTables,
 }
 
 function mockFetch() {
@@ -69,3 +75,7 @@ export const ConnectionsForAnalysts: Story = { args: { analyst: true } }
 export const Connection: Story = { args: { path: '/connections/c1' } }
 export const ConnectionDark: Story = { args: { path: '/connections/c1' }, ...dark }
 export const ConnectionPhone: Story = { args: { path: '/connections/c1' }, ...phone }
+export const ZohoBooksConnection: Story = { args: { path: '/connections/c6' } }
+export const ZohoBooksConnectionPhone: Story = { args: { path: '/connections/c6' }, ...phone }
+export const DatabaseConnection: Story = { args: { path: '/connections/c7' } }
+export const DatabaseConnectionPhone: Story = { args: { path: '/connections/c7' }, ...phone }

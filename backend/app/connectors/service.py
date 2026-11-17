@@ -15,7 +15,7 @@ Choosing a version (a reviewed upload, or switching back to an earlier one) runs
 ``accept_changes=True``.
 
 ``remove_connection`` deletes everything a connection owns at once: snapshots and uploaded files in storage,
-its secret, the Google token at Google (best effort), and the rows (DPDP: "disconnecting deletes its snapshots
+its secret, the Google or Zoho token at the source (best effort), and the rows (DPDP: "disconnecting deletes its snapshots
 and secrets immediately").
 """
 
@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from app.connectors import zoho_books
 from app.connectors.base import Connector, ConnectorError, DatasetInfo, FetchResult
 from app.connectors.google_sheets import revoke
 from app.connectors.registry import (
@@ -426,6 +427,22 @@ def remove_connection(db: DbSession, rt: ConnectorRuntime, connection: Connectio
                 http.close()
         except Exception:  # never block removal on Google
             logger.warning("could not revoke the Google token of a removed connection")
+    if connection.type == "zoho_books" and secret_ref is not None and rt.zoho.available:
+        region = str(connection.config.get("region") or "")
+        try:
+            token = rt.secrets.reveal(
+                db,
+                org_id=connection.org_id,
+                secret_id=secret_ref,
+                purpose=SECRET_PURPOSES["zoho_books"],
+            )
+            http = rt.zoho.http(region)
+            try:
+                zoho_books.revoke(rt.zoho, http, region=region, refresh_token=token)
+            finally:
+                http.close()
+        except Exception:  # never block removal on Zoho
+            logger.warning("could not revoke the Zoho token of a removed connection")
     db.delete(connection)
     db.flush()
     if secret_ref is not None:

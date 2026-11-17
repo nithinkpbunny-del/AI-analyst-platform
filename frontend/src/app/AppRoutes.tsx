@@ -15,10 +15,6 @@ import { SecureAccountPage } from '../features/auth/SecureAccountPage'
 import { SignInPage } from '../features/auth/SignInPage'
 import { SignUpPage } from '../features/auth/SignUpPage'
 import { LoginSetupPage, RequiredSetupPage, TwoFactorPage } from '../features/auth/TwoFactorPages'
-import { ConnectionDetailPage } from '../features/connections/ConnectionDetailPage'
-import { ConnectionsPage } from '../features/connections/ConnectionsPage'
-import { GoogleReturnPage as SheetsReturnPage } from '../features/connections/GoogleReturnPage'
-import { DictionaryPage } from '../features/dictionary/DictionaryPage'
 import { PlaceholderPage } from '../features/placeholder/PlaceholderPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { TeamPage } from '../features/team/TeamPage'
@@ -31,6 +27,26 @@ const ShopifyReturnPage = lazy(() =>
   import('../features/connections/ShopifyReturnPage').then((m) => ({
     default: m.ShopifyReturnPage,
   })),
+)
+const ZohoReturnPage = lazy(() =>
+  import('../features/connections/ZohoReturnPage').then((m) => ({ default: m.ZohoReturnPage })),
+)
+// M13: the Connections and Dictionary screens load on first visit, with their strings (DECISIONS D99).
+const ConnectionsPage = lazy(() =>
+  import('../features/connections/ConnectionsPage').then((m) => ({ default: m.ConnectionsPage })),
+)
+const ConnectionDetailPage = lazy(() =>
+  import('../features/connections/ConnectionDetailPage').then((m) => ({
+    default: m.ConnectionDetailPage,
+  })),
+)
+const SheetsReturnPage = lazy(() =>
+  import('../features/connections/GoogleReturnPage').then((m) => ({
+    default: m.GoogleReturnPage,
+  })),
+)
+const DictionaryPage = lazy(() =>
+  import('../features/dictionary/DictionaryPage').then((m) => ({ default: m.DictionaryPage })),
 )
 const WhatIfPage = lazy(() =>
   import('../features/whatif/WhatIfPage').then((m) => ({ default: m.WhatIfPage })),
@@ -163,9 +179,30 @@ export function AppRoutes() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/activity" element={<ActivityPage />} />
-          <Route path="/connections" element={<ConnectionsPage />} />
-          <Route path="/dictionary" element={<DictionaryPage />} />
-          <Route path="/connections/google/return" element={<SheetsReturnPage />} />
+          <Route
+            path="/connections"
+            element={
+              <Lazy>
+                <ConnectionsPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/dictionary"
+            element={
+              <Lazy>
+                <DictionaryPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/connections/google/return"
+            element={
+              <Lazy>
+                <SheetsReturnPage />
+              </Lazy>
+            }
+          />
           <Route
             path="/connections/shopify/return"
             element={
@@ -174,7 +211,22 @@ export function AppRoutes() {
               </Lazy>
             }
           />
-          <Route path="/connections/:connectionId" element={<ConnectionDetailPage />} />
+          <Route
+            path="/connections/zoho/return"
+            element={
+              <Lazy>
+                <ZohoReturnPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/connections/:connectionId"
+            element={
+              <Lazy>
+                <ConnectionDetailPage />
+              </Lazy>
+            }
+          />
           <Route path="*" element={<Navigate to="/today" replace />} />
         </Route>
       </Route>

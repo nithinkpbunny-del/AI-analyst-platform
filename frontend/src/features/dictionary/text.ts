@@ -1,3 +1,4 @@
+import './strings'
 import type { TFunction } from 'i18next'
 import { ApiError } from '../../lib/api'
 import type {

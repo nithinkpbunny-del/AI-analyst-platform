@@ -1,3 +1,4 @@
+import '../features/connections/strings'
 import { LoaderCircle, TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'

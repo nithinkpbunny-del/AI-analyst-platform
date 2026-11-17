@@ -12,6 +12,8 @@ from app.connectors.google_sheets import default_setup
 from app.connectors.razorpay import default_setup as razorpay_setup
 from app.connectors.registry import ConnectorRuntime
 from app.connectors.shopify import default_setup as shopify_setup
+from app.connectors.sql_database import default_setup as database_setup
+from app.connectors.zoho_books import default_setup as zoho_setup
 from app.data.objects import S3ObjectStore
 from app.db.session import make_engine, make_session_factory
 from app.email.sender import SmtpEmailSender
@@ -34,6 +36,8 @@ def worker_runtime() -> ConnectorRuntime:  # pragma: no cover - exercised by the
         google=default_setup(settings),
         razorpay=razorpay_setup(settings),
         shopify=shopify_setup(settings),
+        zoho=zoho_setup(settings),
+        database=database_setup(settings),
         clock=_utc_now,
         email=SmtpEmailSender(settings),
     )

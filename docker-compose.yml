@@ -1,4 +1,5 @@
-# Local development stack: api, worker, beat, web, postgres, redis, storage (S3), mailpit.
+# Local development stack: api, worker, beat, web, postgres, redis, storage (S3), mailpit, and two demo customer
+# databases (demo-postgres, demo-mysql) for "Connect a database" (M14, development only).
 # Start it with "make dev" (which first derives .compose.env from your .env). Do not run "docker compose up"
 # directly: the Postgres credentials and container URLs come from .compose.env.
 #
@@ -118,6 +119,48 @@ services:
     depends_on:
       - storage
     command: python -m app.storage
+
+  # M14, development only: demo customer databases with the UrbanCart demo data (make fixtures first). The app
+  # reaches them by these service names, which DB_DEV_ALLOWED_HOSTS allows in development (private addresses are
+  # refused everywhere else). Demo passwords for local containers, documented in docs/SETUP_DATABASES.md.
+  demo-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: demo_owner
+      POSTGRES_PASSWORD: demo-owner-pass
+      POSTGRES_DB: urbancart_demo
+    volumes:
+      - ./scripts/demo_db/postgres:/docker-entrypoint-initdb.d:ro
+      - ./eval/fixtures:/fixtures:ro
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo_owner -d urbancart_demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  demo-mysql:
+    image: mysql:8.4
+    # LOAD DATA reads the demo files: an empty value lifts the file-path limit inside this demo container only
+    # (MySQL's entrypoint would otherwise try to take ownership of the read-only /fixtures folder).
+    command: --secure-file-priv=
+    environment:
+      MYSQL_ROOT_PASSWORD: demo-root-pass
+      MYSQL_DATABASE: urbancart_demo
+      MYSQL_USER: demo_owner
+      MYSQL_PASSWORD: demo-owner-pass
+    volumes:
+      - ./scripts/demo_db/mysql:/docker-entrypoint-initdb.d:ro
+      - ./eval/fixtures:/fixtures:ro
+    ports:
+      - "127.0.0.1:3307:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pdemo-root-pass --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
 
   mailpit:
     image: axllent/mailpit:latest

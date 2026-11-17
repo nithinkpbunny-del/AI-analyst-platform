@@ -1,3 +1,4 @@
+import './strings'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BookOpen, Download, LoaderCircle } from 'lucide-react'
 import { useState, type ReactNode } from 'react'

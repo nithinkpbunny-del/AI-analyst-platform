@@ -20,6 +20,9 @@ from app.models import Connection, FileVersion
 from tests.recorded_google import ACCOUNT, REFRESH_TOKEN, SHEET_ID
 from tests.recorded_razorpay import KEY_ID, KEY_SECRET
 from tests.recorded_shopify import SHOP, TOKEN
+from tests.recorded_zoho import ORG_ID as ZOHO_ORG_ID
+from tests.recorded_zoho import OTHER_ORG_ID as ZOHO_OTHER_ORG_ID
+from tests.recorded_zoho import REFRESH_TOKEN as ZOHO_REFRESH_TOKEN
 
 SALES_CSV = (
     "UrbanCart outlet sales\n"
@@ -199,6 +202,93 @@ def make_shopify_connection(
         name=name,
         status="active",
         config={"shop": shop, "shop_name": "UrbanCart", "currency": "INR", "scopes": list(scopes)},
+        secret_ref=secret.id,
+        sync_state="idle",
+    )
+    db.add(connection)
+    db.commit()
+    if sync:
+        service.sync_connection(runtime, org_id=org_id, connection_id=connection.id)
+        db.expire_all()
+    return connection
+
+
+def make_zoho_connection(
+    db: DbSession,
+    runtime: ConnectorRuntime,
+    org_id: uuid.UUID,
+    *,
+    token: str = ZOHO_REFRESH_TOKEN,
+    organization_id: str = ZOHO_ORG_ID,
+    name: str = "Zoho Books (UrbanCart)",
+    org_names: tuple[str, str] = ("UrbanCart", "UrbanCart Labs"),
+    sync: bool = True,
+) -> Connection:
+    secret = runtime.secrets.put(
+        db, org_id=org_id, purpose=SECRET_PURPOSES["zoho_books"], value=token
+    )
+    connection = Connection(
+        org_id=org_id,
+        type="zoho_books",
+        name=name,
+        status="active",
+        config={
+            "region": "in",
+            "api_domain": "https://www.zohoapis.in",
+            "organization_id": organization_id,
+            "organization_name": org_names[0],
+            "currency": "INR",
+            "organizations": [
+                {"id": ZOHO_ORG_ID, "name": org_names[0]},
+                {"id": ZOHO_OTHER_ORG_ID, "name": org_names[1]},
+            ],
+            "daily_limit": 1000,
+        },
+        secret_ref=secret.id,
+        sync_state="idle",
+    )
+    db.add(connection)
+    db.commit()
+    if sync:
+        service.sync_connection(runtime, org_id=org_id, connection_id=connection.id)
+        db.expire_all()
+    return connection
+
+
+def make_database_connection(
+    db: DbSession,
+    runtime: ConnectorRuntime,
+    org_id: uuid.UUID,
+    *,
+    engine: str = "postgresql",
+    tables: Sequence[str] = ("public.orders",),
+    username: str = "m14_reader",
+    password: str = "reader-pass-0001",  # noqa: S107 (the test container's demo user)
+    name: str = "PostgreSQL (customer_demo)",
+    sync: bool = True,
+) -> Connection:
+    """A database connection to the test container (PostgreSQL, through ``db.example.com``) or the fake MySQL."""
+    secret = runtime.secrets.put(
+        db, org_id=org_id, purpose=SECRET_PURPOSES["sql_database"], value=password
+    )
+    mysql = engine == "mysql"
+    connection = Connection(
+        org_id=org_id,
+        type="sql_database",
+        name=name,
+        status="active",
+        config={
+            "engine": engine,
+            "host": "mysql.example.com" if mysql else "db.example.com",
+            "port": 3306 if mysql else 5432,
+            "database": "shop" if mysql else "customer_demo",
+            "username": username,
+            "ssl_mode": "require",
+            "tables": list(tables),
+            "can_write": False,
+            "write_reasons": [],
+            "server_version": None,
+        },
         secret_ref=secret.id,
         sync_state="idle",
     )

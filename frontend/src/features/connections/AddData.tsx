@@ -1,5 +1,14 @@
+import './strings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CreditCard, FileSpreadsheet, Sheet, ShoppingBag, Upload } from 'lucide-react'
+import {
+  BookOpenCheck,
+  CreditCard,
+  Database,
+  FileSpreadsheet,
+  Sheet,
+  ShoppingBag,
+  Upload,
+} from 'lucide-react'
 import { lazy, Suspense, useId, useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormAlert } from '../../components/FormAlert'
@@ -12,6 +21,10 @@ import { CONNECTIONS, fileProblem } from './keys'
 // The key form loads when first opened: the Connections screen is part of the app's first load.
 const RazorpayDialog = lazy(() =>
   import('./RazorpayDialog').then((m) => ({ default: m.RazorpayDialog })),
+)
+
+const DatabaseDialog = lazy(() =>
+  import('./DatabaseDialog').then((m) => ({ default: m.DatabaseDialog })),
 )
 
 const ShopifyDialog = lazy(() =>
@@ -100,7 +113,9 @@ export function AddData({ sources }: { sources: Sources }) {
   const [uploading, setUploading] = useState<string | null>(null)
   const [razorpayOpen, setRazorpayOpen] = useState(false)
   const [shopifyOpen, setShopifyOpen] = useState(false)
+  const [databaseOpen, setDatabaseOpen] = useState(false)
   const shopify = sources.shopify
+  const zoho = sources.zoho_books ?? { available: false, stand_in: false, region: 'in' }
   const upload = useMutation({
     mutationFn: (file: File) => uploadFile(file),
     onMutate: (file) => {
@@ -118,6 +133,12 @@ export function AddData({ sources }: { sources: Sources }) {
   })
   const google = useMutation({
     mutationFn: () => connectionsApi.googleStart(),
+    onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
+    onError: (error) =>
+      setNotice({ tone: 'error', text: errorText(error, t('connections.loadFailed')) }),
+  })
+  const zohoStart = useMutation({
+    mutationFn: () => connectionsApi.zohoStart(),
     onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
     onError: (error) =>
       setNotice({ tone: 'error', text: errorText(error, t('connections.loadFailed')) }),
@@ -214,7 +235,51 @@ export function AddData({ sources }: { sources: Sources }) {
             </p>
           </div>
         </div>
+        <div className="flex flex-col gap-3">
+          <h3 className="flex items-center gap-2 font-sans text-body font-semibold tracking-normal">
+            <BookOpenCheck className="size-5 text-neel" aria-hidden strokeWidth={1.5} />
+            {t('connections.add.zohoTitle')}
+          </h3>
+          <div className="flex flex-col items-start gap-2">
+            <Button
+              disabled={!zoho.available || zohoStart.isPending || zohoStart.isSuccess}
+              onClick={() => zohoStart.mutate()}
+            >
+              {zohoStart.isPending || zohoStart.isSuccess
+                ? t('connections.add.zohoOpening')
+                : t('connections.add.connectZoho')}
+            </Button>
+            <p className="m-0 text-caption text-ink-muted">
+              {!zoho.available
+                ? t('connections.add.zohoOff')
+                : zoho.stand_in
+                  ? t('connections.add.zohoStandIn')
+                  : t('connections.add.zohoHint')}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-3">
+          <h3 className="flex items-center gap-2 font-sans text-body font-semibold tracking-normal">
+            <Database className="size-5 text-neel" aria-hidden strokeWidth={1.5} />
+            {t('connections.add.databaseTitle')}
+          </h3>
+          <div className="flex flex-col items-start gap-2">
+            <Button onClick={() => setDatabaseOpen(true)}>
+              {t('connections.add.connectDatabase')}
+            </Button>
+            <p className="m-0 text-caption text-ink-muted">
+              {sources.database?.demo_hosts.length
+                ? t('connections.add.databaseDemo')
+                : t('connections.add.databaseHint')}
+            </p>
+          </div>
+        </div>
       </div>
+      {databaseOpen ? (
+        <Suspense fallback={null}>
+          <DatabaseDialog open={databaseOpen} onOpenChange={setDatabaseOpen} sources={sources} />
+        </Suspense>
+      ) : null}
       {shopifyOpen ? (
         <Suspense fallback={null}>
           <ShopifyDialog open={shopifyOpen} onOpenChange={setShopifyOpen} />

@@ -302,6 +302,16 @@ const connectionScreens = {
     // The button is low on the page; a full-page capture of a scrolled page misplaces the sticky sidebar.
     await page.evaluate(() => window.scrollTo(0, 0))
   },
+  // M13: a Zoho Books connection (organisation, data centre, API calls, switching organisation).
+  'connection-zoho': async (page: Page) => {
+    await open(page, '/connections/c6')
+    await page.getByLabel('Read another organisation').waitFor()
+  },
+  // M14: a database connection (where it is, the write warning, choosing tables).
+  'connection-database': async (page: Page) => {
+    await open(page, '/connections/c7')
+    await page.getByRole('list', { name: 'Tables in the database' }).waitFor()
+  },
   'connections-analyst': async (page: Page) => {
     await open(page, '/connections', { refresh: analystSession })
     await page.getByRole('article', { name: 'UrbanCart orders' }).waitFor()

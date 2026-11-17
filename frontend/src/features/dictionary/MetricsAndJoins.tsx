@@ -1,3 +1,4 @@
+import './strings'
 import { Check, CircleAlert, CircleCheck, CircleHelp, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'

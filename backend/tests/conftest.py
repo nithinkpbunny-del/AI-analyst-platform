@@ -64,6 +64,9 @@ from app.connectors.razorpay import RazorpaySetup  # noqa: E402
 from app.connectors.registry import ConnectorRuntime  # noqa: E402
 from app.connectors.shopify import ShopifySetup  # noqa: E402
 from app.connectors.shopify_stand_in import StandInShopifyTransport, sample_data  # noqa: E402
+from app.connectors.sql_database import DatabaseSetup  # noqa: E402
+from app.connectors.zoho_books import ZohoSetup  # noqa: E402
+from app.connectors.zoho_stand_in import StandInZohoTransport  # noqa: E402
 from app.data.objects import MemoryObjectStore  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import make_engine, make_session_factory  # noqa: E402
@@ -72,10 +75,18 @@ from app.llm.fake import FakeLLMFactory  # noqa: E402
 from app.llm.models import CATALOG  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.security.secrets import SecretStore, key_wrapper  # noqa: E402
+from tests.customer_db import (  # noqa: E402
+    CustomerDb,
+    FakeMySql,
+    customer_db,  # noqa: F401 (a session fixture)
+)
+from tests.customer_db import database_setup as customer_database_setup  # noqa: E402
 from tests.recorded_google import RecordedGoogle, recorded_setup  # noqa: E402
 from tests.recorded_razorpay import FakeRazorpay  # noqa: E402
 from tests.recorded_razorpay import setup as razorpay_test_setup  # noqa: E402
 from tests.recorded_shopify import shopify_test_setup  # noqa: E402
+from tests.recorded_zoho import fake_zoho as new_fake_zoho  # noqa: E402
+from tests.recorded_zoho import zoho_test_setup  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -221,6 +232,29 @@ def shopify_setup(fake_shopify: StandInShopifyTransport) -> ShopifySetup:
 
 
 @pytest.fixture
+def fake_zoho() -> StandInZohoTransport:
+    """Zoho's accounts server and Books API, answered by the stand-in from a small sample organisation."""
+    return new_fake_zoho()
+
+
+@pytest.fixture
+def zoho_setup(fake_zoho: StandInZohoTransport) -> ZohoSetup:
+    return zoho_test_setup(fake_zoho)
+
+
+@pytest.fixture
+def fake_mysql() -> FakeMySql:
+    """A customer's MySQL database, answered from memory (catalog) and DuckDB (data)."""
+    return FakeMySql()
+
+
+@pytest.fixture
+def database_setup(customer_db: CustomerDb, fake_mysql: FakeMySql) -> DatabaseSetup:  # noqa: F811
+    """Production rules (public addresses only, SSL required) in front of the test container and the fake MySQL."""
+    return customer_database_setup(customer_db, fake_mysql)
+
+
+@pytest.fixture
 def runtime(
     settings: Settings,
     session_factory: sessionmaker[Session],
@@ -229,6 +263,8 @@ def runtime(
     google_setup: GoogleSheetsSetup,
     razorpay_setup: RazorpaySetup,
     shopify_setup: ShopifySetup,
+    zoho_setup: ZohoSetup,
+    database_setup: DatabaseSetup,
     clock: FakeClock,
     outbox: MemoryEmailSender,
 ) -> ConnectorRuntime:
@@ -242,6 +278,8 @@ def runtime(
         google=google_setup,
         razorpay=razorpay_setup,
         shopify=shopify_setup,
+        zoho=zoho_setup,
+        database=database_setup,
         clock=clock,
         email=outbox,
     )
@@ -259,6 +297,8 @@ def client(
     google_setup: GoogleSheetsSetup,
     razorpay_setup: RazorpaySetup,
     shopify_setup: ShopifySetup,
+    zoho_setup: ZohoSetup,
+    database_setup: DatabaseSetup,
 ) -> Iterator[TestClient]:
     app = create_app(
         settings,
@@ -272,6 +312,8 @@ def client(
         google_sheets=google_setup,
         razorpay=razorpay_setup,
         shopify=shopify_setup,
+        zoho=zoho_setup,
+        database=database_setup,
         inline_jobs=True,  # background jobs run at once, in the test
     )
     with TestClient(app, base_url="http://localhost:8000") as test_client:

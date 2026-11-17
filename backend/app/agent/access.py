@@ -37,6 +37,9 @@ class DatasetRef:
     name: str
     row_count: int | None
     profile: dict[str, object]
+    # The source's own name for the table ("public.orders") and, for databases, "postgresql" or "mysql" (M14).
+    external_ref: str = ""
+    engine: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,10 @@ def access_context(db: DbSession, org_id: uuid.UUID, user_id: uuid.UUID) -> Acce
                 name=dataset.name,
                 row_count=dataset.row_count_estimate,
                 profile=dict(dataset.profile_json or {}),
+                external_ref=dataset.external_ref,
+                engine=str(connection.config.get("engine"))
+                if connection.type == "sql_database"
+                else None,
             )
     existing = frozenset(db.scalars(select(Dataset.id).where(Dataset.org_id == org_id)))
     return AccessContext(

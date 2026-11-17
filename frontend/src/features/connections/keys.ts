@@ -1,3 +1,4 @@
+import './strings'
 import type { TFunction } from 'i18next'
 
 /** TanStack Query keys. Invalidating CONNECTIONS also refreshes every connection's detail and the access list. */

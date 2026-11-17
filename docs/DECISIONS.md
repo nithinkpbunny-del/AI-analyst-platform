@@ -1325,3 +1325,158 @@ a missing one.
 - **Uploaded Shopify files keep working** next to the connector: an uploaded `shopify_orders.csv` stays its own
   connection with its own table; both appear in the dictionary (same-named tables follow D64) and both are in rupees.
 
+
+### D96. Zoho Books sign-in, scopes, data centres and organisation (M13, BUILD_SPEC 8.6, 6.3)
+- **OAuth 2.0 authorization code** with `access_type=offline` and `prompt=consent`: a refresh token, stored encrypted
+  (purpose `zoho_refresh_token`). Access tokens (one hour) are kept **in process memory only**, one per refresh token,
+  until five minutes before they expire; a 401 from Zoho gets one renewal and one retry, then "Sign in to Zoho again".
+  Zoho answers token errors with HTTP 200 and `{"error": ...}`; both shapes are handled.
+- **Read scopes only.** Defaults: `ZohoBooks.invoices.READ`, `.bills.READ`, `.expenses.READ`, `.contacts.READ`,
+  `.settings.READ` (organisations, items), `.accountants.READ` (chart of accounts). `ZOHO_SCOPES` may change the list,
+  but anything that is not `ZohoBooks.<module>.READ` is dropped before it is sent. When Zoho reports the granted scopes
+  with the token, a write scope (`CREATE`, `UPDATE`, `DELETE`, `ALL`, `fullaccess`) or missing core reads refuse the
+  connection and nothing is stored.
+- **No "reports" scope by default:** Zoho's documented scope list has no reports module and an unknown scope would
+  break the consent page. The profit and loss report is requested with the scopes above; if Zoho refuses it, only that
+  table fails with a plain message (kind `invalid`, never `needs_reauth`), and docs/SETUP_ZOHO.md says how to add the
+  scope Zoho names. **Untested against real Zoho.**
+- **Data centres:** India (`accounts.zoho.in`, `www.zohoapis.in`) by default, `ZOHO_REGION` for others (`com`, `eu`,
+  `com.au`, `jp`, `ca` = `accounts.zohocloud.ca`, `sa`). Zoho's callback names the person's own data centre
+  (`accounts-server`); it is used only when it is exactly one of these origins (https, no look-alike hosts), and the
+  token answer's `api_domain` must be the same data centre's API host, else the region's own host is used. The
+  read-only HTTP client allows a POST only to that data centre's token and revoke endpoints.
+- **Callback and finish** follow Shopify's pattern (D92): `GET /connections/zoho/callback` is public, checks the
+  `state` (10 minutes, issued to one Owner of one workspace) and the data centre, and forwards the code to the web app
+  in the URL fragment; the same Owner finishes with `POST /connections/zoho/finish` (the state is used once). There
+  is no HMAC (Zoho does not sign callbacks); the state and the single-use code are the protection.
+- **Organisation:** one per connection. At finish the account's **default** organisation is chosen (or, when signing
+  in again, the one already used if the account still sees it). The connection keeps the ids and names of the other
+  organisations the account can see (not secrets; at most 50), and Owners can switch with
+  `PUT /connections/{id}/zoho/organization`: stored copies of the old organisation are deleted first (never merged)
+  and every table is read again; activity entry `connection.organization_changed`. Zoho's organisation list also
+  contains a contact person and e-mail; they are dropped on arrival.
+- **Removal** revokes the refresh token at Zoho (best effort, like Google's) and deletes the secret and snapshots.
+
+### D97. Zoho's API limits: counted, paced, and the stored copy when near the daily limit (M13, BUILD_SPEC 8.6, R1)
+- Zoho Books limits API calls **per organisation per day** (by plan: 1,000 / 2,000 / 5,000 / 10,000) and per minute
+  (100). Every Books call is counted in Redis (`zoho:calls:<organisation id>:<UTC date>`, kept 2 days), so the API,
+  the worker and every workspace connected to the same organisation see one number. The UTC date is an
+  approximation of Zoho's own reset.
+- **Per minute:** above 90 calls in the current minute the reader waits for the next minute.
+- **Per day:** reading stops at **90%** of `ZOHO_DAILY_CALL_LIMIT` (default 1,000, the lowest plan), leaving the rest
+  for the Owner's own tools. A Zoho "daily limit reached" answer (or 429) marks the day as used up.
+- **Degrade to cache:** such refusals carry `ConnectorError.stale_ok`. The cache (`DatasetCache._fetch`) then returns
+  the stored snapshot, whatever its age, instead of failing; its `fetched_at` (shown in sources and provenance) says
+  how old it is. Without a stored copy the plain error is shown. Only Zoho uses `stale_ok` today.
+- The connection page shows "Zoho API calls today: N of L" (detail view only; the list does not read Redis).
+- Cost of reads: one call per 200 rows of a list; incremental reads after the first; the profit and loss report one
+  call per month (24 at first, then the last two months).
+
+### D98. Zoho Books tables, money, personal data and the demo organisation (M13, BUILD_SPEC 8.6, 9, 12.1)
+- **Seven tables:** `invoices`, `bills`, `expenses`, `contacts`, `items`, `chart_of_accounts` (list endpoints, pages
+  of 200 via `page`/`per_page`/`page_context.has_more_page`), and `profit_and_loss` (one row per account line per
+  month: `month`, `section`, `account_name`, `amount`, key `line_id`), flattened from Zoho's nested report; a line is
+  filed under the nearest of Operating Income / Cost of Goods Sold / Operating Expense / Non Operating Income /
+  Non Operating Expense; zero lines are left out.
+- **Only declared fields are kept** from every row, so anything Zoho adds (e-mail, phone, addresses, contact persons,
+  GSTIN/PAN, bank details, free-text descriptions) never reaches a snapshot. Contacts keep `contact_name` and
+  `company_name` (needed for "who owes me"); the profiler now treats `contact_name` (like `customer_name`) as personal,
+  so no samples go to the AI.
+- **Incremental:** `last_modified_time` filter from the newest one seen minus one hour, rows replaced by id; the chart
+  of accounts is read whole; the P&L repeats the last two months (an account line that disappears from a re-read
+  month can stay until "Refresh now"). First reads of invoices, bills and expenses go back `ZOHO_HISTORY_DAYS` (730)
+  with `date_start`. The `last_modified_time` filter is the format Zoho documents for list searches; if an
+  organisation ignores it, the read is simply a full one (still correct).
+- **Money is in rupees** (`stored_in="rupees"`, D95), nothing divided; an organisation in another currency leaves the
+  unit to the Owner.
+- **Analytics:** `finance.pnl` now works on a profit and loss table (a table whose key names profit/P&L, with section,
+  account and rupee amount columns): lines for the period, gross profit, operating profit, net profit and margins on
+  operating income. `receivables_ageing` finds Zoho `invoices` (due date + balance).
+- **No budgets:** Zoho Books' API has no budgets endpoint, so budget vs actual still needs the budget in a spreadsheet.
+- **Development stand-in** (`app/connectors/zoho_stand_in.py`, `APP_ENV=development` without a client): a consent page,
+  the accounts server and the Books API for every data centre host. Organisation **UrbanCart** (default) is built from
+  the demo fixtures: expenses = the monthly **actual** spend per department of `zoho_budget_expenses.xlsx` in three
+  entries each (account = department), so Marketing Q3 2026 is +22.0% against that workbook's budget, to the rupee;
+  invoices = monthly sales to Small Business customers; bills = monthly cost of goods per category; the P&L sums them.
+  A second, tiny organisation (UrbanCart Labs) shows switching. Without fixture files a small built-in sample is used
+  (tests). Tests run the stand-in behind a "real" setup (`tests/recorded_zoho.py`).
+
+### D99. UI strings per screen, and the Connections and Dictionary screens on demand (M13, BUILD_SPEC 11a.9)
+- The first-load shell was 197.4 KB of 200 KB. The `connections` strings (except `connections.quality`, the data notes
+  that Ask and reports also show) and the `dictionary` strings moved from `locales/en.ts` to `locales/en/connections.ts`
+  and `locales/en/dictionary.ts`. Each screen's modules import a small `strings.ts` that adds them with
+  `addStrings` (i18next `addResourceBundle`, deep merge) when the code loads. Keys did not change.
+- The Connections, connection detail, Google return, Zoho return and Dictionary screens load on first visit (like
+  Today since M10). Shell after M13: **176.9 KB**.
+- A test (`src/locales/locales.test.ts`) checks that every literal `t('…')` key in the code exists in the shell or a
+  screen file, and that the screen strings are not in the shell. All text stays English (D41); translation remains a
+  data change (one file per screen per language).
+
+### D100. Customer databases are read-only in four layers (M14, BUILD_SPEC 6.3 item 3, 8.7)
+- **One connection type, two engines:** `sql_database` with `engine` `postgresql` or `mysql` (migration `0014`).
+  Drivers: psycopg 3 (already used for the app's own database) and PyMySQL (new, pure Python). Connection details are
+  **fields, not a URL** (host, port, database, user, password, SSL mode), so no driver option can be smuggled in
+  through a URL's query string. BUILD_SPEC 8.7's "SQLAlchemy URL" is replaced by these fields for that reason.
+- **Layer 1, the account:** setup asks for a dedicated read-only user (docs/SETUP_DATABASES.md). The connection check
+  asks what the user could change. PostgreSQL: superuser/create-role/create-database, INSERT/UPDATE/DELETE/TRUNCATE on
+  any table, CREATE on the database or a schema. MySQL: `SHOW GRANTS` (INSERT/UPDATE/DELETE; CREATE/DROP/ALTER/INDEX/
+  TRIGGER; ALL/SUPER/FILE/GRANT OPTION). A user who can write is **accepted with a warning** (stored as `can_write` and
+  shown on the connection page until a read-only user is entered); the spec says "warn", and the other layers hold.
+- **Layer 2, the session:** PostgreSQL startup options `default_transaction_read_only=on`, `statement_timeout`,
+  `lock_timeout=5s`, `idle_in_transaction_session_timeout`, then `SET SESSION CHARACTERISTICS AS TRANSACTION READ
+  ONLY` and psycopg's `read_only` (every transaction `BEGIN READ ONLY`). MySQL: `SET SESSION TRANSACTION READ ONLY`,
+  `MAX_EXECUTION_TIME` (MariaDB: `max_statement_time`), `START TRANSACTION READ ONLY` before every statement,
+  `local_infile` off. Every transaction ends with a rollback; nothing is ever committed. A test shows a user who can
+  write is still refused by the session (`cannot execute UPDATE in a read-only transaction`).
+- **Layer 3, the SQL:** the table reads the connector builds (with sqlglot, quoted identifiers) and every push-down
+  query pass `sql_guard.check_select` in the source's dialect, with only the exposed tables allowed. The guard gained
+  `qualified=True` for `schema.table` on PostgreSQL (unqualified names are refused there, because the search path
+  could point them elsewhere; a catalog part is always refused). `SET`, `set_config`, several statements, locks,
+  `INTO`, `COPY`, sleeping/file/network functions are refused, so the session cannot be switched back to writing.
+  The only other statements are fixed catalog reads in the connector; the table names they embed come from the
+  database's own catalog and names with quotes, backslashes or control characters are refused.
+- **Layer 4, rows and time:** reads stream in chunks (`DB_FETCH_CHUNK_ROWS`, server-side cursors) up to
+  `MAX_ROWS_PER_DATASET` (one extra row tells "truncated"); push-down answers are wrapped in an outer `LIMIT` and
+  return at most `rows_to_llm_per_tool_call` (200); the statement timeout is the question's or long task's.
+- **Tables:** the Owner chooses which tables and views are exposed (at most 100; `PUT /connections/{id}/database/
+  tables`, checked against what the user can read now). Only exposed tables are read and queried. Binary and spatial
+  columns are not read. A table with an updated-at column (`updated_at`, `modified_at`, `last_modified`, ...) and a
+  single-column primary key is read incrementally (rows changed since the newest seen, minus 5 minutes, replace their
+  copies by key); others are read whole within the row limit.
+- **No SSH tunnel yet** (BUILD_SPEC 8.7 says optional): a firewall allow-list is the documented way. To be built
+  when a customer needs it.
+
+### D101. Network safety for customer databases (M14)
+- The host is resolved **before** connecting and refused when **any** answer is not a global address (Python's
+  `ipaddress.is_global`, IPv4-mapped IPv6 unwrapped; multicast refused): loopback, 10/8, 172.16/12 (incl. the Docker
+  network), 192.168/16, 169.254/16 (incl. cloud metadata), 100.64/10, documentation and reserved ranges, IPv6 local
+  ranges. Names `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.localdomain` are refused without asking DNS.
+- **No second DNS answer:** PostgreSQL connects to the checked address (`hostaddr`) while TLS still checks the name.
+  PyMySQL cannot separate the two: it connects to the checked address too, except with "certificate checked", where
+  it must connect by name (a small window between check and connect; accepted and documented here).
+- **Development exception:** only the host names in `DB_DEV_ALLOWED_HOSTS` (default `demo-postgres,demo-mysql`, the
+  demo containers) may be private, and only with `APP_ENV=development`; elsewhere the setting is ignored. The app's
+  own database (`postgres`) is not on the list.
+- **SSL** is required by default (`require`: encrypted, certificate not checked; `verify-full`: certificate and name
+  checked against the system's authorities). `disable` is accepted only in development. The Owner picks the mode;
+  "certificate checked" is labelled "best".
+- **Credentials:** the password is envelope-encrypted (`secrets`, purpose `database_password`) and never returned;
+  host, port and database are shown; the user name is shown masked. Replacing credentials checks them first; moving to
+  another host or database drops the stored copies first. Driver errors are turned into plain messages that never
+  contain the password (wrong password -> "Enter the credentials again", SSL refused, unknown database, timeout).
+
+### D102. Push-down: the agent's `query_source` tool (M14, BUILD_SPEC 7.3, 8.7)
+- Offered to the model only when the asking person can see a table of a database connection (and the run can reach
+  databases: not in briefings). The SQL is written over the **dictionary's table keys** (like `run_sql`), checked
+  SELECT-only, then the keys are replaced by the source's own names (`"public"."orders"`), rendered in the database's
+  dialect by sqlglot, and handed to the connector, which checks it again against the exposed tables, wraps it in a
+  row limit and runs it in a read-only session with the run's timeout. All tables of one query must come from one
+  database; other tables get "use run_sql".
+- The runner refuses connections outside the person's access (`AccessContext.connection_ids`) and paused ones, and
+  holds no database transaction of the app while the customer database answers.
+- Results carry provenance (connection, tables, the translated SQL, the time) and the note "values as stored in the
+  database (no unit conversion)": push-down skips the dictionary's unit conversion (e.g. paise), so the agent is told.
+- Development stand-ins: `demo-postgres` and `demo-mysql` in docker compose, loaded from the demo fixtures by
+  `scripts/demo_db/*` with a read-only user (`analyst_ro`) and an owner who can write (`demo_owner`); demo passwords,
+  documented, not secrets. Tests use a separate database in the test container (real PostgreSQL behind a "public"
+  name) and a fake MySQL that answers catalog questions and runs the connector's SQL on DuckDB.

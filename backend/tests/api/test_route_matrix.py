@@ -40,16 +40,21 @@ from app.models import (
 )
 from app.security.secrets import SecretStore, key_wrapper
 from tests.conftest import FakeClock
+from tests.customer_db import READER
 from tests.datasources import (
     csv_bytes,
+    make_database_connection,
     make_file_connection,
     make_razorpay_connection,
     make_sheets_connection,
+    make_zoho_connection,
 )
 from tests.recorded_google import NO_ACCESS_ID, SHEET_ID
 from tests.recorded_razorpay import KEY_ID, KEY_SECRET
 from tests.recorded_shopify import SHOP
 from tests.recorded_shopify import code as shopify_code
+from tests.recorded_zoho import OTHER_ORG_ID as ZOHO_OTHER_ORG
+from tests.recorded_zoho import code as zoho_code
 from tests.tenancy import World, add_member, build_world, token_for
 
 P = Permission
@@ -85,6 +90,8 @@ PUBLIC = {
     ("GET", "/connections/google/callback"),
     # The browser returns from Shopify; only the HMAC is checked here (tested in test_connections_shopify).
     ("GET", "/connections/shopify/callback"),
+    # The browser returns from Zoho; only the state and data centre are checked (test_connections_zoho).
+    ("GET", "/connections/zoho/callback"),
 }
 
 # Signed in, but about the person rather than a workspace: tested in test_auth/test_two_factor/test_devices,
@@ -161,6 +168,10 @@ class Fixtures:
     sheets_b: str = ""
     razorpay_a: str = ""
     razorpay_b: str = ""
+    zoho_a: str = ""
+    zoho_b: str = ""
+    database_a: str = ""
+    database_b: str = ""
     version_a: str = ""  # a readable file version that is not in use
     version_b: str = ""
     dict_version_a: str = ""  # a confirmed version of the business dictionary
@@ -168,6 +179,7 @@ class Fixtures:
     draft_a: dict[str, Any] = field(default_factory=dict)  # org A's dictionary draft (content)
     google_state: str = ""
     shopify_state: str = ""
+    zoho_state: str = ""
 
     def placeholders(self, *, theirs: bool) -> dict[str, str]:
         side = "b" if theirs else "a"
@@ -180,6 +192,8 @@ class Fixtures:
                 "dataset",
                 "sheets",
                 "razorpay",
+                "zoho",
+                "database",
                 "version",
                 "dict_version",
             )
@@ -211,6 +225,14 @@ class Case:
     def url(self, ids: Fixtures, *, theirs: bool = False) -> str:
         return self.path.format(**ids.placeholders(theirs=theirs))
 
+
+DATABASE_BODY = {
+    "engine": "postgresql",
+    "host": "db.example.com",
+    "database": "customer_demo",
+    "username": READER[0],
+    "password": READER[1],
+}
 
 CASES: dict[tuple[str, str], Case] = {
     ("GET", "/team/members"): Case("GET", "/team/members", P.MEMBERS_MANAGE, 200, check_leak=True),
@@ -470,6 +492,57 @@ CASES: dict[tuple[str, str], Case] = {
         body_from=lambda ids: {"state": ids.shopify_state, "code": shopify_code()},
         invalid_body={"state": "short", "code": ""},
     ),
+    ("POST", "/connections/zoho/start"): Case(
+        "POST",
+        "/connections/zoho/start",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={},
+        invalid_body={"connection_id": "not-a-uuid"},
+    ),
+    ("POST", "/connections/zoho/finish"): Case(
+        "POST",
+        "/connections/zoho/finish",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body_from=lambda ids: {"state": ids.zoho_state, "code": zoho_code()},
+        invalid_body={"state": "short", "code": ""},
+    ),
+    ("PUT", "/connections/{connection_id}/zoho/organization"): Case(
+        "PUT",
+        "/connections/{zoho}/zoho/organization",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={"organization_id": ZOHO_OTHER_ORG},
+        invalid_body={"organization_id": "not a number"},
+    ),
+    ("POST", "/connections/database"): Case(
+        "POST",
+        "/connections/database",
+        P.CONNECTIONS_MANAGE,
+        201,
+        body=DATABASE_BODY,
+        invalid_body={**DATABASE_BODY, "engine": "oracle"},
+    ),
+    ("PUT", "/connections/{connection_id}/database/credentials"): Case(
+        "PUT",
+        "/connections/{database}/database/credentials",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body=DATABASE_BODY,
+        invalid_body={**DATABASE_BODY, "port": 0},
+    ),
+    ("GET", "/connections/{connection_id}/database/tables"): Case(
+        "GET", "/connections/{database}/database/tables", P.CONNECTIONS_MANAGE, 200
+    ),
+    ("PUT", "/connections/{connection_id}/database/tables"): Case(
+        "PUT",
+        "/connections/{database}/database/tables",
+        P.CONNECTIONS_MANAGE,
+        200,
+        body={"tables": ["public.orders"]},
+        invalid_body={"tables": "public.orders"},
+    ),
     ("POST", "/connections/razorpay"): Case(
         "POST",
         "/connections/razorpay",
@@ -625,6 +698,24 @@ def ids(
         for org in (world.org_a, world.org_b)
     }
 
+    zoho = {
+        world.org_a.id: make_zoho_connection(db, runtime, world.org_a.id, sync=False),
+        # Workspace B's names differ, so the leak check can tell the two apart.
+        world.org_b.id: make_zoho_connection(
+            db,
+            runtime,
+            world.org_b.id,
+            name="Zoho Books (Chaiwala)",
+            org_names=("Chaiwala Books", "Chaiwala Labs"),
+            sync=False,
+        ),
+    }
+
+    databases = {
+        org.id: make_database_connection(db, runtime, org.id, sync=False)
+        for org in (world.org_a, world.org_b)
+    }
+
     # Each workspace gets a confirmed dictionary (version 1) and a draft (version 2) continuing it.
     dictionaries: dict[Any, str] = {}
     drafts: dict[Any, dict[str, Any]] = {}
@@ -672,9 +763,27 @@ def ids(
             }
         ),
     )
+    # A Zoho sign-in started by owner_a whose callback came back from Zoho's India data centre.
+    zoho_state = "matrix-zoho-state-0000000000000"
+    fake_redis.set(
+        f"zoho:state:{zoho_state}",
+        json.dumps(
+            {
+                "org_id": str(world.org_a.id),
+                "user_id": str(world.owner_a.id),
+                "connection_id": None,
+                "region": "in",
+            }
+        ),
+    )
     return Fixtures(
         world=world,
         shopify_state=shopify_state,
+        zoho_state=zoho_state,
+        database_a=str(databases[world.org_a.id].id),
+        database_b=str(databases[world.org_b.id].id),
+        zoho_a=str(zoho[world.org_a.id].id),
+        zoho_b=str(zoho[world.org_b.id].id),
         member_a=membership(world.analyst_a.id),
         member_b=membership(world.analyst_b.id),
         invitation_a=invitations[world.org_a.id],

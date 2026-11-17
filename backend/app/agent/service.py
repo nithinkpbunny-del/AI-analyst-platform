@@ -30,7 +30,8 @@ from app.agent.access import NoAccess, VisibleDictionary, access_context, visibl
 from app.agent.provenance import ResultStore
 from app.agent.tools import ToolContext
 from app.audit import writer as audit
-from app.connectors.registry import ConnectorRuntime
+from app.connectors.base import ConnectorError
+from app.connectors.registry import ConnectorRuntime, database_connector
 from app.data.cache import DatasetCache
 from app.data.workspace import Workspace
 from app.db.tenant import scope_to_org
@@ -38,7 +39,7 @@ from app.dictionary import service as dictionary_service
 from app.llm import keys, usage
 from app.llm.base import LLMFactory, LLMResponse, close_client
 from app.llm.usage import UsageLimitReached
-from app.models import Conversation, Message, Organization
+from app.models import Connection, Conversation, Message, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,40 @@ def _session(rt: ConnectorRuntime, org_id: uuid.UUID) -> DbSession:
     db = rt.session_factory()
     scope_to_org(db, org_id)
     return db
+
+
+def pushdown_runner(
+    rt: ConnectorRuntime,
+    *,
+    org_id: uuid.UUID,
+    allowed_connections: frozenset[uuid.UUID],
+    timezone: str,
+    timeout_seconds: int,
+) -> Any:
+    """``query_source`` for one run: only connections the asking person may see, read-only, the run's timeout."""
+
+    def run(connection_id: Any, sql: str, max_rows: int) -> tuple[list[str], list[list[Any]], bool]:
+        if connection_id not in allowed_connections:
+            raise ConnectorError("not_found", "This database is not available to you.")
+        with _session(rt, org_id) as db:
+            connection = db.get(Connection, connection_id)
+            if (
+                connection is None
+                or connection.type != "sql_database"
+                or connection.status == "disabled"
+            ):
+                db.commit()
+                raise ConnectorError("not_found", "This database is not available right now.")
+            connector = database_connector(
+                db, connection, rt, timezone=timezone, timeout_seconds=timeout_seconds
+            )
+            db.commit()  # nothing is held open while the database answers
+        try:
+            return connector.query(sql, max_rows=max_rows)
+        finally:
+            connector.close()
+
+    return run
 
 
 def question_hash(text: str) -> str:
@@ -287,6 +322,13 @@ def run_agent(
         today=today,
         max_rows=settings.rows_to_llm_per_tool_call,
         progress=progress,
+        pushdown=pushdown_runner(
+            rt,
+            org_id=spec.org_id,
+            allowed_connections=access.connection_ids,
+            timezone=access.timezone,
+            timeout_seconds=timeout,
+        ),
     )
     system, playbooks = prompts.system_prompt(
         access=access,

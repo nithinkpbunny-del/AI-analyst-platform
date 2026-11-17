@@ -224,6 +224,13 @@ class DatasetCache:
             result = source_connector.fetch(ctx.dataset)
             return self._store(dataset_id, ctx, result, result.frame, "full")
         except ConnectorError as error:
+            if error.stale_ok and ctx.snapshot is not None:
+                # The source is at its usage limit (e.g. Zoho's daily API calls): keep using the stored copy
+                # rather than failing; its fetch time shows how old it is (DECISIONS D97).
+                kept = self._read(ctx.snapshot)
+                if kept is not None:
+                    logger.info("source at its limit; using the stored copy of %s", dataset_id)
+                    return self._cached(ctx.snapshot, kept, "cache")
             self._record_failure(dataset_id, error)
             raise
         finally:

@@ -1,14 +1,17 @@
-**Next milestone: M13: Zoho Books connector** (M12 is built and waits for the human's check and commit; M11 is committed,
-4653f4f). **M10b (public website, then the Phase 1 review) is still not built**; the human chose to go on with Phase 2
-first, ask before skipping it for good.
-**Unfinished work:** none for M12. Carry into M10b and later:
+**Next milestone: M15: Goals, pinned dashboard, UI translations** (then the Phase 2 review). M13 (Zoho Books) and M14
+(PostgreSQL/MySQL) were built in one chat by the human's choice, on branch `m13-zoho-books`, and wait for the human's
+check and commit (suggested: "M13: Zoho Books connector", then "M14: PostgreSQL/MySQL connector"; M12 is committed,
+1f1bdb2). **M10b (public website, then the Phase 1 review) is still not built**; the human chose to go on with Phase 2
+first, ask before skipping it for good. UI translations stay deferred (D41).
+**Unfinished work:** none for M13/M14. Carry into M10b and later:
 - **Never run against a real model yet** (M8-M10): the agent, the briefing writer and `make eval` are tested with the
   fake client only. The real-AI checks of M10 (AI-written briefing, health check, export and share of a real answer, a
   long task) are still untested (Gemini was overloaded). Phase 1 sign-off needs >= 85% on `make eval` with a real model
   (BUILD_SPEC 12.2): run it by name when you are ready (`make eval LIST=1` lists the 48 questions).
 - M10b's final design QA (11a.9) should look again at the Today, Briefings, Tasks and report screens on phones.
-- The app shell is at **197.4 KB** of its 200 KB budget (196.1 after M11): the next screens must load lazily; splitting
-  `locales/en.ts` by screen is the next lever and will be needed soon.
+- The app shell is at **176.9 KB** of its 200 KB budget after M13 (197.4 after M12): the Connections and Dictionary
+  screens now load on demand with their own strings files (`locales/en/*.ts`, D99). New screens keep loading lazily;
+  `src/locales/locales.test.ts` checks every literal key exists.
 - New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`); questions and long tasks run through
   `agent.service.run_agent`. Every number comes from code and cites a result id (D67).
 - Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants; every new route goes in
@@ -25,6 +28,15 @@ first, ask before skipping it for good.
   Shopify's OAuth and Admin GraphQL API whose schema copy was written from Shopify's documentation. Before launch,
   create the app (docs/SETUP_SHOPIFY.md Part B), connect a development store once and compare a few orders with the
   Shopify admin. Shopify's expiring offline tokens are not used yet (D92).
+- **Real Zoho Books is untested** (no Zoho client): the connector is tested against a local imitation of Zoho's
+  accounts server and Books API written from Zoho's documentation. The profit and loss report's format and the
+  `last_modified_time` filter are the least certain parts (D96, D98). Before launch, create the client
+  (docs/SETUP_ZOHO.md Part B), connect a test organisation and compare invoices and a month's P&L with Zoho.
+- **Real customer databases are untested outside the test container and the demo containers:** PostgreSQL is tested
+  against a real PostgreSQL 16 (test container and the `demo-postgres` container), MySQL against the `demo-mysql`
+  container (MySQL 8.4) by hand and a fake in the automated tests. Try a managed database (RDS, Cloud SQL) with SSL
+  "certificate checked" before launch. SSH tunnels are not built (D100).
+- `make dev` now also starts `demo-postgres` (127.0.0.1:5433) and `demo-mysql` (127.0.0.1:3307), development only.
 - Small fix asked for later: removing a source and uploading the same file again loses its dictionary edits (D76).
 **Deferred:** multilingual answers, briefings and UI translations (D41): everything is in English, all UI text in
 `locales/en.ts`. Pin to dashboard and goals (M15). What-if levers for stock, staffing and product mix (D71).
@@ -48,8 +60,8 @@ first, ask before skipping it for good.
 ### Phase 2
 - [x] M11: Razorpay connector
 - [x] M12: Shopify connector
-- [ ] M13: Zoho Books connector
-- [ ] M14: PostgreSQL/MySQL connector
+- [x] M13: Zoho Books connector
+- [x] M14: PostgreSQL/MySQL connector
 - [ ] M15: Goals, pinned dashboard, UI translations (translations deferred, D41) (then Phase 2 review, stop)
 
 ### Phase 3
@@ -947,3 +959,144 @@ Connect Shopify, any store address, Install app on the stand-in page).
 - Removing a connection does not uninstall the app in Shopify (that is a write); the page says to uninstall it there.
 - Expiring offline tokens are not used; a deleted line item can stay until "Refresh now" (D94).
 - No Storybook story for the Shopify dialog (as for Razorpay's).
+
+
+---
+
+## M13: Zoho Books connector (done)
+
+**Built**
+- **Connector** (`app/connectors/zoho_books.py`): seven tables, `invoices`, `bills`, `expenses`, `contacts`, `items`,
+  `chart_of_accounts` and `profit_and_loss` (monthly, one row per account line). Zoho's OAuth with a refresh token
+  (stored encrypted; access tokens only in memory), **read scopes only** (`ZohoBooks.<module>.READ`; others dropped
+  before sending; a token that can write is refused), **India data centre by default** (`ZOHO_REGION` for others; the
+  person's own data centre is accepted only when it is one of Zoho's). One organisation per connection: the default
+  one at sign-in, and Owners can switch to another the account sees. GET only (POST only to the token and revoke
+  endpoints). Pages of 200, incremental by `last_modified_time`, P&L repeats the last two months. D96-D98.
+- **Limits:** every Zoho call is counted per organisation per day in Redis; reading slows near 90 calls a minute and
+  stops at 90% of `ZOHO_DAILY_CALL_LIMIT`; then the stored copy is used instead of failing (`ConnectorError.stale_ok`
+  in the cache), D97. The connection page shows "Zoho API calls today: N of L".
+- **Money in rupees** (declared by the source, nothing divided). **No personal details:** only declared fields are
+  kept (no e-mails, phones, addresses, GSTIN/PAN, bank details, descriptions); `contact_name` is treated as personal
+  by the profiler (no samples to the AI).
+- **Analytics:** `finance.pnl` now computes a P&L from a profit and loss table (lines, gross/operating/net profit,
+  margins); the `finance_summary` tool describes it. Receivables ageing works on Zoho invoices.
+- **API:** `POST /connections/zoho/start`, `GET /connections/zoho/callback` (public), `POST /connections/zoho/finish`,
+  `PUT /connections/{id}/zoho/organization`; connection answers carry `zoho: {region, region_name, organization_id,
+  organization_name, currency, organizations, calls_today (detail only), daily_limit}`; the list says whether Zoho is
+  available. Removing revokes the token at Zoho. Activity entry `connection.organization_changed`. Migration `0013`
+  (reversible). New env (all optional, in `.env.example`): `ZOHO_REGION`, `ZOHO_SCOPES`, `ZOHO_HISTORY_DAYS`,
+  `ZOHO_REPORT_MONTHS`, `ZOHO_DAILY_CALL_LIMIT` (`ZOHO_CLIENT_ID`/`_SECRET` existed).
+- **Development stand-in** (`app/connectors/zoho_stand_in.py`): without a Zoho client and with `APP_ENV=development`,
+  "Connect Zoho Books" opens a local consent page and reads the demo organisation **UrbanCart**, whose expenses are the
+  monthly actual spend per department of `eval/fixtures/zoho_budget_expenses.xlsx` to the rupee (Marketing Q3 2026 is
+  +22.0% against the workbook's budget), plus invoices, bills, items, accounts and a P&L built from the demo orders. A
+  second small organisation shows switching. Zoho's API has no budgets, so the budget still comes from the workbook.
+- **Web app:** "Connect Zoho Books" on Add data, the return page `/connections/zoho/return`, and on the connection
+  page the organisation, data centre, currency, today's API calls, the read-only note, "Read another organisation"
+  and "Sign in to Zoho again". **Shell budget:** the Connections and Dictionary screens load on demand and their strings
+  moved to `locales/en/connections.ts` and `locales/en/dictionary.ts` (D99): shell **176.9 KB** (197.4 before).
+  Storybook: Zoho connection stories. `docs/SETUP_ZOHO.md`.
+
+**Test status**
+- Backend: **2291 passed** (2171 in M12); ruff, ruff format and mypy (strict) clean. New: the connector against the
+  stand-in (55: read scopes only, write scopes refused, data centres and look-alike hosts, code exchange, token renewal
+  once, revoked token, organisations without personal details, paging past 200, history window, row cap, incremental,
+  rupees, no personal columns in any table, P&L flattening and month-by-month reads, a refused report fails only that
+  table, the daily limit at 90%, per-minute pacing, Zoho's own limit answer, retries, GET only; the demo organisation's
+  expenses equal the workbook's actuals and give Marketing +22.0%); API (32: start, callback with unknown state /
+  refusal / foreign data centre / the person's own data centre, finish once and only by the starter, write scopes
+  refused with nothing stored, no organisation, secrets never in responses/logs/audit/DB, preview, dictionary units,
+  incremental refresh, the stored copy at the daily limit, a refused report, switching organisation, revoked token and
+  signing in again, cross-workspace 404, removal revokes the token, analysts read-only, stand-in pages off); the
+  stand-in flow end to end (3); P&L and receivables on Zoho tables (5); route matrix for the 3 new routes (+1 public);
+  security (writes through every connector incl. Zoho).
+- Frontend: vitest **362 passed** (352 in M12; new: Zoho on Add data, return page, connection page, switching,
+  signing in again, analysts; a check that every literal string key exists); eslint, prettier, tsc, tokens:check
+  clean; build OK, first-load shell **176.9 KB of 200 KB** (197.4 before).
+- Playwright: run once at the end of M14 (the human asked for `make e2e` once, at the very end).
+- **No AI calls were made.**
+
+**How to try it:** see the testing steps given at the end of M13/M14 (summary: `make fixtures`, `make dev`,
+Connections > Add data > Connect Zoho Books > Accept on the stand-in page).
+
+**Known gaps / notes**
+- **Never run against real Zoho** (no client): see "Unfinished work" above and docs/SETUP_ZOHO.md.
+- The P&L report is requested without a "reports" scope (none is documented); if Zoho refuses it, only that table
+  says so (D96).
+- Zoho's daily count uses the UTC date; Zoho's own reset time may differ by a few hours (D97).
+- Budgets are not read (no Zoho API for them); journals, bank transactions, payments and credit notes are not read yet.
+
+
+---
+
+## M14: PostgreSQL/MySQL connector (done)
+
+**Built**
+- **Connector** (`app/connectors/sql_database.py`): a customer's PostgreSQL or MySQL database, one connection type
+  `sql_database` with an engine. **Read-only in four layers** (D100): a read-only user is asked for and the check warns
+  when the user can write; every session is opened read-only with statement and lock timeouts and never commits; every
+  read and push-down query passes the sqlglot SELECT-only guard in the source's dialect, exposed tables only (the guard
+  now accepts `schema.table`); reads stream in chunks within the row limits, push-down answers are wrapped in a LIMIT.
+- **Network safety** (D101): the host is resolved first and refused when any address is private or internal
+  (localhost, 10.x, 172.16/12 incl. Docker, 192.168.x, 169.254.x, CGNAT, IPv6 local, `*.local`/`.internal` names);
+  PostgreSQL connects to the checked address. In development only, `DB_DEV_ALLOWED_HOSTS` (the demo containers) may
+  be private. SSL is required by default ("certificate checked" or "not checked"); "not encrypted" only in development.
+- **Tables:** the Owner lists the tables and views the user can read and chooses which ones questions may use (up to
+  100). Tables with an updated-at column and a primary key are read incrementally; others whole within the limits.
+- **Push-down:** new agent tool `query_source` (D102), offered only when a database table is visible: SQL over the
+  dictionary's table keys, translated to the database's names and dialect, checked twice, run read-only with the
+  question's timeout and the person's access; results with provenance. The Ask screen shows "Querying <source>
+  directly".
+- **API:** `POST /connections/database` (checked, then the password stored encrypted), `PUT /connections/{id}/database/
+  credentials`, `GET` and `PUT /connections/{id}/database/tables`; connection answers carry `database: {engine, host,
+  port, database, username_masked, ssl_mode, tables, can_write, write_reasons, server_version}`; the list says whether
+  SSL may be off and which demo hosts exist (development). Activity entry `connection.tables_changed`. Migration `0014`
+  (reversible). New dependency `pymysql`. New env (optional, in `.env.example`): `DB_DEV_ALLOWED_HOSTS`,
+  `DB_CONNECT_TIMEOUT_SECONDS`, `DB_FETCH_CHUNK_ROWS`.
+- **Development stand-ins:** `make dev` starts `demo-postgres` and `demo-mysql` (docker compose, init scripts in
+  `scripts/demo_db/`) with the UrbanCart orders, customers (no names or e-mails), products and a `monthly_sales` view,
+  a read-only user `analyst_ro` and an owner `demo_owner` who can write (to see the warning).
+- **Web app:** "Connect a database" on Add data (the dialog loads on demand): engine, host, port, database, user,
+  password, encryption, with the demo details in development. The connection page shows where the database is (user
+  masked), the encryption, the write warning, "Tables in the database" with checkboxes and "Save tables", "Replace
+  credentials" and "Enter the credentials again". The shell stays at **176.9 KB**. `docs/SETUP_DATABASES.md`.
+
+**Test status**
+- Backend: **2444 passed** (2291 after M13); ruff, ruff format and mypy (strict) clean. New:
+  - The connector (66): every private/internal address and local name refused in production; only the demo names
+    and only in development; the checked address is what the driver gets; SSL rules.
+  - SQL built, quoted and checked in both dialects; a cursor cannot leave its literal; writes, locks, sleeping,
+    file/network functions, other tables, unqualified names, `SET ... READ WRITE`, `set_config` and several
+    statements refused.
+  - A real PostgreSQL in the test container: the read-only user passes; the writer is flagged and still cannot
+    UPDATE/DELETE/CREATE through the session; statement timeout; tables the user may read (an ungranted table is not
+    listed); chunked reads, IST times, cursor and incremental read; push-down with a join; a vanished table; a
+    wrong password; SSL refused in plain words.
+  - The fake MySQL: grants, typing, incremental, row cap, push-down LIMIT, and the real session's read-only set-up
+    with the driver stood in.
+  - API (35): add, writer warning, 8 refused hosts, SSL off refused, wrong password, MySQL, validation, roles,
+    rate limit, password never in responses/logs/audit/DB, listing and choosing tables, refused table, preview and
+    incremental read, replacing credentials, the engine fixed, other kinds of connection refused, analysts read-only,
+    cross-workspace 404, removal.
+  - `query_source` (12): on PostgreSQL with provenance, writes and other tables refused, 200-row cap, offered only
+    with a visible database, other tables sent to `run_sql`, people without access refused, MySQL dialect.
+  - Route matrix for the 4 new routes; security (no writes through any connector, now including databases).
+- Frontend: vitest **368 passed** (362 after M13; new: connecting a database with checks, the server's refusal, the
+  development-only options, the connection page with the write warning and choosing tables, entering credentials
+  again, analysts); eslint, prettier, tsc, tokens:check clean; build OK, shell **176.9 KB of 200 KB**. Storybook
+  builds (new Zoho and database connection stories).
+- By hand: both demo containers start and load the demo data (28,540 orders, 3,000 customers); the connector reads
+  them, flags `demo_owner`, refuses writes in the session and refuses `localhost` outside development.
+- **No AI calls were made.** `make eval` and `make llm-check` were not run.
+
+**How to try it:** see the testing steps given at the end of M13/M14 (summary: `make fixtures`, `make dev`,
+Connections > Add data > Connect a database, host `demo-postgres`, database `urbancart_demo`, user `analyst_ro`,
+password `demo-readonly`, encryption "Not encrypted (development only)"; for MySQL host `demo-mysql` and "Encrypted,
+certificate not checked").
+
+**Known gaps / notes**
+- No SSH tunnel (use a firewall allow-list). Binary and spatial columns are not read.
+- Push-down results skip the dictionary's unit conversion (the agent is told; D102).
+- PyMySQL with "certificate checked" connects by name after the address check (small window, D101).
+- MySQL is covered by a fake in the automated tests and by the demo container by hand.

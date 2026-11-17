@@ -6,6 +6,9 @@ import {
   demoConnectionList,
   demoOrdersDetail,
   demoDatasetPreview,
+  demoZohoDetail,
+  demoDatabaseDetail,
+  demoDatabaseTables,
 } from '../src/testing/connectionFixtures'
 import { demoConversation, demoConversations, demoSaved } from '../src/testing/askFixtures'
 import { firstDraftState } from '../src/testing/dictionaryFixtures'
@@ -184,6 +187,11 @@ export async function mockApi(
     route.fulfill({ json: { people: demoAccess } }),
   )
   await page.route(`${API}/connections/c1`, (route) => route.fulfill({ json: demoOrdersDetail }))
+  await page.route(`${API}/connections/c6`, (route) => route.fulfill({ json: demoZohoDetail }))
+  await page.route(`${API}/connections/c7`, (route) => route.fulfill({ json: demoDatabaseDetail }))
+  await page.route(`${API}/connections/c7/database/tables`, (route) =>
+    route.fulfill({ json: demoDatabaseTables }),
+  )
   await page.route(`${API}/connections/c1/datasets/d1/preview`, (route) =>
     route.fulfill({ json: demoDatasetPreview }),
   )

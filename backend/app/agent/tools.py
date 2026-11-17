@@ -20,8 +20,11 @@ from datetime import date
 from typing import Any
 
 import pandas as pd
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ParseError
 
-from app.agent.access import AccessContext, VisibleDictionary
+from app.agent.access import AccessContext, DatasetRef, VisibleDictionary
 from app.agent.provenance import ResultStore
 from app.analytics import (
     anomalies,
@@ -87,6 +90,9 @@ class ToolContext:
     frames: dict[str, pd.DataFrame] = field(
         default_factory=dict
     )  # full tables of results, for charts
+    # Push-down to a customer database (M14): (connection id, SQL in its dialect, max rows) -> columns, rows,
+    # truncated. None where no database can be reached (tests, briefings).
+    pushdown: Callable[[Any, str, int], tuple[list[str], list[list[Any]], bool]] | None = None
 
     @property
     def dictionary(self) -> Any:
@@ -415,6 +421,24 @@ SPECS: dict[str, ToolSpec] = {
             ["kind"],
         ),
         _spec(
+            "query_source",
+            "Tables from a PostgreSQL or MySQL database only: run one read-only SELECT on the database itself "
+            "(push-down), for large tables where fetching everything is slow. Use the dictionary's table keys and "
+            "column names; the SQL is translated to the database's own dialect. All tables must come from the "
+            "same database. Returns at most 200 rows; aggregate in the SQL.",
+            {
+                "sql": {
+                    "type": "string",
+                    "description": "One SELECT over table keys of one database.",
+                },
+                "purpose": {
+                    "type": "string",
+                    "description": "What the query is for, in a few words.",
+                },
+            },
+            ["sql"],
+        ),
+        _spec(
             "make_chart",
             "A chart from an earlier result's rows. The title must state the insight ('South fell 18% while "
             "other regions grew'), not just name the data.",
@@ -623,6 +647,114 @@ def run_sql(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     ctx.frames[rid] = frame
     quality = [{"table": t, **q} for t in checked.tables for q in ctx.quality.get(t, [])]
     return {"result_id": rid, **content, **({"quality_warnings": quality} if quality else {})}
+
+
+def _source_tables(ctx: ToolContext, sql: str) -> tuple[list[str], DatasetRef]:
+    """The dictionary keys the push-down SQL reads, and the one database they all come from."""
+    try:
+        tree = sqlglot.parse_one(sql, read="postgres")
+    except ParseError as error:
+        raise ToolFailure(
+            "unsafe_sql", f"syntax: {str(error).splitlines()[0][:200]}", "Write one SELECT."
+        ) from error
+    ctes = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
+    keys = sorted({t.name for t in tree.find_all(exp.Table) if t.name.lower() not in ctes})
+    refs = []
+    for key in keys:
+        ref = ctx.visible.tables.get(key)
+        if ref is None or key not in ctx.dictionary.datasets:
+            raise AnalyticsError("unknown_table", key)
+        refs.append(ref)
+    if not refs:
+        raise ToolFailure("unsafe_sql", "no table", "Name at least one table key.")
+    if any(r.connection_type != "sql_database" or not r.engine for r in refs):
+        raise ToolFailure(
+            "not_a_database",
+            "query_source works on tables from a PostgreSQL or MySQL connection only.",
+            "Use run_sql for other tables.",
+        )
+    if len({r.connection_id for r in refs}) != 1:
+        raise ToolFailure(
+            "several_databases",
+            "All tables of one query must come from the same database.",
+            "Query each database separately, then join the results with run_sql.",
+        )
+    return keys, refs[0]
+
+
+def query_source(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Push-down (BUILD_SPEC 7.3, 8.7): the SQL is written over table keys; the keys become the source's own table
+    names, the SQL is rendered in the database's dialect, then the connector checks it again (SELECT only, exposed
+    tables only), wraps it in a row limit and runs it in a read-only session with a statement timeout."""
+    sql = _str(args, "sql") or ""
+    if ctx.pushdown is None:
+        raise ToolFailure(
+            "not_available", "Direct database queries are not available here.", "Use run_sql."
+        )
+    try:
+        sql_guard.check_select(sql, dialect="postgres", allowed_tables=ctx.dictionary.datasets)
+    except sql_guard.UnsafeSql as error:
+        raise ToolFailure(
+            "unsafe_sql", str(error), "Write one SELECT over the dictionary's table keys."
+        ) from error
+    keys, ref = _source_tables(ctx, sql)
+    engine = str(ref.engine)
+    dialect = "postgres" if engine == "postgresql" else "mysql"
+    names = {key: ctx.visible.tables[key].external_ref for key in keys}
+    tree = sqlglot.parse_one(sql, read="postgres")
+    for table in tree.find_all(exp.Table):
+        source = names.get(table.name)
+        if source is None:
+            continue
+        schema, _, name = source.rpartition(".")
+        table.set("this", exp.to_identifier(name, quoted=True))
+        table.set(
+            "db",
+            exp.to_identifier(schema, quoted=True) if schema and dialect == "postgres" else None,
+        )
+    translated = tree.sql(dialect=dialect)
+    ctx.progress({"code": "querying_source", "connection": ref.connection_name})
+    try:
+        columns, rows, truncated = ctx.pushdown(ref.connection_id, translated, ctx.max_rows)
+    except ConnectorError as error:
+        raise ToolFailure(
+            "source_error", error.message, "Simplify the query, or use fetch_dataset."
+        ) from error
+    except sql_guard.UnsafeSql as error:
+        raise ToolFailure(
+            "unsafe_sql", str(error), "Write one SELECT over this database's tables."
+        ) from error
+    frame = pd.DataFrame(rows, columns=columns)
+    fetched = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    content = {
+        "columns": columns,
+        "rows": compact(rows),
+        "total_rows": len(rows),
+        "truncated": truncated,
+        "note": "Values as stored in the database (no unit conversion).",
+    }
+    tables = [
+        {
+            **ctx.table_record(key),
+            "connection": ref.connection_name,
+            "connection_type": ref.connection_type,
+            "connection_id": str(ref.connection_id),
+            "dataset_id": str(ctx.visible.tables[key].dataset_id),
+            "fetched_at": fetched,
+            "pushdown": True,
+        }
+        for key in keys
+    ]
+    rid = ctx.store.add(
+        "query_source",
+        content,
+        tables=tables,
+        inputs={"sql": sql},
+        sql=[translated],
+        row_count=len(rows),
+    )
+    ctx.frames[rid] = frame
+    return {"result_id": rid, **content}
 
 
 def _computing(ctx: ToolContext, tool: str, metric: str | None) -> None:
@@ -842,6 +974,7 @@ HANDLERS: dict[str, Callable[[ToolContext, dict[str, Any]], dict[str, Any]]] = {
     "describe_dataset": describe_dataset,
     "fetch_dataset": fetch_dataset,
     "run_sql": run_sql,
+    "query_source": query_source,
     "kpi_summary": kpi_summary,
     "trend": trend,
     "driver_analysis": driver_analysis,
@@ -931,6 +1064,11 @@ def execute(ctx: ToolContext, call: ToolCall) -> ToolResult:
 
 
 def specs(ctx: ToolContext | None = None) -> list[ToolSpec]:
-    """The tools offered to the model. ``query_source`` (push-down to databases) arrives with the database
-    connector (M14); no connection of today's kinds supports it, so it is not offered."""
-    return list(SPECS.values())
+    """The tools offered to the model. ``query_source`` (push-down, M14) only when the person can see a table of
+    a PostgreSQL or MySQL connection and the run can reach it."""
+    offer = (
+        ctx is not None
+        and ctx.pushdown is not None
+        and any(r.connection_type == "sql_database" for r in ctx.visible.tables.values())
+    )
+    return [s for name, s in SPECS.items() if offer or name != "query_source"]

@@ -1,3 +1,4 @@
+import './strings'
 import { DraftNotice } from '../dictionary/DraftNotice'
 import { useQuery } from '@tanstack/react-query'
 import { Plug } from 'lucide-react'

@@ -11,7 +11,7 @@ selects. It refuses:
 * table functions (``read_csv('...')``) and, when ``allowed_tables`` is given, any table not in it.
 
 The DuckDB workspace adds its own walls (no external access, locked configuration); this check is the first one,
-and it is the same check M14 uses for customer databases.
+and it is the same check M14 uses for customer databases (``qualified=True`` for ``schema.table``).
 """
 
 from __future__ import annotations
@@ -138,7 +138,11 @@ def check_select(
     dialect: str = "duckdb",
     allowed_tables: Iterable[str] | None = None,
     max_length: int = 20_000,
+    qualified: bool = False,
 ) -> CheckedSql:
+    """``qualified``: tables may name their schema (``sales.orders``, a customer's PostgreSQL database, M14); the
+    name checked against ``allowed_tables`` is then ``schema.table``. A catalog (``db.schema.table``) is never
+    allowed."""
     if not sql or not sql.strip():
         raise UnsafeSql("empty")
     if len(sql) > max_length:
@@ -165,13 +169,18 @@ def check_select(
             if not isinstance(node.this, exp.Identifier):
                 # read_csv('x'), a string as a table, a function in FROM: never needed here.
                 raise UnsafeSql("table_function", node.sql(dialect=dialect)[:80])
-            if node.args.get("db") or node.args.get("catalog"):
+            if node.args.get("catalog") or (node.args.get("db") and not qualified):
                 raise UnsafeSql("qualified_table", node.sql(dialect=dialect)[:80])
             name = node.name.lower()
             if any(ch in name for ch in "/\\.:~"):
                 # DuckDB reads a quoted path as a file ("FROM '/etc/passwd'").
                 raise UnsafeSql("table_function", name[:80])
-            if name not in ctes:
+            schema = node.text("db").lower()
+            if schema:
+                if any(ch in schema for ch in "/\\.:~"):
+                    raise UnsafeSql("table_function", schema[:80])
+                tables.add(f"{schema}.{name}")
+            elif name not in ctes:
                 tables.add(name)
     if allowed_tables is not None:
         allowed = {t.lower() for t in allowed_tables}

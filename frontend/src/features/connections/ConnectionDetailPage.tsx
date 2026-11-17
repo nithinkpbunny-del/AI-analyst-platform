@@ -1,3 +1,5 @@
+import './strings'
+import '../dictionary/strings'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ChevronDown, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
@@ -27,9 +29,14 @@ import { ReplaceDialog } from '../dictionary/ReplaceDialog'
 import { FileDrop } from './AddData'
 import { CONNECTIONS, fileProblem } from './keys'
 import { useSpreadsheetPicker } from './useSpreadsheetPicker'
+import { ZohoLines, ZohoOrganizationPicker } from './ZohoDetails'
+import { DatabaseLines, DatabaseTables } from './DatabaseDetails'
 
 const RazorpayDialog = lazy(() =>
   import('./RazorpayDialog').then((m) => ({ default: m.RazorpayDialog })),
+)
+const DatabaseDialog = lazy(() =>
+  import('./DatabaseDialog').then((m) => ({ default: m.DatabaseDialog })),
 )
 import {
   cellText,
@@ -462,6 +469,7 @@ export function ConnectionDetailPage() {
   const [removing, setRemoving] = useState(false)
   const [replacing, setReplacing] = useState(false)
   const [keyDialog, setKeyDialog] = useState(false)
+  const [credentialsDialog, setCredentialsDialog] = useState(false)
   const [discarding, setDiscarding] = useState<FileVersion | null>(null)
   const picker = useSpreadsheetPicker()
   // Shares the list's cache; only the upload limit is needed from it here.
@@ -561,6 +569,11 @@ export function ConnectionDetailPage() {
   })
   const reconnectShopify = useMutation({
     mutationFn: () => connectionsApi.shopifyStart({ connection_id: connectionId }),
+    onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
+    onError: fail,
+  })
+  const reconnectZoho = useMutation({
+    mutationFn: () => connectionsApi.zohoStart(connectionId),
     onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
     onError: fail,
   })
@@ -684,6 +697,8 @@ export function ConnectionDetailPage() {
               {t('connections.shopify.readOnlyNote')}
             </p>
           ) : null}
+          {connection.zoho ? <ZohoLines zoho={connection.zoho} /> : null}
+          {connection.database ? <DatabaseLines database={connection.database} /> : null}
           {paused ? (
             <p className="m-0 mt-2 text-small text-ink-muted">
               {t('connections.detail.pausedNote')}
@@ -720,6 +735,22 @@ export function ConnectionDetailPage() {
                   >
                     {t('connections.shopify.reconnect')}
                   </Button>
+                ) : canManage &&
+                  connection.status === 'needs_reauth' &&
+                  connection.type === 'sql_database' ? (
+                  <Button size="sm" onClick={() => setCredentialsDialog(true)}>
+                    {t('connections.database.reconnect')}
+                  </Button>
+                ) : canManage &&
+                  connection.status === 'needs_reauth' &&
+                  connection.type === 'zoho_books' ? (
+                  <Button
+                    size="sm"
+                    disabled={reconnectZoho.isPending}
+                    onClick={() => reconnectZoho.mutate()}
+                  >
+                    {t('connections.zoho.reconnect')}
+                  </Button>
                 ) : null
               }
             >
@@ -747,6 +778,19 @@ export function ConnectionDetailPage() {
             </FormAlert>
           ) : null}
           {test ? <TestOutcome result={test} /> : null}
+          {canManage && connection.zoho ? (
+            <ZohoOrganizationPicker
+              key={connection.zoho.organization_id}
+              connectionId={connectionId}
+              zoho={connection.zoho}
+              disabled={busy}
+              onDone={(text) => {
+                setNotice({ tone: 'success', text })
+                void refresh()
+              }}
+              onError={fail}
+            />
+          ) : null}
           {canManage ? (
             <div className="mt-4 flex flex-wrap gap-2">
               <Button variant="secondary" disabled={busy || paused} onClick={() => reread.mutate()}>
@@ -784,6 +828,20 @@ export function ConnectionDetailPage() {
                   {t('connections.shopify.reconnect')}
                 </Button>
               ) : null}
+              {connection.type === 'sql_database' ? (
+                <Button variant="ghost" onClick={() => setCredentialsDialog(true)}>
+                  {t('connections.database.replaceButton')}
+                </Button>
+              ) : null}
+              {connection.type === 'zoho_books' ? (
+                <Button
+                  variant="ghost"
+                  disabled={reconnectZoho.isPending}
+                  onClick={() => reconnectZoho.mutate()}
+                >
+                  {t('connections.zoho.reconnect')}
+                </Button>
+              ) : null}
               <Button variant="ghost" onClick={() => setReplacing(true)}>
                 {t('dictionary.replace.button')}
               </Button>
@@ -793,6 +851,21 @@ export function ConnectionDetailPage() {
             </div>
           ) : null}
         </Section>
+
+        {connection.type === 'sql_database' && canManage ? (
+          <Section
+            id="database-tables-title"
+            title={t('connections.database.tablesTitle')}
+            intro={t('connections.database.tablesIntro', { max: 100 })}
+          >
+            <DatabaseTables
+              connectionId={connectionId}
+              chosen={connection.database?.tables ?? []}
+              disabled={busy}
+              onSaved={() => void refresh()}
+            />
+          </Section>
+        ) : null}
 
         {connection.type === 'google_sheets' && canManage ? (
           <Section id="sheets-title" title={t('connections.detail.spreadsheetsTitle')}>
@@ -912,6 +985,19 @@ export function ConnectionDetailPage() {
             onOpenChange={setKeyDialog}
             connection={connection}
             onDone={(text) => setNotice({ tone: 'success', text })}
+          />
+        </Suspense>
+      ) : null}
+      {credentialsDialog ? (
+        <Suspense fallback={null}>
+          <DatabaseDialog
+            open
+            onOpenChange={setCredentialsDialog}
+            connection={connection}
+            onDone={(text) => {
+              setNotice({ tone: 'success', text })
+              void refresh()
+            }}
           />
         </Suspense>
       ) : null}

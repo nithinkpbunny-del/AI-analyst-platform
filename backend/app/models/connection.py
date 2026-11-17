@@ -55,7 +55,10 @@ def _org_fk() -> Mapped[uuid.UUID]:
 class Connection(IdMixin, TimestampMixin, Base):
     __tablename__ = "connections"
     __table_args__ = (
-        CheckConstraint("type IN ('file', 'google_sheets', 'razorpay', 'shopify')", name="type"),
+        CheckConstraint(
+            "type IN ('file', 'google_sheets', 'razorpay', 'shopify', 'zoho_books', 'sql_database')",
+            name="type",
+        ),
         CheckConstraint("status IN ('active', 'error', 'needs_reauth', 'disabled')", name="status"),
         CheckConstraint("sync_state IN ('idle', 'queued', 'running')", name="sync_state"),
     )

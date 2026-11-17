@@ -15,7 +15,9 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from app.schemas.auth import _Strict
 
-ConnectionTypeName = Literal["file", "google_sheets", "razorpay", "shopify"]
+ConnectionTypeName = Literal[
+    "file", "google_sheets", "razorpay", "shopify", "zoho_books", "sql_database"
+]
 StatusName = Literal["active", "error", "needs_reauth", "disabled"]
 SyncStateName = Literal["idle", "queued", "running"]
 AccessName = Literal["all", "selected"]
@@ -99,6 +101,38 @@ class ShopifyOut(BaseModel):
     all_orders: bool
 
 
+class ZohoOrganizationOut(BaseModel):
+    id: str
+    name: str
+
+
+class ZohoOut(BaseModel):
+    region: str  # Zoho's data centre ("in", "com", "eu", ...)
+    region_name: str
+    organization_id: str
+    organization_name: str | None
+    currency: str | None
+    # Other organisations the Zoho account can see (the Owner may switch to one of them).
+    organizations: list[ZohoOrganizationOut]
+    # Zoho's daily API calls for the organisation, as counted by this platform (D97). Only on the detail.
+    calls_today: int | None = None
+    daily_limit: int
+
+
+class DatabaseOut(BaseModel):
+    engine: Literal["postgresql", "mysql"]
+    host: str
+    port: int
+    database: str
+    username_masked: str  # the password is never returned
+    ssl_mode: Literal["verify-full", "require", "disable"]
+    tables: list[str]  # the exposed tables ("schema.table" on PostgreSQL)
+    # The connection check found that the database user can change data (D100); the session is read-only anyway.
+    can_write: bool
+    write_reasons: list[str]
+    server_version: str | None
+
+
 class ConnectionOut(BaseModel):
     id: uuid.UUID
     type: ConnectionTypeName
@@ -116,6 +150,8 @@ class ConnectionOut(BaseModel):
     google: GoogleOut | None = None
     razorpay: RazorpayOut | None = None
     shopify: ShopifyOut | None = None
+    zoho: ZohoOut | None = None
+    database: DatabaseOut | None = None
 
 
 class DictionaryMoveOut(BaseModel):
@@ -153,11 +189,26 @@ class ShopifySourceOut(BaseModel):
     stand_in: bool
 
 
+class ZohoSourceOut(BaseModel):
+    available: bool
+    stand_in: bool
+    region: str
+
+
+class DatabaseSourceOut(BaseModel):
+    available: bool
+    # Development only: SSL may be turned off, and these demo database hosts may be private addresses.
+    ssl_off_allowed: bool
+    demo_hosts: list[str]
+
+
 class SourcesOut(BaseModel):
     upload_max_mb: int
     google_sheets: GoogleSourceOut
     razorpay: RazorpaySourceOut
     shopify: ShopifySourceOut
+    zoho_books: ZohoSourceOut
+    database: DatabaseSourceOut
 
 
 class ConnectionList(BaseModel):
@@ -314,3 +365,76 @@ class ShopifyFinishRequest(_Strict):
 class ShopifyFinishOut(BaseModel):
     connection: ConnectionOut
     reconnected: bool
+
+
+class ZohoStartRequest(_Strict):
+    """Start connecting Zoho Books, or signing in again for a connection (``connection_id``)."""
+
+    connection_id: uuid.UUID | None = None
+
+
+class ZohoStartOut(BaseModel):
+    authorization_url: str
+
+
+class ZohoFinishRequest(_Strict):
+    state: str = Field(min_length=16, max_length=200)
+    code: str = Field(min_length=1, max_length=2048)
+
+
+class ZohoFinishOut(BaseModel):
+    connection: ConnectionOut
+    reconnected: bool
+
+
+class ZohoOrganizationRequest(_Strict):
+    organization_id: str = Field(pattern=r"^[0-9]{1,30}$")
+
+
+class DatabaseRequest(_Strict):
+    """Connection details of a customer database. The password is write-only (stored encrypted)."""
+
+    engine: Literal["postgresql", "mysql"]
+    host: str = Field(min_length=1, max_length=253)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    database: str = Field(min_length=1, max_length=128)
+    username: str = Field(min_length=1, max_length=128)
+    password: SecretStr = Field(min_length=1, max_length=1024)
+    ssl_mode: Literal["verify-full", "require", "disable"] = "require"
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @field_validator("host", "database", "username")
+    @classmethod
+    def _no_control_characters(cls, value: str) -> str:
+        value = value.strip()
+        if not value or re.search(r"[\x00-\x1f\x7f]", value):
+            raise ValueError("Remove spaces and special characters at the ends.")
+        return value
+
+
+class DatabaseTableOut(BaseModel):
+    ref: str
+    name: str
+    kind: Literal["table", "view"]
+    rows_estimate: int | None
+    chosen: bool
+
+
+class DatabaseTablesOut(BaseModel):
+    tables: list[DatabaseTableOut]
+    max_tables: int
+
+
+class DatabaseTablesRequest(_Strict):
+    tables: list[str] = Field(max_length=100)
+
+    @field_validator("tables")
+    @classmethod
+    def _unique(cls, value: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in value:
+            if not item or len(item) > 300 or re.search(r"[\x00-\x1f\x7f]", item):
+                raise ValueError("This is not a table name.")
+            if item not in out:
+                out.append(item)
+        return out
