@@ -151,7 +151,7 @@ const dictionary = {
       money_name: 'a money-like name',
       paise_name: 'the name says paise',
       source_paise: 'Razorpay sends this amount in paise',
-      source_rupees: 'Shopify sends this amount in rupees',
+      source_rupees: 'The source sends this amount in rupees',
       paise_signature: 'a payments table with whole-number amounts',
       paise_amount: 'a whole-number amount next to INR',
       percent_marker: 'a % in the values',

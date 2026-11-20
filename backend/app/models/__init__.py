@@ -17,6 +17,7 @@ from app.models.goals import DashboardTile, Goal
 from app.models.invitation import Invitation
 from app.models.org import Membership, Organization
 from app.models.reports import BriefingRun, BriefingSetting, Report, Share, Task
+from app.models.tally import TallyDevice, TallyRecord, TallySync
 from app.models.two_factor import KnownDevice, LoginChallenge, TwoFactor, TwoFactorCode
 from app.models.user import User
 
@@ -47,6 +48,9 @@ __all__ = [
     "Session",
     "Share",
     "Snapshot",
+    "TallyDevice",
+    "TallyRecord",
+    "TallySync",
     "Task",
     "TwoFactor",
     "TwoFactorCode",

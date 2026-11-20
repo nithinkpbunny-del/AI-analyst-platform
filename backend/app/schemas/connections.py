@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 from app.schemas.auth import _Strict
 
 ConnectionTypeName = Literal[
-    "file", "google_sheets", "razorpay", "shopify", "zoho_books", "sql_database"
+    "file", "google_sheets", "razorpay", "shopify", "zoho_books", "sql_database", "tally"
 ]
 StatusName = Literal["active", "error", "needs_reauth", "disabled"]
 SyncStateName = Literal["idle", "queued", "running"]
@@ -93,6 +93,34 @@ class RazorpayOut(BaseModel):
     mode: Literal["live", "test"]
 
 
+class TallyOut(BaseModel):
+    """The Tally PC behind a Tally connection (M16, D112). ``state`` drives the Connections screen."""
+
+    state: Literal[
+        "not_paired",
+        "offline",
+        "tally_closed",
+        "no_company",
+        "tally_error",
+        "first_sync",
+        "connected",
+    ]
+    device_name: str | None
+    bridge_version: str | None
+    paired_at: datetime | None
+    last_seen_at: datetime | None
+    last_sync_at: datetime | None
+    last_full_sync_at: datetime | None
+    company: str | None
+    # A short code the bridge reported (company_mismatch, platform_unreachable, ...), for a plain message.
+    problem: str | None
+    syncing: bool
+    next_sync_at: datetime | None
+    refresh_pending: bool
+    rows: dict[str, int]
+    unpaired_at: datetime | None
+
+
 class ShopifyOut(BaseModel):
     shop: str  # the store's *.myshopify.com address (not a secret)
     shop_name: str | None
@@ -152,6 +180,7 @@ class ConnectionOut(BaseModel):
     shopify: ShopifyOut | None = None
     zoho: ZohoOut | None = None
     database: DatabaseOut | None = None
+    tally: TallyOut | None = None
 
 
 class DictionaryMoveOut(BaseModel):

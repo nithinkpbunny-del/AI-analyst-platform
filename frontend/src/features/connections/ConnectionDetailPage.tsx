@@ -31,10 +31,12 @@ import { CONNECTIONS, fileProblem } from './keys'
 import { useSpreadsheetPicker } from './useSpreadsheetPicker'
 import { ZohoLines, ZohoOrganizationPicker } from './ZohoDetails'
 import { DatabaseLines, DatabaseTables } from './DatabaseDetails'
+import { TallyLines, UnpairTally } from './TallyDetails'
 
 const RazorpayDialog = lazy(() =>
   import('./RazorpayDialog').then((m) => ({ default: m.RazorpayDialog })),
 )
+const TallyDialog = lazy(() => import('./TallyDialog').then((m) => ({ default: m.TallyDialog })))
 const DatabaseDialog = lazy(() =>
   import('./DatabaseDialog').then((m) => ({ default: m.DatabaseDialog })),
 )
@@ -460,7 +462,14 @@ export function ConnectionDetailPage() {
   const detail = useQuery({
     queryKey: key,
     queryFn: () => connectionsApi.get(connectionId),
-    refetchInterval: (query) => (query.state.data && isSyncing(query.state.data) ? POLL_MS : false),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (data && isSyncing(data)) return POLL_MS
+      // Tally: the PC pushes on its own; keep the page current while waiting for it.
+      if (data?.tally)
+        return data.tally.state === 'connected' && !data.tally.refresh_pending ? 60_000 : 5_000
+      return false
+    },
     retry: false,
   })
   const [notice, setNotice] = useState<Notice>(null)
@@ -470,6 +479,7 @@ export function ConnectionDetailPage() {
   const [replacing, setReplacing] = useState(false)
   const [keyDialog, setKeyDialog] = useState(false)
   const [credentialsDialog, setCredentialsDialog] = useState(false)
+  const [tallyCode, setTallyCode] = useState(false)
   const [discarding, setDiscarding] = useState<FileVersion | null>(null)
   const picker = useSpreadsheetPicker()
   // Shares the list's cache; only the upload limit is needed from it here.
@@ -486,8 +496,13 @@ export function ConnectionDetailPage() {
     setNotice({ tone: 'error', text: message(error, t('connections.loadFailed')) })
   const reread = useMutation({
     mutationFn: () => connectionsApi.refresh(connectionId),
-    onSuccess: () => {
-      setNotice({ tone: 'success', text: t('connections.detail.refreshed') })
+    onSuccess: (updated) => {
+      setNotice({
+        tone: 'success',
+        text: updated.tally
+          ? t('connections.tally.refreshAsked')
+          : t('connections.detail.refreshed'),
+      })
       void refresh()
     },
     onError: fail,
@@ -699,6 +714,7 @@ export function ConnectionDetailPage() {
           ) : null}
           {connection.zoho ? <ZohoLines zoho={connection.zoho} /> : null}
           {connection.database ? <DatabaseLines database={connection.database} /> : null}
+          {connection.tally ? <TallyLines tally={connection.tally} /> : null}
           {paused ? (
             <p className="m-0 mt-2 text-small text-ink-muted">
               {t('connections.detail.pausedNote')}
@@ -842,6 +858,19 @@ export function ConnectionDetailPage() {
                   {t('connections.zoho.reconnect')}
                 </Button>
               ) : null}
+              {connection.type === 'tally' ? (
+                <Button variant="ghost" onClick={() => setTallyCode(true)}>
+                  {t('connections.tally.newCode')}
+                </Button>
+              ) : null}
+              {connection.tally?.device_name && connection.tally.state !== 'not_paired' ? (
+                <UnpairTally
+                  connectionId={connectionId}
+                  pcName={connection.tally.device_name}
+                  onDone={(text) => setNotice({ tone: 'success', text })}
+                  onError={fail}
+                />
+              ) : null}
               <Button variant="ghost" onClick={() => setReplacing(true)}>
                 {t('dictionary.replace.button')}
               </Button>
@@ -977,6 +1006,18 @@ export function ConnectionDetailPage() {
             void refresh()
           }}
         />
+      ) : null}
+      {tallyCode ? (
+        <Suspense fallback={null}>
+          <TallyDialog
+            open
+            onOpenChange={(next) => {
+              setTallyCode(next)
+              if (!next) void refresh()
+            }}
+            connectionId={connectionId}
+          />
+        </Suspense>
       ) : null}
       {keyDialog ? (
         <Suspense fallback={null}>

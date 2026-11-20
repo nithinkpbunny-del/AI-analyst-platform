@@ -2,6 +2,7 @@ import './strings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   BookOpenCheck,
+  Calculator,
   CreditCard,
   Database,
   FileSpreadsheet,
@@ -27,6 +28,7 @@ const DatabaseDialog = lazy(() =>
   import('./DatabaseDialog').then((m) => ({ default: m.DatabaseDialog })),
 )
 
+const TallyDialog = lazy(() => import('./TallyDialog').then((m) => ({ default: m.TallyDialog })))
 const ShopifyDialog = lazy(() =>
   import('./ShopifyDialog').then((m) => ({ default: m.ShopifyDialog })),
 )
@@ -112,6 +114,7 @@ export function AddData({ sources }: { sources: Sources }) {
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [uploading, setUploading] = useState<string | null>(null)
   const [razorpayOpen, setRazorpayOpen] = useState(false)
+  const [tallyOpen, setTallyOpen] = useState(false)
   const [shopifyOpen, setShopifyOpen] = useState(false)
   const [databaseOpen, setDatabaseOpen] = useState(false)
   const shopify = sources.shopify
@@ -260,6 +263,16 @@ export function AddData({ sources }: { sources: Sources }) {
         </div>
         <div className="flex flex-col gap-3">
           <h3 className="flex items-center gap-2 font-sans text-body font-semibold tracking-normal">
+            <Calculator className="size-5 text-neel" aria-hidden strokeWidth={1.5} />
+            {t('connections.tally.addTitle')}
+          </h3>
+          <div className="flex flex-col items-start gap-2">
+            <Button onClick={() => setTallyOpen(true)}>{t('connections.tally.connect')}</Button>
+            <p className="m-0 text-caption text-ink-muted">{t('connections.tally.addHint')}</p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-3">
+          <h3 className="flex items-center gap-2 font-sans text-body font-semibold tracking-normal">
             <Database className="size-5 text-neel" aria-hidden strokeWidth={1.5} />
             {t('connections.add.databaseTitle')}
           </h3>
@@ -278,6 +291,11 @@ export function AddData({ sources }: { sources: Sources }) {
       {databaseOpen ? (
         <Suspense fallback={null}>
           <DatabaseDialog open={databaseOpen} onOpenChange={setDatabaseOpen} sources={sources} />
+        </Suspense>
+      ) : null}
+      {tallyOpen ? (
+        <Suspense fallback={null}>
+          <TallyDialog open={tallyOpen} onOpenChange={setTallyOpen} />
         </Suspense>
       ) : null}
       {shopifyOpen ? (

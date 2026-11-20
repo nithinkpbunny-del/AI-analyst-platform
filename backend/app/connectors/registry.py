@@ -25,6 +25,7 @@ from app.connectors.google_sheets import GoogleSheetsConnector, GoogleSheetsSetu
 from app.connectors.razorpay import RazorpayConnector, RazorpaySetup
 from app.connectors.shopify import ShopifyConnector, ShopifySetup
 from app.connectors.sql_database import ConnectParams, DatabaseSetup, SqlDatabaseConnector
+from app.connectors.tally import TallyConnector
 from app.connectors.zoho_books import ZohoBooksConnector, ZohoQuota, ZohoSetup
 from app.data.objects import ObjectStore
 from app.email.sender import EmailSender
@@ -46,6 +47,7 @@ TYPE_LABELS = {
     "shopify": "Shopify",
     "zoho_books": "Zoho Books",
     "sql_database": "PostgreSQL or MySQL database",
+    "tally": "Tally",
 }
 
 
@@ -176,6 +178,16 @@ def build_connector(
         return _zoho(db, connection, runtime, timezone=timezone, max_rows=max_rows)
     if connection.type == "sql_database":
         return database_connector(db, connection, runtime, timezone=timezone)
+    if connection.type == "tally":
+        # No credentials: the bridge on the Tally PC pushes; this reads what it sent (D110).
+        return TallyConnector(
+            session_factory=runtime.session_factory,
+            org_id=connection.org_id,
+            connection_id=connection.id,
+            max_rows=max_rows,
+            clock=runtime.clock,
+            offline_after_minutes=runtime.settings.tally_offline_after_minutes,
+        )
     raise ConnectorError("invalid", "This kind of connection is not supported.")  # pragma: no cover
 
 

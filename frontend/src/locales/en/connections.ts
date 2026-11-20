@@ -12,7 +12,7 @@ const connections = {
     add: {
       title: 'Add data',
       intro:
-        'Upload a spreadsheet, or connect Google Sheets, Razorpay, Shopify, Zoho Books or your own database. Each sheet, tab, kind of record or database table becomes a table you can ask about.',
+        'Upload a spreadsheet, or connect Google Sheets, Razorpay, Shopify, Zoho Books, Tally or your own database. Each sheet, tab, kind of record or database table becomes a table you can ask about.',
       uploadTitle: 'Excel or CSV file',
       uploadHint:
         '.xlsx or .csv, up to {{mb}} MB. Every sheet is read; dates like 05/01/2026 are read day first.',
@@ -199,6 +199,73 @@ const connections = {
         'This app only reads from Razorpay. Amounts are kept in paise, as Razorpay sends them.',
       replaceButton: 'Replace the API key',
     },
+    tally: {
+      addTitle: 'Tally',
+      addHint:
+        'Ledgers, vouchers, stock items and the trial balance. A small helper on the Tally PC sends them; it only reads from Tally.',
+      connect: 'Connect Tally',
+      title: 'Connect Tally',
+      intro:
+        'Tally runs on your PC, so a small helper (the Tally bridge) sends its data here. It only reads from Tally and never changes anything in it.',
+      name: 'Name (optional)',
+      getCode: 'Get a pairing code',
+      gettingCode: 'Getting a code…',
+      codeTitle: 'Pair the Tally PC',
+      codeLabel: 'Pairing code',
+      codeExpires: 'Works once, until {{time}}.',
+      codeExpired: 'This code has expired. Get a new one.',
+      step1: 'On the PC where Tally runs, install the Tally bridge.',
+      step1Download: 'Download the Tally bridge',
+      step1Ask: 'Ask your administrator for the Tally bridge installer (docs/SETUP_TALLY.md).',
+      step2:
+        'In Tally, turn on the XML server: Help (F1) > Settings > Connectivity > Client/Server configuration, TallyPrime acts as "Both", port 9000.',
+      step3: 'On that PC, run this once, then start the bridge with "tally-bridge run":',
+      step4: 'This page shows "Connected" when the PC is paired and the first data has arrived.',
+      done: 'Done',
+      newCode: 'Get a new pairing code',
+      newCodeTitle: 'A new pairing code',
+      unpair: 'Unpair this PC',
+      unpairTitle: 'Unpair {{name}}?',
+      unpairBody:
+        'The PC stops sending data at once. The data it already sent stays, so questions still work, until you pair a PC again or remove the connection.',
+      unpairConfirm: 'Unpair the PC',
+      unpaired: 'The Tally PC was unpaired.',
+      failed: 'This did not work. Try again.',
+      copy: 'Copy',
+      copied: 'Copied',
+      refreshAsked:
+        'The Tally PC was asked to read Tally again. New data arrives within a minute when it is online.',
+      refreshWaiting: 'Waiting for the Tally PC to read Tally again.',
+      readOnlyNote:
+        'This app only reads from Tally: the bridge sends export requests only. Amounts are in rupees, debits shown as positive.',
+      state: {
+        not_paired: 'Waiting for a Tally PC to pair',
+        offline: 'Tally PC offline since {{when}}',
+        offlineNever: 'Tally PC offline',
+        tally_closed: 'Tally is not open on {{pc}}',
+        no_company: 'No company is open in Tally on {{pc}}',
+        tally_error: 'Tally answered {{pc}} with an error',
+        first_sync: 'Reading Tally for the first time',
+        connected: 'Connected',
+      },
+      pcLine: 'PC: {{pc}} · bridge {{version}}',
+      companyLine: 'Company: {{company}}',
+      lastSeen: 'Last seen {{when}}',
+      lastSync: 'Last data {{when}}',
+      noSyncYet: 'No data received yet',
+      lastFullSync: 'last full read {{when}}',
+      problems: {
+        company_mismatch:
+          'The PC is sending another company than this connection reads. Open the right company in Tally, or add another Tally connection for it.',
+        platform_unreachable:
+          'The PC could not reach this app for a while. It keeps trying and continues where it stopped.',
+        tally_unreachable: 'Tally is not answering on the PC. Open Tally and keep it running.',
+        tally_error: 'Tally answered the PC with an error. Check that a company is open in Tally.',
+        no_company: 'No company is open in Tally on the PC.',
+        company_not_open: 'The company chosen for the bridge is not open in Tally.',
+        connection_paused: 'This connection is paused, so the PC is not sending data.',
+      },
+    },
     types: {
       file: 'Excel or CSV file',
       google_sheets: 'Google Sheets',
@@ -206,6 +273,7 @@ const connections = {
       shopify: 'Shopify',
       zoho_books: 'Zoho Books',
       sql_database: 'Database',
+      tally: 'Tally',
     },
     status: { active: 'Live', needs_reauth: 'Needs sign-in', error: 'Error', disabled: 'Paused' },
     reading: 'Reading the data…',

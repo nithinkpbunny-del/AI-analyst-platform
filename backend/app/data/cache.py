@@ -213,7 +213,9 @@ class DatasetCache:
                 if version is not None and version == snapshot.source_version:
                     frame = self._read(snapshot)
                     if frame is not None:
-                        return self._confirm(snapshot, frame)
+                        # A pushed source (Tally) confirms the copy, not that the data is newer (D111).
+                        pushed = bool(getattr(source_connector, "pushed", False))
+                        return self._confirm(snapshot, frame, pushed=pushed)
             old: pd.DataFrame | None = None
             if snapshot is not None and snapshot.cursor and source_connector.supports_incremental():
                 old = self._read(snapshot)
@@ -238,7 +240,9 @@ class DatasetCache:
                 close_connector(source_connector)
 
     # -------------------------------------------------------------------------------------- writes
-    def _confirm(self, snapshot: Snapshot, frame: pd.DataFrame) -> CachedFrame:
+    def _confirm(
+        self, snapshot: Snapshot, frame: pd.DataFrame, *, pushed: bool = False
+    ) -> CachedFrame:
         now = self._rt.clock()
         with self._session() as db:
             row = db.get(Snapshot, snapshot.id)
@@ -246,9 +250,12 @@ class DatasetCache:
                 row.checked_at = now
                 dataset = db.get(Dataset, row.dataset_id)
                 if dataset is not None:
-                    dataset.last_fetched_at = now
+                    if not pushed:
+                        dataset.last_fetched_at = now
                     dataset.last_error = None
-                    self._mark_connection_ok(db, dataset.connection_id, now)
+                    self._mark_connection_ok(
+                        db, dataset.connection_id, row.fetched_at if pushed else now
+                    )
                 db.commit()
                 snapshot = row
         return self._cached(snapshot, frame, "unchanged")
@@ -262,6 +269,8 @@ class DatasetCache:
         source: Source,
     ) -> CachedFrame:
         now = self._rt.clock()
+        # When the rows left the source: now, or for a pushed source the time of its last push (D111).
+        as_of = min(result.data_as_of, now) if result.data_as_of is not None else now
         max_rows = self._rt.settings.max_rows_per_dataset
         truncated = result.truncated or len(frame) > max_rows
         frame = frame.head(max_rows)
@@ -299,7 +308,7 @@ class DatasetCache:
                 org_id=self._org_id,
                 dataset_id=dataset_id,
                 storage_key=key,
-                fetched_at=now,
+                fetched_at=as_of,
                 checked_at=now,
                 cursor=result.cursor,
                 source_version=result.source_version,
@@ -319,10 +328,10 @@ class DatasetCache:
             snapshots.delete_snapshots(db, self._rt.objects, older)
             dataset.schema_json = schema
             dataset.row_count_estimate = len(frame)
-            dataset.last_fetched_at = now
+            dataset.last_fetched_at = as_of
             dataset.quality_json = found
             dataset.last_error = None
-            self._mark_connection_ok(db, ctx.connection_id, now)
+            self._mark_connection_ok(db, ctx.connection_id, as_of)
             db.commit()
         return self._cached(row, frame, source)
 
@@ -331,7 +340,8 @@ class DatasetCache:
         connection = db.get(Connection, connection_id)
         if connection is None:
             return
-        connection.last_success_at = now
+        if connection.last_success_at is None or now > connection.last_success_at:
+            connection.last_success_at = now
         if connection.status in ("error", "needs_reauth"):
             connection.status = "active"
             connection.last_error = None

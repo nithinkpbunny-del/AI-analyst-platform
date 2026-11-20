@@ -56,7 +56,8 @@ class Connection(IdMixin, TimestampMixin, Base):
     __tablename__ = "connections"
     __table_args__ = (
         CheckConstraint(
-            "type IN ('file', 'google_sheets', 'razorpay', 'shopify', 'zoho_books', 'sql_database')",
+            "type IN ('file', 'google_sheets', 'razorpay', 'shopify', 'zoho_books', 'sql_database', "
+            "'tally')",
             name="type",
         ),
         CheckConstraint("status IN ('active', 'error', 'needs_reauth', 'disabled')", name="status"),

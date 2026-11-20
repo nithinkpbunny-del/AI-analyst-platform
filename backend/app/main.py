@@ -19,6 +19,7 @@ from app.api import (
     ai,
     audit,
     auth,
+    bridge,
     briefings,
     chat,
     connections,
@@ -30,6 +31,7 @@ from app.api import (
     invitations,
     org,
     reports,
+    tally,
     tasks,
     team,
     today,
@@ -202,7 +204,11 @@ def create_app(
     app.include_router(team.router)
     app.include_router(org.router)
     app.include_router(ai.router)
+    app.include_router(
+        tally.router
+    )  # before connections: /connections/tally is not a connection id
     app.include_router(connections.router)
+    app.include_router(bridge.router)
     app.include_router(dictionary.router)
     app.include_router(chat.router)
     app.include_router(whatif.router)

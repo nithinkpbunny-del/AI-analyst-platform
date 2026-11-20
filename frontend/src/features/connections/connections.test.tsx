@@ -19,6 +19,8 @@ import {
   demoDatabaseTables,
   demoDatasetPreview,
   demoTargets,
+  demoTally,
+  demoTallyDetail,
 } from '../../testing/connectionFixtures'
 import { apiError, fakeApi } from '../../testing/fakeApi'
 
@@ -1071,5 +1073,134 @@ describe('Databases', () => {
     expect(await screen.findByText(/PostgreSQL at db.urbancart.in/)).toBeVisible()
     expect(screen.queryByRole('list', { name: 'Tables in the database' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Replace credentials' })).toBeNull()
+  })
+})
+
+describe('Tally', () => {
+  const pairing = {
+    code: 'K7QM-3XRP',
+    expires_at: '2099-01-01T10:00:00+00:00',
+    server_url: 'https://app.example.in',
+    download_url: null,
+  }
+
+  it('adds a Tally connection and shows the one-time code with the steps', async () => {
+    const api = routes({
+      'POST /connections/tally': {
+        status: 201,
+        body: {
+          connection: { ...demoTally, tally: { ...demoTally.tally!, state: 'not_paired' } },
+          pairing,
+        },
+      },
+    })
+    renderApp('/connections')
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect Tally' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Connect Tally' })
+    expect(within(dialog).getByText(/never changes anything in it/)).toBeVisible()
+    await userEvent.type(within(dialog).getByLabelText('Name (optional)'), 'Tally (head office)')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Get a pairing code' }))
+    const paired = await screen.findByRole('dialog', { name: 'Pair the Tally PC' })
+    expect(within(paired).getByTestId('tally-code')).toHaveTextContent('K7QM-3XRP')
+    expect(
+      within(paired).getByText('tally-bridge pair K7QM-3XRP --server https://app.example.in'),
+    ).toBeVisible()
+    expect(within(paired).getByText(/Works once, until/)).toBeVisible()
+    expect(within(paired).getByText(/Ask your administrator/)).toBeVisible()
+    expect(api.body('POST /connections/tally')).toEqual({ name: 'Tally (head office)' })
+  })
+
+  it('says when a code has expired', async () => {
+    routes({
+      'POST /connections/tally': {
+        status: 201,
+        body: {
+          connection: demoTally,
+          pairing: { ...pairing, expires_at: '2020-01-01T00:00:00Z' },
+        },
+      },
+    })
+    renderApp('/connections')
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect Tally' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a pairing code' }))
+    expect(await screen.findByText('This code has expired. Get a new one.')).toBeVisible()
+  })
+
+  it('shows on the card when the Tally PC is offline', async () => {
+    routes({
+      'GET /connections': {
+        status: 200,
+        body: {
+          ...demoConnectionList,
+          connections: [{ ...demoTally, tally: { ...demoTally.tally!, state: 'offline' } }],
+        },
+      },
+    })
+    renderApp('/connections')
+    const card = await screen.findByRole('article', { name: 'Tally' })
+    expect(within(card).getByText(/Tally PC offline since/)).toBeInTheDocument()
+  })
+
+  it('shows the PC, the company, the last data and lets the Owner ask for a refresh', async () => {
+    const api = routes({
+      'GET /connections/c8': { status: 200, body: demoTallyDetail },
+      'POST /connections/c8/refresh': {
+        status: 200,
+        body: { ...demoTally, tally: { ...demoTally.tally!, refresh_pending: true } },
+      },
+    })
+    renderApp('/connections/c8')
+    expect(await screen.findByTestId('tally-state')).toHaveTextContent('Connected')
+    expect(screen.getByText(/PC: ACCOUNTS-PC · bridge 1.0.0/)).toBeVisible()
+    expect(screen.getByText(/Company: UrbanCart Retail \(demo\)/)).toBeVisible()
+    expect(screen.getByText(/only reads from Tally/)).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh now' }))
+    expect(await screen.findByText(/asked to read Tally again/)).toBeVisible()
+    expect(api.count('POST /connections/c8/refresh')).toBe(1)
+  })
+
+  it('explains a problem the PC reported', async () => {
+    routes({
+      'GET /connections/c8': {
+        status: 200,
+        body: { ...demoTallyDetail, tally: { ...demoTally.tally!, problem: 'company_mismatch' } },
+      },
+    })
+    renderApp('/connections/c8')
+    expect(await screen.findByText(/sending another company/)).toBeVisible()
+  })
+
+  it('gets a new pairing code and unpairs the PC after confirmation', async () => {
+    const api = routes({
+      'GET /connections/c8': { status: 200, body: demoTallyDetail },
+      'POST /connections/c8/tally/pairing-code': { status: 200, body: pairing },
+      'POST /connections/c8/tally/unpair': {
+        status: 200,
+        body: {
+          ...demoTally,
+          status: 'needs_reauth',
+          tally: { ...demoTally.tally!, state: 'not_paired' },
+        },
+      },
+    })
+    renderApp('/connections/c8')
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a new pairing code' }))
+    const dialog = await screen.findByRole('dialog', { name: 'A new pairing code' })
+    expect(await within(dialog).findByTestId('tally-code')).toHaveTextContent('K7QM-3XRP')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Unpair this PC' }))
+    const confirm = await screen.findByRole('dialog', { name: 'Unpair ACCOUNTS-PC?' })
+    expect(within(confirm).getByText(/stops sending data at once/)).toBeVisible()
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Unpair the PC' }))
+    expect(await screen.findByText('The Tally PC was unpaired.')).toBeVisible()
+    expect(api.count('POST /connections/c8/tally/unpair')).toBe(1)
+  })
+
+  it('shows analysts the PC without the controls', async () => {
+    routes({ 'GET /connections/c8': { status: 200, body: demoTallyDetail } })
+    renderApp('/connections/c8', { session: analyst })
+    expect(await screen.findByTestId('tally-state')).toHaveTextContent('Connected')
+    expect(screen.queryByRole('button', { name: 'Unpair this PC' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Get a new pairing code' })).not.toBeInTheDocument()
   })
 })

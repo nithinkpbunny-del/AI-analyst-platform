@@ -298,3 +298,18 @@ def make_database_connection(
         service.sync_connection(runtime, org_id=org_id, connection_id=connection.id)
         db.expire_all()
     return connection
+
+
+def make_tally_connection(db: DbSession, org_id: uuid.UUID, *, name: str = "Tally") -> Connection:
+    """A Tally connection with no PC paired yet (M16)."""
+    connection = Connection(
+        org_id=org_id,
+        type="tally",
+        name=name,
+        status="active",
+        config={"tally": {}},
+        sync_state="idle",
+    )
+    db.add(connection)
+    db.commit()
+    return connection

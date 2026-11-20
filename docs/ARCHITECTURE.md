@@ -87,7 +87,9 @@ flowchart LR
   Shopify (M12: OAuth, GraphQL queries, bulk exports for large first reads, D92-D95) and Zoho Books (M13: region-aware
   OAuth, read scopes, per-organisation daily call quota with the stored copy used near the limit, P&L report,
   D96-D98) and PostgreSQL/MySQL (M14: read-only in four layers, public addresses only, SSL by default, chosen
-  tables, push-down `query_source`, D100-D102) exist; Tally follows in Phase 3.
+  tables, push-down `query_source`, D100-D102) and Tally (M16: a bridge on the customer's PC pairs with a one-time
+  code, reads Tally with export requests only and pushes batches outbound over HTTPS into `tally_records`; the
+  platform can only ask it to read again; the `tally` connector types the rows into seven tables, D108-D113) exist.
 - **Typed tables** (`connectors/tabular.py`): header detection, Indian dates and amounts, units, type per column.
 - **Cache** (`data/cache.py`): reuse a Parquet snapshot within `CACHE_TTL_SECONDS`; afterwards ask the source for
   its version and keep the snapshot if unchanged; fetch incrementally where supported; otherwise read everything.

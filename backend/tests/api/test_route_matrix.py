@@ -50,6 +50,7 @@ from tests.datasources import (
     make_file_connection,
     make_razorpay_connection,
     make_sheets_connection,
+    make_tally_connection,
     make_zoho_connection,
 )
 from tests.recorded_google import NO_ACCESS_ID, SHEET_ID
@@ -144,6 +145,16 @@ PERSONAL = {
     ("DELETE", "/dashboard/tiles/{tile_id}"),
 }
 
+# The Tally bridge's API (M16): a Tally PC calls these with a device token, not a person's session (pairing uses a
+# one-time code). Tested in test_tally_bridge.py: 401 without a token, with a bad or revoked one; 400/429 for
+# pairing codes; 413/415/422 for bodies; 409 for another company; rows always land in the device's own workspace.
+DEVICE = {
+    ("POST", "/bridge/tally/pair"),
+    ("POST", "/bridge/tally/poll"),
+    ("POST", "/bridge/tally/batches"),
+    ("POST", "/bridge/tally/syncs/{sync_id}/complete"),
+}
+
 # Routes whose success depends on the workspace's state (M10): cancelling a deletion needs one to be requested.
 # Tested in test_today_privacy.py (TestDeletion: success, 409, 401, 403 for Analysts, Viewers and Owners without 2FA).
 STATEFUL = {
@@ -181,6 +192,8 @@ class Fixtures:
     zoho_b: str = ""
     database_a: str = ""
     database_b: str = ""
+    tally_a: str = ""
+    tally_b: str = ""
     version_a: str = ""  # a readable file version that is not in use
     version_b: str = ""
     dict_version_a: str = ""  # a confirmed version of the business dictionary
@@ -206,6 +219,7 @@ class Fixtures:
                 "razorpay",
                 "zoho",
                 "database",
+                "tally",
                 "version",
                 "dict_version",
                 "goal",
@@ -609,6 +623,20 @@ CASES: dict[tuple[str, str], Case] = {
         body={"tables": ["public.orders"]},
         invalid_body={"tables": "public.orders"},
     ),
+    ("POST", "/connections/tally"): Case(
+        "POST",
+        "/connections/tally",
+        P.CONNECTIONS_MANAGE,
+        201,
+        body={"name": "Tally"},
+        invalid_body={"name": ""},
+    ),
+    ("POST", "/connections/{connection_id}/tally/pairing-code"): Case(
+        "POST", "/connections/{tally}/tally/pairing-code", P.CONNECTIONS_MANAGE, 200
+    ),
+    ("POST", "/connections/{connection_id}/tally/unpair"): Case(
+        "POST", "/connections/{tally}/tally/unpair", P.CONNECTIONS_MANAGE, 200
+    ),
     ("POST", "/connections/razorpay"): Case(
         "POST",
         "/connections/razorpay",
@@ -646,13 +674,13 @@ def _api_routes(client: TestClient) -> set[tuple[str, str]]:
 
 def test_every_route_is_classified(client: TestClient) -> None:
     routes = _api_routes(client)
-    unclassified = routes - PUBLIC - SELF - PERSONAL - DATA_ROUTES - STATEFUL - set(CASES)
+    unclassified = routes - PUBLIC - SELF - PERSONAL - DATA_ROUTES - STATEFUL - DEVICE - set(CASES)
     assert unclassified == set(), (
         "New routes need tests: add them to PUBLIC, SELF or CASES in tests/api/test_route_matrix.py"
     )
-    assert (PUBLIC | SELF | PERSONAL | DATA_ROUTES | STATEFUL | set(CASES)) - routes == set(), (
-        "stale entries"
-    )
+    assert (
+        PUBLIC | SELF | PERSONAL | DATA_ROUTES | STATEFUL | DEVICE | set(CASES)
+    ) - routes == set(), "stale entries"
 
 
 @pytest.fixture
@@ -781,6 +809,7 @@ def ids(
         org.id: make_database_connection(db, runtime, org.id, sync=False)
         for org in (world.org_a, world.org_b)
     }
+    tallies = {org.id: make_tally_connection(db, org.id) for org in (world.org_a, world.org_b)}
 
     # Each workspace gets a confirmed dictionary (version 1) and a draft (version 2) continuing it.
     dictionaries: dict[Any, str] = {}
@@ -890,6 +919,8 @@ def ids(
         zoho_state=zoho_state,
         database_a=str(databases[world.org_a.id].id),
         database_b=str(databases[world.org_b.id].id),
+        tally_a=str(tallies[world.org_a.id].id),
+        tally_b=str(tallies[world.org_b.id].id),
         zoho_a=str(zoho[world.org_a.id].id),
         zoho_b=str(zoho[world.org_b.id].id),
         member_a=membership(world.analyst_a.id),

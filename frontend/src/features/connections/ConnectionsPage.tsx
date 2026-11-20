@@ -14,6 +14,7 @@ import { connectionsApi, isSyncing } from '../../lib/connectionsApi'
 import { AccessSection } from './AccessSection'
 import { AddData } from './AddData'
 import { CONNECTIONS } from './keys'
+import { tallyStateText } from './tallyText'
 import { summary, typeLabel } from './text'
 
 const POLL_MS = 2000
@@ -88,7 +89,13 @@ export function ConnectionsPage() {
                     reading={isSyncing(connection)}
                     summary={summary(t, connection)}
                     warnings={connection.warnings_count}
-                    message={connection.status === 'active' ? null : connection.last_error}
+                    message={
+                      connection.tally && connection.tally.state !== 'connected'
+                        ? tallyStateText(t, connection.tally)
+                        : connection.status === 'active'
+                          ? null
+                          : connection.last_error
+                    }
                   />
                 </li>
               ))}

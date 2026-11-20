@@ -4,6 +4,7 @@ import type {
   ConnectionList,
   PersonAccess,
   Preview,
+  TallyPc,
 } from '../lib/connectionsApi'
 
 // UrbanCart's connections as the API returns them. Dates are more than a week old, so screens show fixed dates
@@ -467,3 +468,44 @@ export const demoAccess: PersonAccess[] = [
     connection_ids: [],
   },
 ]
+
+export const demoTallyPc: TallyPc = {
+  state: 'connected',
+  device_name: 'ACCOUNTS-PC',
+  bridge_version: '1.0.0',
+  paired_at: '2026-10-30T04:00:00+00:00',
+  last_seen_at: '2026-10-30T04:29:00+00:00',
+  last_sync_at: '2026-10-30T04:25:00+00:00',
+  last_full_sync_at: '2026-10-30T00:30:00+00:00',
+  company: 'UrbanCart Retail (demo)',
+  problem: null,
+  syncing: false,
+  next_sync_at: null,
+  refresh_pending: false,
+  rows: { vouchers: 30112 },
+  unpaired_at: null,
+}
+
+export const demoTally: Connection = {
+  id: 'c8',
+  type: 'tally',
+  name: 'Tally',
+  status: 'active',
+  sync_state: 'idle',
+  last_success_at: '2026-10-30T04:25:00+00:00',
+  last_error: null,
+  created_at: '2026-10-30T04:00:00+00:00',
+  created_by_name: 'Asha Rao',
+  datasets_count: 7,
+  rows_total: 120_000,
+  warnings_count: 0,
+  file: null,
+  google: null,
+  tally: demoTallyPc,
+}
+
+export const demoTallyDetail: ConnectionDetail = {
+  ...demoTally,
+  datasets: [],
+  versions: [],
+}

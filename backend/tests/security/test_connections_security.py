@@ -39,6 +39,7 @@ from tests.datasources import (
     make_razorpay_connection,
     make_sheets_connection,
     make_shopify_connection,
+    make_tally_connection,
     make_zoho_connection,
     upload,
 )
@@ -64,6 +65,9 @@ class TestReadOnly:
             "shopify": make_shopify_connection,
             "zoho_books": make_zoho_connection,
             "sql_database": make_database_connection,
+            # Tally: no network client at all; the bridge pushes and only export requests reach Tally (D109,
+            # tests/security/test_tally_security.py).
+            "tally": lambda db, _runtime, org_id: make_tally_connection(db, org_id),
         }
         connection = makers[kind](db, runtime, world.org_a.id)
         scope_to_org(db, world.org_a.id)

@@ -3,7 +3,7 @@ import type { Role } from './role'
 
 // Shapes as the API sends them (backend app/schemas/connections.py).
 export type ConnectionType =
-  'file' | 'google_sheets' | 'razorpay' | 'shopify' | 'zoho_books' | 'sql_database'
+  'file' | 'google_sheets' | 'razorpay' | 'shopify' | 'zoho_books' | 'sql_database' | 'tally'
 export type ConnectionStatus = 'active' | 'error' | 'needs_reauth' | 'disabled'
 export type SyncState = 'idle' | 'queued' | 'running'
 export type ColumnType = 'boolean' | 'integer' | 'number' | 'date' | 'datetime' | 'text'
@@ -99,6 +99,43 @@ export interface Connection {
   zoho?: ZohoBooks | null
   /** PostgreSQL or MySQL: where it is and which tables are used; the password is never returned. */
   database?: DatabaseInfo | null
+  /** Tally: the paired PC's state (the bridge pushes; nothing is ever sent to Tally). */
+  tally?: TallyPc | null
+}
+
+export type TallyState =
+  | 'not_paired'
+  | 'offline'
+  | 'tally_closed'
+  | 'no_company'
+  | 'tally_error'
+  | 'first_sync'
+  | 'connected'
+
+export interface TallyPc {
+  state: TallyState
+  device_name: string | null
+  bridge_version: string | null
+  paired_at: string | null
+  last_seen_at: string | null
+  last_sync_at: string | null
+  last_full_sync_at: string | null
+  company: string | null
+  /** A short code the bridge reported, e.g. company_mismatch. */
+  problem: string | null
+  syncing: boolean
+  next_sync_at: string | null
+  refresh_pending: boolean
+  rows: Record<string, number>
+  unpaired_at: string | null
+}
+
+/** A one-time code for the bridge on the Tally PC; shown once, it works once and for a few minutes. */
+export interface PairingCode {
+  code: string
+  expires_at: string
+  server_url: string
+  download_url: string | null
 }
 
 export type DatabaseEngine = 'postgresql' | 'mysql'
@@ -335,6 +372,17 @@ export const connectionsApi = {
       method: 'PUT',
       body: { tables },
     }),
+  addTally: (name?: string) =>
+    authedRequest<{ connection: Connection; pairing: PairingCode }>('/connections/tally', {
+      method: 'POST',
+      body: name ? { name } : {},
+    }),
+  tallyPairingCode: (connectionId: string) =>
+    authedRequest<PairingCode>(`/connections/${id(connectionId)}/tally/pairing-code`, {
+      method: 'POST',
+    }),
+  tallyUnpair: (connectionId: string) =>
+    authedRequest<Connection>(`/connections/${id(connectionId)}/tally/unpair`, { method: 'POST' }),
   addRazorpay: (body: RazorpayKey) =>
     authedRequest<Connection>('/connections/razorpay', { method: 'POST', body }),
   replaceRazorpayKey: (connectionId: string, body: RazorpayKey) =>

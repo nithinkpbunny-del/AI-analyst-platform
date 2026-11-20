@@ -116,6 +116,23 @@ class Settings(BaseSettings):
     # Rows read from the database per round trip while a table is read in chunks.
     db_fetch_chunk_rows: int = Field(default=10_000, ge=100, le=100_000)
 
+    # --- Tally bridge (M16; docs/SETUP_TALLY.md) ---
+    # A pairing code works once and only for this long.
+    tally_pairing_code_minutes: int = Field(default=10, ge=1, le=60)
+    # Sent to the bridge: minutes between syncs, hours between full reads, months of vouchers read.
+    tally_sync_interval_minutes: int = Field(default=15, ge=5, le=1440)
+    tally_full_sync_hours: int = Field(default=24, ge=1, le=336)
+    tally_history_months: int = Field(default=36, ge=1, le=120)
+    # One batch from the bridge: at most this many rows, and this many bytes of JSON (after un-gzipping).
+    tally_max_batch_rows: int = Field(default=2000, ge=50, le=10_000)
+    tally_max_batch_bytes: int = Field(default=2_000_000, ge=65_536, le=8_000_000)
+    # No word from the bridge for this long: the Connections screen shows "Tally PC offline since ...".
+    tally_offline_after_minutes: int = Field(default=5, ge=1, le=120)
+    # The bridge's long-poll waits at most this long for a "read again now" request.
+    tally_poll_wait_seconds: int = Field(default=25, ge=0, le=50)
+    # Where Owners download the Windows bridge (shown on the pairing screen). Empty: "ask your administrator".
+    tally_bridge_download_url: str = ""
+
     # --- AI ---
     llm_default_provider: Literal["gemini", "claude"] = "gemini"
     gemini_api_key: SecretStr = SecretStr("")

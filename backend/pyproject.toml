@@ -74,11 +74,13 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S311"]
+"../bridge/tally/bridge_tests/**" = ["S105", "S106", "S311"]
 "../eval/**" = ["S311"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
+testpaths = ["tests", "../bridge/tally/bridge_tests"]
+# The Tally bridge (bridge/tally) is tested, linted and type-checked here too (same Python, httpx, defusedxml).
+pythonpath = [".", "../bridge/tally"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers"
@@ -90,13 +92,13 @@ markers = [
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["app", "tests", "../eval"]
-mypy_path = [".", "../eval"]
+files = ["app", "tests", "../eval", "../bridge/tally/tally_bridge", "../bridge/tally/bridge_tests"]
+mypy_path = [".", "../eval", "../bridge/tally"]
 explicit_package_bases = true
 exclude = ["alembic/versions"]
 
 [[tool.mypy.overrides]]
-module = ["celery.*", "boto3.*", "botocore.*", "kombu.*", "testcontainers.*", "authlib.*", "pymysql.*"]
+module = ["celery.*", "boto3.*", "botocore.*", "kombu.*", "testcontainers.*", "authlib.*", "pymysql.*", "defusedxml.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -15,7 +15,8 @@ Choosing a version (a reviewed upload, or switching back to an earlier one) runs
 ``accept_changes=True``.
 
 ``remove_connection`` deletes everything a connection owns at once: snapshots and uploaded files in storage,
-its secret, the Google or Zoho token at the source (best effort), and the rows (DPDP: "disconnecting deletes its snapshots
+its secret, the Google or Zoho token at the source (best effort), a Tally connection's paired PCs and the rows its
+bridge sent, and the rows (DPDP: "disconnecting deletes its snapshots
 and secrets immediately").
 """
 
@@ -42,6 +43,7 @@ from app.data import snapshots
 from app.data.cache import DatasetCache, DatasetMissing
 from app.db.tenant import scope_to_org
 from app.models import Connection, Dataset, FileVersion, Organization, Snapshot
+from app.tally import pairing
 
 logger = logging.getLogger(__name__)
 
@@ -443,6 +445,10 @@ def remove_connection(db: DbSession, rt: ConnectorRuntime, connection: Connectio
                 http.close()
         except Exception:  # never block removal on Zoho
             logger.warning("could not revoke the Zoho token of a removed connection")
+    if connection.type == "tally":
+        # Its devices, syncs and rows go with it (foreign keys); a code or a "read again" request must not stay.
+        pairing.cancel_code(rt.redis, connection.id)
+        pairing.clear_refresh(rt.redis, connection.id)
     db.delete(connection)
     db.flush()
     if secret_ref is not None:

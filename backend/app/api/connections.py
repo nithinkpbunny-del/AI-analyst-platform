@@ -148,6 +148,7 @@ from app.schemas.connections import (
     SourcesOut,
     SpreadsheetOut,
     SpreadsheetsRequest,
+    TallyOut,
     TestCheckOut,
     TestOut,
     ZohoFinishOut,
@@ -159,6 +160,9 @@ from app.schemas.connections import (
     ZohoStartOut,
     ZohoStartRequest,
 )
+from app.tally import pairing as tally_pairing
+from app.tally import status as tally_status
+from app.tally.ingest import set_tally_config
 from app.tasks.queue import JobQueue
 
 logger = logging.getLogger(__name__)
@@ -320,6 +324,10 @@ class _Loaded:
         people = {c.created_by for c in connections if c.created_by} | {
             v.uploaded_by for vs in self.versions.values() for v in vs if v.uploaded_by
         }
+        tally_ids = [c.id for c in connections if c.type == "tally"]
+        self.devices = tally_status.active_devices(db, tally_ids)
+        self.now = tenant.service.clock()
+        self.offline_minutes = tenant.service.settings.tally_offline_after_minutes
         self.names: dict[uuid.UUID, str] = (
             {
                 row.id: row.name
@@ -380,7 +388,21 @@ def _connection_out(connection: Connection, loaded: _Loaded) -> ConnectionOut:
         shopify=_shopify_out(connection),
         zoho=_zoho_out(connection),
         database=_database_out(connection),
+        tally=_tally_out(connection, loaded),
     )
+
+
+def _tally_out(connection: Connection, loaded: _Loaded) -> TallyOut | None:
+    if connection.type != "tally":
+        return None
+    view = tally_status.view(
+        connection,
+        loaded.devices.get(connection.id),
+        now=loaded.now,
+        offline_after_minutes=loaded.offline_minutes,
+        refresh_pending=bool((connection.config.get("tally") or {}).get("refresh_requested_at")),
+    )
+    return TallyOut.model_validate(view)
 
 
 def _database_out(connection: Connection) -> DatabaseOut | None:
@@ -2127,7 +2149,9 @@ def test_connection(
         result = connector.test()
     finally:
         close_connector(connector)
-    if result.ok and connection.status in ("error", "needs_reauth"):
+    if connection.type == "tally":
+        pass  # the PC's state is shown live; a test never marks the connection itself as failed
+    elif result.ok and connection.status in ("error", "needs_reauth"):
         connection.status = "active"
         connection.last_error = None
     elif not result.ok and connection.status != "disabled":
@@ -2154,6 +2178,13 @@ def refresh_connection(
     connection = access.visible_connection(tenant.db, tenant.auth, connection_id, lock=True)
     if connection.status == "disabled":
         raise ApiError(409, "connection_paused", "This connection is paused. Resume it first.")
+    if connection.type == "tally":
+        # Tally is read on the customer's PC: ask its bridge to read again (it does when it is online, D109).
+        tally_pairing.request_refresh(_runtime(request).redis, connection.id)
+        set_tally_config(connection, refresh_requested_at=tenant.service.clock().isoformat())
+        _audit(tenant, "connection.refresh_requested", connection, {"name": connection.name})
+        tenant.db.commit()
+        return _one(tenant, connection)
     if _syncing(tenant, connection):
         raise ApiError(409, "already_reading", "This connection is being read already.")
     _queue_sync(request, tenant, connection, force=True)

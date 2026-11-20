@@ -1,15 +1,17 @@
-**Next: the Phase 2 review** (BUILD_SPEC 0.3: the end of Phase 2 is a larger review), then M16 (Tally bridge) when the
-human says "continue". M15 (Goals, pinned dashboard; UI translations deferred, D41) was built on branch
-`m15-goals-dashboard` and waits for the human's check and commit (suggested: "M15: Goals, pinned dashboard (UI translations deferred)"). M1 to
-M14 are committed and merged to main. **M10b (public website, then the Phase 1 review) is still not built**; the human
-chose to go on with Phase 2 first, ask before skipping it for good.
-**Unfinished work:** none for M15. Carry into the Phase 2 review, M10b and later:
+**Next: M17 (Industry templates)** when the human says "continue". M16 (Tally bridge) was built on branch
+`m16-tally-bridge` and waits for the human's check and commit (suggested: "M16: Tally bridge"). M1 to M15 are
+committed and merged to main. **M10b (public website, then the Phase 1 review) is still not built**; the human
+chose to go on first, ask before skipping it for good.
+**Unfinished work for M16:** real TallyPrime and the Windows build are untested (no Windows PC, no Tally here); see
+docs/SETUP_TALLY.md "What is least certain" and the M16 section below. Before launch: build `tally-bridge.exe` on
+Windows, sign it, pair one real company and compare a month's day book, a ledger and the trial balance with Tally.
+**Carried over** (Phase 2 review, M10b and later):
 - **Never run against a real model yet** (M8-M10): the agent, the briefing writer and `make eval` are tested with the
   fake client only. The real-AI checks of M10 (AI-written briefing, health check, export and share of a real answer, a
   long task) are still untested (Gemini was overloaded). Phase 1 sign-off needs >= 85% on `make eval` with a real model
   (BUILD_SPEC 12.2): run it by name when you are ready (`make eval LIST=1` lists the 48 questions).
 - M10b's final design QA (11a.9) should look again at the Today, Briefings, Tasks and report screens on phones.
-- The app shell is at **177.3 KB** of its 200 KB budget after M15 (176.9 after M13): Connections, Dictionary,
+- The app shell is at **177.4 KB** of its 200 KB budget after M16 (177.3 after M15): Connections, Dictionary,
   Dashboard and Goals load on demand with their own strings files (`locales/en/*.ts`, D99). New screens keep loading
   lazily; `src/locales/locales.test.ts` checks every literal key exists.
 - New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`); questions and long tasks run through
@@ -68,7 +70,7 @@ chose to go on with Phase 2 first, ask before skipping it for good.
 - [x] M15: Goals, pinned dashboard, UI translations (translations deferred, D41) (then Phase 2 review, stop)
 
 ### Phase 3
-- [ ] M16: Tally bridge
+- [x] M16: Tally bridge
 - [ ] M17: Industry templates
 - [ ] M18: Billing hooks (no payments)
 - [ ] M19: Hardening (then Phase 3 review, stop)
@@ -1162,3 +1164,98 @@ certificate not checked").
 - The 10% "at risk" margin and the 15-minute freshness of goal progress are constants for now (D103).
 - Goals use calendar months/quarters in the "Period" presets; India's financial-year quarters can be chosen as dates.
 - UI translations (Hindi, Kannada) stay deferred (D41).
+
+
+---
+
+## M16: Tally bridge (done)
+
+**Built**
+- **The bridge** (`bridge/tally/`, Python 3.12 + httpx + defusedxml, PyInstaller spec for Windows): `tally-bridge pair
+  <CODE> --server <url>`, `run`, `sync-now [--full]`, `status`, `companies`, `forget`.
+  - Reads TallyPrime's XML server (default `http://127.0.0.1:9000`, this PC or the office network only) with **export
+    requests only**: fixed inline-TDL collection templates (`ISMODIFY="No"`), and `check_export_only` checks every
+    request right before it is sent (allow-list; import, alter, create, delete, TDL functions, `ACTION`, entities are
+    refused with `ReadOnlyViolation`). D109.
+  - Sends voucher types, groups, ledgers, stock items (whole, every sync) and vouchers with their ledger and inventory
+    lines (changed ones by AlterID every 15 minutes; all of the last 36 months, month by month, at least daily), as
+    Tally's own text, only the fields asked for. D110.
+  - Outbound HTTPS only, device token in every request (DPAPI-protected on Windows), gzip, no redirects followed;
+    plain http only to localhost. Settings from the platform are clamped. D108, D109.
+  - Survives sleep, offline and restarts: progress saved after every accepted batch, each batch kept in an outbox
+    until accepted and re-sent unchanged, backoff with jitter (6 tries in a sync, then 30 s ... 15 min), Tally closed
+    retried every 5 minutes, one instance per user. D113.
+- **Platform** (migration `0016`, reversible): `tally_devices`, `tally_syncs`, `tally_records`, each with `org_id`, RLS
+  and the `tenant_isolation` policy; `connections.type` accepts `tally`.
+  - Pairing: one-time 8-character code (hash in Redis, 10 minutes, once, a new code cancels the old one; 10 tries per
+    IP per 15 min) -> device token (only its hash stored). One PC per connection; **Unpair this PC** revokes at once
+    (401). D108.
+  - Bridge API `/bridge/tally/*`: `pair`, `poll` (heartbeat + 25 s long-poll for "read again now", the only request
+    the platform can make), `batches` (2,000 rows / 2 MB before and after gzip, unknown fields dropped, idempotent by
+    batch number, one company per connection), `syncs/{id}/complete` (all batches present, then rows Tally no longer has
+    are removed; vouchers only after a full read; tables rebuilt in the background). D109, D110.
+  - Connector `tally` (`app/connectors/tally.py`): seven tables, `groups`, `ledgers`, `stock_items`, `vouchers`,
+    `voucher_ledger_entries`, `voucher_inventory_entries`, `trial_balance`; cancelled and optional vouchers left out;
+    **money in rupees** (`stored_in="rupees"`, debit positive); voucher classes through custom voucher types; group
+    nature (Assets/Liabilities/Income/Expenses). Freshness = the last push (`FetchResult.data_as_of`, used by the cache
+    for `fetched_at`, so provenance never makes an offline PC's data look new). D111.
+  - Owner routes: `POST /connections/tally` (connection + pairing code), `POST /connections/{id}/tally/pairing-code`,
+    `POST /connections/{id}/tally/unpair`; "Refresh now" on a Tally connection asks the PC; "Test" reports the PC
+    without marking the connection failed. Activity: `connection.tally_paired`, `.tally_code_created`,
+    `.tally_unpaired`, `.refresh_requested`. D112.
+  - The dictionary's rupee evidence text is now source-neutral; `party_ledger` is treated as personal (no samples to
+    the AI).
+- **Development stand-ins** (not in the Windows build): the Tally stand-in (`make tally-stand-in`, demo company
+  "UrbanCart Retail (demo)" from the fixtures, Tally's quirks, records and refuses any change request) and the fake
+  helper (`make tally-fake-helper CODE=...` with `LIVE`, `FLAKY`, `OFFLINE_AFTER`, `TALLY_CLOSED_AFTER`, `SAMPLE`).
+- **Web app:** Add data > **Connect Tally** (dialog on demand): a name, then the code, its expiry, the three steps on
+  the PC and the copyable pair command. Connection card: "Tally PC offline since …", "Tally is not open on …",
+  "Waiting for a Tally PC to pair". Connection page: state, PC and bridge version, company, last seen, last data,
+  problems in plain words, the read-only note, **Get a new pairing code**, **Unpair this PC** (confirmation), and
+  "Refresh now" asking the PC. Strings in `locales/en/connections.ts`. Storybook: Tally connection stories.
+- New env (optional, `.env.example`): `TALLY_PAIRING_CODE_MINUTES`, `TALLY_SYNC_INTERVAL_MINUTES`,
+  `TALLY_FULL_SYNC_HOURS`, `TALLY_HISTORY_MONTHS`, `TALLY_MAX_BATCH_ROWS`, `TALLY_MAX_BATCH_BYTES`,
+  `TALLY_OFFLINE_AFTER_MINUTES`, `TALLY_POLL_WAIT_SECONDS`, `TALLY_BRIDGE_DOWNLOAD_URL`. No new dependencies.
+- The bridge's code and tests run with the backend's tools (`make test-backend`, `make lint`, `make typecheck`).
+- Docs: `docs/SETUP_TALLY.md` (try it locally, a customer's PC, building the .exe, what is least certain),
+  decisions D108-D113.
+
+**Test status**
+- Backend: **2791 passed** (2612 after M15); ruff, ruff format and mypy (strict) clean, now including `bridge/tally`.
+  New: the bridge (42: request templates and the export-only guard, UTF-16 and forbidden characters, only asked
+  fields kept, voucher lines and allocations, platform/Tally address rules, gzip, error mapping, no redirects, the
+  token file, progress after a restart, full/incremental/daily-full, 413 splitting, refusals, another company,
+  backoff, Tally closed, platform down, the loop's refresh and unpairing); Tally text and tables (32: amounts with
+  Tally's signs, Dr/Cr, forex, quantities, rates, dates, voucher classes through custom types, primary groups,
+  voucher amounts, trial balance, every table empty, rupees declared); the bridge API and Owner routes (42: one-time,
+  expiring, cancelled and rate-limited codes, hashed token never logged or audited, a new PC revokes the old one,
+  401 without/with a bad or revoked token, heartbeat fields bounded, the poll can only say "read again", batches
+  idempotent, unknown fields dropped, validation, 2,000 rows, 2 MB, gzip bomb, 415, another company, paused,
+  missing batches named, complete twice, no voucher removal after an incremental read, analysts, other connection
+  types, test, another workspace 404); the whole path with the real bridge (11: typed tables in rupees, freshness =
+  the push, debits = credits and a balanced trial balance, cancelled/optional left out, incremental + alteration +
+  no duplicates, deletion only on a full read, resuming after a lost answer, status changes, refresh through the
+  poll, and **planted finding 1 (South falls in Q3 2026, others grow) visible in the demo company's Tally data**);
+  security (26: 14 kinds of change request refused, every built request passes, a refused request never reaches
+  Tally, no platform module contains Tally's request vocabulary, settings clamped, rows only in the device's
+  workspace under RLS); route matrix with the 3 new Owner routes, the 4 bridge routes listed as `DEVICE`; the
+  read-only test now covers `tally`; RLS on the three new tables (generic test).
+- Frontend: vitest **390 passed** (383 after M15); eslint, prettier, tsc and tokens:check clean; build OK, first-load
+  shell **177.4 KB of 200 KB**. Storybook builds (new Tally connection stories).
+- Playwright (run once, `--update-snapshots=changed`): **317 passed**, 31 skipped by design, axe clean. Re-recorded
+  and reviewed: Connections and the access dialog over it (the new Tally block in Add data), light/dark x
+  desktop/phone; no overflow at 375 px.
+- **Live check against `make dev`: 18 of 18** (script in the session scratchpad, not committed): sign-up with
+  two-step, Connect Tally, a wrong code and a re-used code refused, the real bridge pairing and reading the demo
+  company from the stand-in (30,112 vouchers in 18 s, 28 requests, all exports), the Celery worker building seven
+  tables (30,110 vouchers in the books), rupees, "Connected", preview, "Refresh now" heard through the long-poll,
+  an incremental sync of one new sale, "Tally is not open", unpair, the revoked token refused, removal.
+- **No AI calls were made.** `make eval` and `make llm-check` were not run.
+
+**Known gaps / notes**
+- **Real TallyPrime and the Windows build are untested** (docs/SETUP_TALLY.md lists the least certain parts: nested
+  voucher-line FETCH, debit/credit signs, period balances, the AlterID filter, text formats, Windows-only code).
+- A voucher deleted in Tally disappears at the next full read (at least daily), not at the next 15-minute sync.
+- One company per connection; companies kept in another currency than rupees are not detected yet.
+- The bridge's IP limit for pairing sees the proxy's address behind a load balancer until trusted forwarding headers
+  are set up (M19, same as sign-in).

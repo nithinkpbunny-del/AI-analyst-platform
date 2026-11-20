@@ -1549,3 +1549,113 @@ a missing one.
 - The Dashboard and Goals screens load on first visit with their own strings files (`locales/en/dashboard.ts`,
   `locales/en/goals.ts`, D99); the Pin dialog loads from Ask only when opened. The app shell is 177.3 KB of 200 KB.
 - UI translations stay deferred (D41): M15 adds no language files.
+
+### D108. Pairing a Tally PC: one-time code, per-device token, revocation (M16, BUILD_SPEC 8.8)
+- **Connect Tally** creates a `tally` connection and shows a **pairing code** (`K7QM-3XRP`: 8 characters from 31 that
+  cannot be confused, about 40 bits). Only its SHA-256 hash is kept, in Redis, for `TALLY_PAIRING_CODE_MINUTES` (10).
+  Redeeming deletes it (`GETDEL`), so a code works **once**; a new code for the same connection cancels the old one.
+  Pairing attempts are limited to 10 per IP address per 15 minutes; Owners can make 20 codes per hour.
+- Redeeming (`POST /bridge/tally/pair`) returns a **device token** (`tlyd_` + 256 random bits) shown to the bridge
+  once. Only its SHA-256 hash is stored (`tally_devices.token_hash`), so a database copy cannot be used to impersonate
+  a PC. The token is never logged or audited. On Windows the bridge keeps it protected with DPAPI (only that Windows
+  user can read it); elsewhere in a file only its owner can read.
+- **One PC per connection** (a partial unique index): pairing another PC revokes the first. **Unpair this PC** revokes
+  at once (the next request is 401); the data already sent stays until the connection is removed. Removing the
+  connection deletes its devices, syncs and rows (foreign keys) and any code or "read again" request in Redis.
+- Codes live in Redis rather than a table: they expire by themselves and are never more than a hash. The activity log
+  records `connection.tally_paired` (with the person who made the code), `connection.tally_code_created`,
+  `connection.tally_unpaired` and `connection.refresh_requested`.
+
+### D109. Outbound only, and the platform cannot send anything to Tally (M16, BUILD_SPEC 6.3, 8.8)
+- The bridge always calls the platform (HTTPS, `Authorization: Bearer`); the platform never connects to the PC, so no
+  port is opened on the customer's network. Plain `http` is allowed only to `localhost` (development); the bridge
+  refuses other addresses, credentials or query strings in the platform address and never follows redirects (one
+  could carry the token elsewhere). TLS certificates are always checked.
+- The **only** request the platform can make is "read again now" (`refresh`, optionally `full`), returned by the
+  bridge's long-poll (`POST /bridge/tally/poll`, up to `TALLY_POLL_WAIT_SECONDS` = 25 s, which is also the heartbeat).
+  The answer has exactly `refresh`, `full` and `settings`; the bridge clamps the settings to safe ranges. Even a
+  compromised platform could at most make the bridge read Tally more often.
+- **Read-only toward Tally** in three layers: (1) the bridge's requests come only from fixed templates (inline TDL
+  collections with `ISMODIFY="No"`, `TALLYREQUEST` = `Export`); (2) `check_export_only` parses every request right
+  before it is sent and refuses anything else with an allow-list (only the tags the templates use, no `ACTION`
+  attribute, no `TALLYMESSAGE`/`IMPORTDATA`, no TDL functions, one collection, formulas limited to `$AlterID > n`,
+  XML export format, no DTD/entities, at most 64 KB); `ReadOnlyViolation` is never caught; (3) the platform has no code
+  that builds a Tally request (a test fails if `app/` contains Tally's request vocabulary). The development stand-in
+  records and refuses every non-export request; every test that syncs asserts that list stays empty.
+- "Refresh now" on a Tally connection sets the flag (kept 24 h, so an offline PC reads when it is back) instead of
+  queuing a read; the page says the PC was asked.
+
+### D110. What the bridge sends and how the platform stores it (M16)
+- The bridge sends Tally's **own text** (`{"DATE": "20260701", "AMOUNT": "-1281.72"}`), only the fields it asked Tally
+  for; the platform does all typing (amounts, quantities, rates, dates). A fix to how Tally's text is read is then a
+  platform deploy, not a re-install on every PC. The platform also keeps only the fields it knows per dataset
+  (`RAW_FIELDS`), so a modified bridge cannot store anything else (no narration, addresses, phone numbers, GSTIN, bank
+  details).
+- Datasets sent: `voucher_types`, `groups`, `ledgers`, `stock_items` (masters, always whole; ledger and stock balances
+  for the current financial year up to the sync day, the year start taken from the company) and `vouchers` with their
+  ledger and inventory lines (an inventory line's accounting allocations, e.g. the sales ledger of an invoice, become
+  ledger lines, so a voucher's debits equal its credits).
+- Stored in **`tally_records`** (`org_id`, RLS), keyed by (connection, dataset, Tally GUID): an upsert, so a re-read can
+  never duplicate a row; a voucher's lines are replaced with it. These rows are the platform's **source copy** of
+  Tally (Tally cannot be read from here), kept like uploaded files until the connection is removed (BUILD_SPEC 6.6
+  keeps sources; snapshots built from them still expire). A composite primary key, not a UUID: it is a copy of source
+  rows, not an entity.
+- **Batches** (`POST /bridge/tally/batches`): one dataset, at most `TALLY_MAX_BATCH_ROWS` (2,000) rows and
+  `TALLY_MAX_BATCH_BYTES` (2 MB) of JSON, gzip allowed but limited after un-gzipping too (a gzip bomb is 413), 300
+  requests per minute per device. Idempotent by (sync, dataset, batch number) in `tally_syncs`: a batch already received
+  answers "duplicate" and changes nothing.
+- **Complete** (`POST /bridge/tally/syncs/{id}/complete`) checks every batch number 0..n-1 arrived (409 naming the
+  missing ones otherwise), then for datasets read whole removes rows this sync did not send. **Vouchers are only removed
+  after a full read**; incremental reads (by Tally's `AlterID`) cannot see deletions, so a voucher deleted in Tally stays
+  until the next full read (at least every `TALLY_FULL_SYNC_HOURS` = 24 h; `tally-bridge sync-now --full` on the PC).
+  Then the connection's tables are rebuilt in the background (the usual sync job, dictionary included).
+- **One company per connection:** the first company's GUID is remembered; another company is refused (409) so two sets
+  of books never mix. Another company needs another Tally connection.
+- Completed sync records are kept 7 days.
+
+### D111. Tally tables, money and freshness (M16, BUILD_SPEC 8.8, 9)
+- Seven tables: `groups`, `ledgers`, `stock_items`, `vouchers` (the day book: one row per voucher, amount = its debits,
+  `voucher_class` from the voucher type followed through custom types, e.g. "Online Sales" -> sales), `voucher_ledger_
+  entries` (debit, credit, signed amount, the ledger's group, primary group and nature), `voucher_inventory_entries`
+  (quantity, unit, rate, discount %, amount) and `trial_balance` (closing balances split into debit and credit).
+- **Cancelled and optional vouchers are left out** of every table (they are not in the books); they stay in the raw rows.
+- **Money is in rupees** (Tally keeps amounts in the company's currency with two decimals): every money column is
+  declared `unit="INR"`, `stored_in="rupees"`, so the dictionary never divides (the D95 pattern; the profiler's evidence
+  text is now "The source sends this amount in rupees"). Tally writes a debit as a negative number; these tables show a
+  **debit as positive** (`amount`, `closing_balance`) with separate positive `debit`/`credit` columns. Forex amounts use
+  the rupee value after "=". A company kept in another currency is not detected yet (see SETUP_TALLY.md).
+- `party_ledger` is treated as personal by the profiler (customers can be people): no samples of it go to the AI.
+- **Freshness is the last push, not the last table build:** `FetchResult.data_as_of` (new, optional) is the bridge's
+  last completed sync; the cache stores it as the snapshot's `fetched_at` (so provenance says "sent 3 h ago") and a
+  pushed source's "unchanged" check does not move `last_success_at` forward. `source_version` is the last sync's id, so
+  the tables are rebuilt only after new data arrived.
+
+### D112. The PC's status on the Connections screen (M16)
+- Every poll is a heartbeat with the bridge's state (Tally reachable, company, syncing, last error code, next sync);
+  only known, bounded fields are stored (`tally_devices.status_json`).
+- States: **not paired**, **offline** (no heartbeat for `TALLY_OFFLINE_AFTER_MINUTES` = 5: "Tally PC offline since …"),
+  **Tally not open** on the PC, **no company open**, **Tally error**, **reading for the first time**, **connected**.
+  Problems the bridge reports (another company, could not reach the platform, paused) are explained in plain words.
+- The connection's own `status` is not changed by the PC going offline or by "Test" (the data sent stays usable);
+  unpairing sets it to `needs_reauth` with "Pair a PC to send Tally data again".
+
+### D113. Surviving sleep, offline and restarts (M16)
+- The bridge saves its progress after every accepted batch (`state.json`) and writes each batch to `outbox.json`
+  before sending it, removing it only after the platform accepted it: after a crash or a lost answer the same batch is
+  re-sent unchanged and the platform answers "duplicate". Full reads go month by month and continue from the month
+  after the last one finished. All files are written to a temporary file and renamed.
+- Retries: within a sync, 6 attempts with exponential backoff and jitter (honouring `Retry-After`); after that the sync
+  pauses and the loop retries after 30 s, 1, 2, 4 ... minutes up to 15 minutes (+/-50% jitter). Tally closed: retry
+  every 5 minutes. Times are wall-clock, so a sync is due right after the PC wakes up.
+- A 413 halves the batch; a 409 (another company, closed sync, missing batches) or 422 abandons the sync and the next
+  one starts over (rows already sent are upserts, so starting over is safe). A 401 stops the bridge with a message to
+  pair again. Only one bridge runs per Windows user (a lock file).
+- **Development stand-ins:** `tally_bridge.dev.stand_in` answers Tally's XML requests for the demo company
+  "UrbanCart Retail (demo)" built from the demo fixtures (one sales voucher per Shopify order, party = customers of the
+  order's region, sales ledger per category, credit notes for refunds, monthly receipts, purchases at cost, supplier
+  payments, the departments' actual expenses), with Tally's quirks (UTF-16, `&#4;`, `ACTION="Create"`, `" 2 Nos"`).
+  The **fake helper** (`tally_bridge.dev.fake_helper`) runs the real bridge against it with switches for a flaky
+  network, a PC going offline and Tally being closed. Neither is part of the Windows build.
+- The bridge is plain Python 3.12 (httpx, defusedxml) built for Windows with PyInstaller (`bridge/tally/
+  tally_bridge.spec`). It is tested, linted and type-checked with the backend (same interpreter); the Windows build,
+  DPAPI and real TallyPrime are untested here (docs/SETUP_TALLY.md).

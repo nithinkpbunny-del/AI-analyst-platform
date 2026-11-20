@@ -42,7 +42,7 @@ NOT_MONEY_NAME = re.compile(
 CURRENCY_COLUMN = re.compile(r"^(currency|currency_code|curr)$", re.IGNORECASE)
 RUPEE_VALUES = frozenset({"inr", "₹", "rs", "rs.", "rupee", "rupees"})
 PII_NAME = re.compile(
-    r"(email|e_mail|phone|mobile|contact_no|first_name|last_name|full_name|customer_name|contact_name|"
+    r"(email|e_mail|phone|mobile|contact_no|first_name|last_name|full_name|customer_name|contact_name|party_ledger|"
     r"address|street|gstin|aadhaar|aadhar|(^|_)pan($|_)|vpa|(^|_)card($|_)|ip_address|password)",
     re.IGNORECASE,
 )
@@ -149,7 +149,7 @@ def money_evidence(
         }
     named_money = bool(MONEY_NAME.search(name)) and not NOT_MONEY_NAME.search(name)
     if info.get("stored_in") == "rupees":
-        # The source (Shopify's API) says the amount is in rupees: nothing to divide (D95).
+        # The source (Shopify, Zoho Books, Tally) says the amount is in rupees: nothing to divide (D95, D111).
         evidence.append("source_rupees")
         unit = "INR"
     elif declared == "INR":

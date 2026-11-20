@@ -13,6 +13,7 @@ import {
   demoZohoDetail,
   demoDatabaseDetail,
   demoDatabaseTables,
+  demoTallyDetail,
 } from '../testing/connectionFixtures'
 import { dark, phone } from './variants'
 
@@ -25,6 +26,7 @@ const replies: Record<string, unknown> = {
   '/connections/c6': demoZohoDetail,
   '/connections/c7': demoDatabaseDetail,
   '/connections/c7/database/tables': demoDatabaseTables,
+  '/connections/c8': demoTallyDetail,
 }
 
 function mockFetch() {
@@ -79,3 +81,5 @@ export const ZohoBooksConnection: Story = { args: { path: '/connections/c6' } }
 export const ZohoBooksConnectionPhone: Story = { args: { path: '/connections/c6' }, ...phone }
 export const DatabaseConnection: Story = { args: { path: '/connections/c7' } }
 export const DatabaseConnectionPhone: Story = { args: { path: '/connections/c7' }, ...phone }
+export const TallyConnection: Story = { args: { path: '/connections/c8' } }
+export const TallyConnectionPhone: Story = { args: { path: '/connections/c8' }, ...phone }

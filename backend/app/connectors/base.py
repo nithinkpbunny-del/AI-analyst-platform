@@ -9,6 +9,7 @@ status) and a message that says what happened and how to fix it (BUILD_SPEC 11a.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal, Protocol
 
 import pandas as pd
@@ -53,6 +54,9 @@ class FetchResult:
     key_column: str | None = None
     truncated: bool = False
     total_row_dropped: bool = False
+    # Sources pushed to the platform (the Tally bridge): when the rows left the source. Freshness and provenance
+    # use it instead of the time the table was built, so data from an offline PC never looks new (D111).
+    data_as_of: datetime | None = None
 
     @classmethod
     def from_table(cls, table: ParsedTable, *, source_version: str | None) -> FetchResult:

@@ -3,12 +3,13 @@
 
 COMPOSE := docker compose --env-file .env --env-file .compose.env
 BACKEND := cd backend &&
-RUFF_ARGS := --config pyproject.toml . ../eval
+RUFF_ARGS := --config pyproject.toml . ../eval ../bridge/tally
 
 .DEFAULT_GOAL := help
 .PHONY: help dev up down logs ps env test test-backend test-frontend lint lint-backend lint-frontend \
         typecheck typecheck-backend typecheck-frontend format check migrate fixtures seed-demo eval \
-        tokens storybook storybook-build e2e e2e-update size llm-check
+        tokens storybook storybook-build e2e e2e-update size llm-check tally-stand-in tally-fake-helper \
+        tally-bridge
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "} {printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
@@ -98,6 +99,21 @@ e2e: ## Visual snapshots + accessibility + layout checks (Playwright in Docker, 
 e2e-update: ## Re-record visual snapshots after an intended design change (then review the PNGs)
 	$(PLAYWRIGHT_RUN) "npm ci --no-audit --no-fund && npx playwright test --update-snapshots=all"
 
+
+# --- Tally bridge (M16; docs/SETUP_TALLY.md) ----------------------------------------------------------------------
+BRIDGE := cd backend && PYTHONPATH=../bridge/tally uv run python -m
+
+tally-stand-in: ## A stand-in for TallyPrime's XML server on 127.0.0.1:9000 (demo company; LIVE=60 adds a sale/min)
+	$(BRIDGE) tally_bridge.dev.stand_in $(if $(LIVE),--live $(LIVE),)
+
+tally-fake-helper: ## The real bridge on this computer, reading the stand-in: make tally-fake-helper CODE=K7QM-3XRP
+	$(BRIDGE) tally_bridge.dev.fake_helper --server http://localhost:8000 $(if $(CODE),--code $(CODE),) \
+		$(if $(LIVE),--live $(LIVE),) $(if $(FLAKY),--flaky $(FLAKY),) \
+		$(if $(OFFLINE_AFTER),--offline-after $(OFFLINE_AFTER),) \
+		$(if $(TALLY_CLOSED_AFTER),--tally-closed-after $(TALLY_CLOSED_AFTER),) $(if $(SAMPLE),--sample,)
+
+tally-bridge: ## The bridge's own command line, e.g. make tally-bridge ARGS="status" (real Tally: Windows)
+	$(BRIDGE) tally_bridge $(ARGS)
 
 # --- Demo data and evaluation -------------------------------------------------------------------------------------
 fixtures: ## Generate the UrbanCart demo sources and ANSWER_KEY.md into eval/fixtures/
