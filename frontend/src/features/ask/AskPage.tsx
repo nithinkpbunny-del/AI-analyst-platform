@@ -36,6 +36,10 @@ const ExportDialog = lazy(() =>
 const ShareDialog = lazy(() =>
   import('../reports/ShareDialog').then((m) => ({ default: m.ShareDialog })),
 )
+// M15: pinning to the dashboard loads with its dialog.
+const PinDialog = lazy(() =>
+  import('../dashboard/TileDialogs').then((m) => ({ default: m.PinDialog })),
+)
 const POLL_MS = 1000
 
 function conversationKey(id: string) {
@@ -192,6 +196,7 @@ export function AskPage() {
   const canSave = useCan('saved_questions')
   const canExport = useCan('export')
   const canShare = useCan('share')
+  const canPin = useCan('dashboard.edit')
   const box = useRef<HTMLTextAreaElement>(null)
   useSlashFocus(box)
   const [lens, setLens] = useState<Lens>('business')
@@ -201,6 +206,7 @@ export function AskPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [exporting, setExporting] = useState<ChatMessage | null>(null)
   const [sharing, setSharing] = useState<ChatMessage | null>(null)
+  const [pinning, setPinning] = useState<{ message: ChatMessage; question: string } | null>(null)
   const autoRun = useRef(false)
 
   useEffect(() => {
@@ -450,6 +456,15 @@ export function AskPage() {
                     onShare={
                       canShare && message.status === 'done' ? () => setSharing(message) : undefined
                     }
+                    onPin={
+                      canPin && message.status === 'done'
+                        ? () =>
+                            setPinning({
+                              message,
+                              question: current.messages[i - 1]?.content ?? message.content,
+                            })
+                        : undefined
+                    }
                     onRetry={() => {
                       const asked = current.messages[i - 1]
                       if (asked?.role === 'user') ask(asked.content)
@@ -507,6 +522,17 @@ export function AskPage() {
             objectId={sharing.id}
             open
             onOpenChange={(open) => !open && setSharing(null)}
+          />
+        </Suspense>
+      ) : null}
+      {pinning ? (
+        <Suspense fallback={null}>
+          <PinDialog
+            key={pinning.message.id}
+            messageId={pinning.message.id}
+            question={pinning.question}
+            open
+            onOpenChange={(open) => !open && setPinning(null)}
           />
         </Suspense>
       ) : null}

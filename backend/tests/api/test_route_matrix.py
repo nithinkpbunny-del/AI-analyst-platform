@@ -12,7 +12,7 @@ import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 import fakeredis
@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from app.analytics.common import metric_info
 from app.api.connections import _GOOGLE_STATE as GOOGLE_STATE_PREFIX
 from app.auth.permissions import ROLE_PERMISSIONS, Permission
 from app.config import Settings
@@ -32,8 +33,10 @@ from app.llm.fake import FakeLLMFactory
 from app.models import (
     AuditLog,
     Conversation,
+    DashboardTile,
     Dataset,
     FileVersion,
+    Goal,
     Invitation,
     Membership,
     SavedQuestion,
@@ -133,6 +136,12 @@ PERSONAL = {
     ("DELETE", "/shares/{share_id}"),
     ("GET", "/shared/{share_id}"),
     ("GET", "/shared/{share_id}/export"),
+    # M15: dashboard tiles are personal (someone else's tile is 404 for changes) and pinning needs one's own answer.
+    # Tested in test_dashboard.py (TestPersonalRoutes): 401, 403 for Viewers, 404 for others' and other
+    # workspaces' ids, 422 for malformed ids and bodies, success for one's own.
+    ("POST", "/dashboard/tiles"),
+    ("PATCH", "/dashboard/tiles/{tile_id}"),
+    ("DELETE", "/dashboard/tiles/{tile_id}"),
 }
 
 # Routes whose success depends on the workspace's state (M10): cancelling a deletion needs one to be requested.
@@ -176,6 +185,9 @@ class Fixtures:
     version_b: str = ""
     dict_version_a: str = ""  # a confirmed version of the business dictionary
     dict_version_b: str = ""
+    goal_a: str = ""  # a goal on a metric of the workspace's dictionary
+    goal_b: str = ""
+    metric_a: str = ""
     draft_a: dict[str, Any] = field(default_factory=dict)  # org A's dictionary draft (content)
     google_state: str = ""
     shopify_state: str = ""
@@ -196,6 +208,7 @@ class Fixtures:
                 "database",
                 "version",
                 "dict_version",
+                "goal",
             )
         }
 
@@ -451,6 +464,59 @@ CASES: dict[tuple[str, str], Case] = {
     ("GET", "/briefings"): Case("GET", "/briefings", P.SHARED_VIEW, 200, check_leak=True),
     ("POST", "/briefings/send-now"): Case("POST", "/briefings/send-now", P.SHARED_VIEW, 202),
     ("GET", "/today"): Case("GET", "/today", P.SHARED_VIEW, 200, check_leak=True),
+    # M15: goals and the dashboard.
+    ("GET", "/goals"): Case("GET", "/goals", P.GOALS_VIEW, 200, check_leak=True),
+    ("GET", "/goals/options"): Case("GET", "/goals/options", P.GOALS_EDIT, 200, check_leak=True),
+    ("POST", "/goals"): Case(
+        "POST",
+        "/goals",
+        P.GOALS_EDIT,
+        201,
+        body_from=lambda ids: {
+            "metric": ids.metric_a,
+            "target": 100000,
+            "period_start": "2026-11-01",
+            "period_end": "2026-11-30",
+        },
+        invalid_body={"metric": "", "target": 1, "period_start": "x", "period_end": "y"},
+    ),
+    ("PATCH", "/goals/{goal_id}"): Case(
+        "PATCH",
+        "/goals/{goal}",
+        P.GOALS_EDIT,
+        200,
+        body={"target": 250000},
+        invalid_body={"target": -1},
+    ),
+    ("DELETE", "/goals/{goal_id}"): Case("DELETE", "/goals/{goal}", P.GOALS_EDIT, 204),
+    ("POST", "/goals/refresh"): Case(
+        "POST",
+        "/goals/refresh",
+        P.GOALS_VIEW,
+        202,
+        body={},
+        invalid_body={"force": "maybe"},
+        check_leak=True,
+    ),
+    ("GET", "/dashboard"): Case("GET", "/dashboard", P.DASHBOARD_VIEW, 200, check_leak=True),
+    ("PUT", "/dashboard/order"): Case(
+        "PUT",
+        "/dashboard/order",
+        P.DASHBOARD_EDIT,
+        200,
+        body={"tile_ids": []},
+        invalid_body={"tile_ids": "all"},
+        check_leak=True,
+    ),
+    ("POST", "/dashboard/refresh"): Case(
+        "POST",
+        "/dashboard/refresh",
+        P.DASHBOARD_VIEW,
+        202,
+        body={},
+        invalid_body={"force": "maybe"},
+        check_leak=True,
+    ),
     ("GET", "/org/export.zip"): Case("GET", "/org/export.zip", P.ORG_MANAGE, 200),
     ("POST", "/org/deletion"): Case(
         "POST",
@@ -736,6 +802,48 @@ def ids(
             scoped.commit()
     db.expire_all()
 
+    # A goal in each workspace on a metric of its dictionary; workspace A also shows a tile on everyone's
+    # dashboard, so the leak checks have something to find.
+    goals: dict[Any, str] = {}
+    metrics: dict[Any, str] = {}
+    for org, owner_user in ((world.org_a, world.owner_a), (world.org_b, world.owner_b)):
+        with dictionary_service._session(runtime, org.id) as scoped:
+            active = dictionary_service.active(scoped, org.id)
+            assert active.dictionary is not None
+            metric = next(
+                key
+                for key in active.dictionary.metrics
+                if metric_info(active.dictionary, key).time_column
+            )
+            goal = Goal(
+                org_id=org.id,
+                name=f"{org.name} Diwali target",
+                metric_key=metric,
+                target_value=500000,
+                direction="at_least",
+                period_start=date(2026, 10, 1),
+                period_end=date(2026, 10, 31),
+                filters={},
+                created_by=owner_user.id,
+            )
+            scoped.add(goal)
+            if org is world.org_a:
+                scoped.add(
+                    DashboardTile(
+                        org_id=org.id,
+                        user_id=owner_user.id,
+                        title="UrbanCart sales tile",
+                        spec={"tables": [], "calls": [], "question": "UrbanCart?"},
+                        position=0,
+                        refresh_minutes=60,
+                        shared=True,
+                    )
+                )
+            scoped.flush()
+            goals[org.id], metrics[org.id] = str(goal.id), metric
+            scoped.commit()
+    db.expire_all()
+
     # A Google sign-in started by owner_a, which finish() completes.
     state = "matrix-state-0000000000000000"
     fake_redis.set(
@@ -800,6 +908,9 @@ def ids(
         version_b=spare_version(world.org_b.id),
         dict_version_a=dictionaries[world.org_a.id],
         dict_version_b=dictionaries[world.org_b.id],
+        goal_a=goals[world.org_a.id],
+        goal_b=goals[world.org_b.id],
+        metric_a=metrics[world.org_a.id],
         draft_a=drafts[world.org_a.id],
         google_state=state,
     )

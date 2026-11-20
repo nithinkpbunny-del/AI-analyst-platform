@@ -22,7 +22,9 @@ from app.api import (
     briefings,
     chat,
     connections,
+    dashboard,
     dictionary,
+    goals,
     google,
     health,
     invitations,
@@ -208,6 +210,8 @@ def create_app(
     app.include_router(reports.router)
     app.include_router(briefings.router)
     app.include_router(today.router)
+    app.include_router(goals.router)
+    app.include_router(dashboard.router)
     app.include_router(audit.router)
     return app
 

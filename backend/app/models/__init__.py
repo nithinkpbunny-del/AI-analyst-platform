@@ -13,6 +13,7 @@ from app.models.connection import (
 )
 from app.models.consent import Consent
 from app.models.dictionary import DictionaryVersion
+from app.models.goals import DashboardTile, Goal
 from app.models.invitation import Invitation
 from app.models.org import Membership, Organization
 from app.models.reports import BriefingRun, BriefingSetting, Report, Share, Task
@@ -27,9 +28,11 @@ __all__ = [
     "ConnectionGrant",
     "Consent",
     "Conversation",
+    "DashboardTile",
     "Dataset",
     "DictionaryVersion",
     "FileVersion",
+    "Goal",
     "Invitation",
     "KnownDevice",
     "LlmKey",

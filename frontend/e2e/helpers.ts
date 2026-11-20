@@ -14,6 +14,7 @@ import { demoConversation, demoConversations, demoSaved } from '../src/testing/a
 import { firstDraftState } from '../src/testing/dictionaryFixtures'
 import { demoAudit, demoInvitations, demoMembers, demoPreview } from '../src/testing/teamFixtures'
 import { demoOptions, demoResult } from '../src/testing/whatIfFixtures'
+import { demoDashboard, demoGoalList, demoGoalOptions } from '../src/testing/goalsFixtures'
 import {
   demoBriefing,
   demoBriefingSettings,
@@ -224,6 +225,12 @@ export async function mockApi(
   await page.route(`${API}/reports/rep-briefing`, (route) => route.fulfill({ json: demoBriefing }))
   await page.route(`${API}/reports/rep-task`, (route) => route.fulfill({ json: demoTaskReport }))
   await page.route(`${API}/shares?*`, (route) => route.fulfill({ json: demoShares }))
+  // M15: goals and the dashboard ("Checked"/"Updated" times older than a week render as fixed dates).
+  await page.route(`${API}/goals`, (route) => route.fulfill({ json: demoGoalList }))
+  await page.route(`${API}/goals/refresh`, (route) => route.fulfill({ json: demoGoalList }))
+  await page.route(`${API}/goals/options`, (route) => route.fulfill({ json: demoGoalOptions }))
+  await page.route(`${API}/dashboard`, (route) => route.fulfill({ json: demoDashboard }))
+  await page.route(`${API}/dashboard/refresh`, (route) => route.fulfill({ json: demoDashboard }))
   await page.route(`${API}/saved-questions`, (route) =>
     route.fulfill({ json: { questions: demoSaved } }),
   )

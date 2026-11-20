@@ -1,4 +1,4 @@
-"""The agent's tools (BUILD_SPEC 7.3; M8, ``what_if`` in M9, ``growth_signals`` in M10; goals arrive in M15).
+"""The agent's tools (BUILD_SPEC 7.3; M8, ``what_if`` in M9, ``growth_signals`` in M10, ``goal_progress`` in M15).
 
 Every tool receives the ``ToolContext`` of the question: the asking person's ``AccessContext``, the dictionary
 cut down to what they may see, the per-question DuckDB workspace and the live data cache. A tool can only reach
@@ -32,6 +32,7 @@ from app.analytics import (
     drivers,
     finance,
     forecast,
+    goals,
     growth,
     kpis,
     marketing,
@@ -46,9 +47,11 @@ from app.analytics.common import (
     Result,
     comparison_of,
     coverage,
+    metric_info,
     parse_date,
     period_of,
 )
+from app.analytics.goals import GoalSpec
 from app.connectors.base import ConnectorError
 from app.data.cache import DatasetCache, DatasetMissing
 from app.data.workspace import QueryError, Workspace, plain
@@ -93,6 +96,8 @@ class ToolContext:
     # Push-down to a customer database (M14): (connection id, SQL in its dialect, max rows) -> columns, rows,
     # truncated. None where no database can be reached (tests, briefings).
     pushdown: Callable[[Any, str, int], tuple[list[str], list[list[Any]], bool]] | None = None
+    # The workspace's goals this person may see (M15): metric visible, filters on visible columns.
+    goals: list[GoalSpec] = field(default_factory=list)
 
     @property
     def dictionary(self) -> Any:
@@ -355,6 +360,26 @@ SPECS: dict[str, ToolSpec] = {
             ["metric", "period"],
         ),
         _spec(
+            "goal_progress",
+            "Progress of the workspace's goals (targets): actual so far, the share of the period passed, the "
+            "projection to the end of the period (run-rate, or seasonal from last year when it covers the "
+            "period), the gap, what is needed per day, and a status decided by code: on_track, at_risk, behind, "
+            "achieved, missed or not_started. With no arguments: every goal (list_sources lists them). Or give "
+            "goal_ids, or an ad-hoc target (metric, target, period) to check one the person has in mind.",
+            {
+                "goal_ids": {"type": "array", "items": {"type": "string"}},
+                "metric": _METRIC,
+                "target": {
+                    "type": "number",
+                    "description": "The target value, in the metric's unit.",
+                },
+                "period": _PERIOD,
+                "direction": {"type": "string", "enum": list(goals.DIRECTIONS)},
+                "filters": _FILTERS,
+            },
+            [],
+        ),
+        _spec(
             "forecast",
             "Forecast a metric with an 80% range, the method used and its backtest error.",
             {
@@ -512,6 +537,18 @@ def list_sources(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         "metrics": metrics,
         "joins": [{"left": r.left, "right": r.right} for r in d.relationships],
         "unavailable_metrics": ctx.visible.unavailable_metrics,
+        "goals": [
+            {
+                "goal_id": g.goal_id,
+                "name": g.name,
+                "metric": g.metric,
+                "target": g.target,
+                "direction": g.direction,
+                "period": g.period.as_json(),
+                "filters": g.filters or None,
+            }
+            for g in ctx.goals
+        ],
     }
     rid = ctx.store.add(
         "list_sources", content, tables=[], inputs={}, sql=[], row_count=len(tables)
@@ -828,6 +865,39 @@ def growth_signals(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return _result(ctx, "growth_signals", args, result)
 
 
+def goal_progress(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    chosen = goal_specs(ctx, args)
+    _computing(ctx, "goal_progress", chosen[0].metric)
+    result = goals.goal_progress(ctx.analysis(), chosen, today=ctx.today)
+    return _result(ctx, "goal_progress", args, result)
+
+
+def goal_specs(ctx: ToolContext, args: dict[str, Any]) -> list[GoalSpec]:
+    """The goals a ``goal_progress`` call is about: an ad-hoc target, the ones named, or all of them."""
+    if args.get("target") is not None or args.get("metric"):
+        metric = _str(args, "metric")
+        target = args.get("target")
+        if not metric or isinstance(target, bool) or not isinstance(target, int | float):
+            raise AnalyticsError("bad_goal", "an ad-hoc goal needs metric, target and period")
+        direction = _str(args, "direction")
+        if direction not in goals.DIRECTIONS:
+            direction = goals.default_direction(metric_info(ctx.dictionary, metric))
+        return [
+            GoalSpec(
+                metric=metric,
+                target=float(target),
+                period=_period(args),
+                direction=direction,
+                filters=_obj(args, "filters") or {},
+            )
+        ]
+    wanted = [str(g) for g in _list(args, "goal_ids")]
+    chosen = [g for g in ctx.goals if not wanted or g.goal_id in wanted]
+    if not chosen:
+        raise AnalyticsError("no_goal", ", ".join(wanted))
+    return chosen
+
+
 def run_forecast(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     metric = _str(args, "metric") or ""
     _computing(ctx, "forecast", metric)
@@ -980,6 +1050,7 @@ HANDLERS: dict[str, Callable[[ToolContext, dict[str, Any]], dict[str, Any]]] = {
     "driver_analysis": driver_analysis,
     "detect_anomalies": detect_anomalies,
     "growth_signals": growth_signals,
+    "goal_progress": goal_progress,
     "forecast": run_forecast,
     "what_if": run_what_if,
     "segment_customers": segment_customers,
@@ -1013,6 +1084,8 @@ HINTS = {
     "unknown_channel": "That channel is not in the marketing data; check the names with marketing_efficiency.",
     "no_gross_sales": "Gross sales could not be read from the table, so the discount rate is unknown.",
     "no_customer_column": "No customer column was found in this metric's table.",
+    "no_goal": "No goals are set (or none with those ids). Give metric, target and period to check a target.",
+    "bad_goal": "An ad-hoc goal needs metric (a dictionary metric), target (a number) and period {start, end}.",
 }
 
 

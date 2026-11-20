@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import en from './en'
 import connections from './en/connections'
+import dashboard from './en/dashboard'
 import dictionary from './en/dictionary'
+import goals from './en/goals'
 
 type Tree = { [key: string]: string | Tree }
 
@@ -14,7 +16,7 @@ function merge(target: Tree, source: Tree): Tree {
   return target
 }
 
-const all = [en, connections, dictionary].reduce<Tree>(
+const all = [en, connections, dictionary, goals, dashboard].reduce<Tree>(
   (tree, bundle) => merge(tree, structuredClone(bundle) as Tree),
   {},
 )
@@ -59,6 +61,8 @@ describe('UI strings (DECISIONS D99)', () => {
   it('the screen files are not part of the shell strings', () => {
     expect('add' in (en.connections as Tree)).toBe(false)
     expect('dictionary' in en).toBe(false)
+    expect('goals' in en).toBe(false)
+    expect('dashboard' in en).toBe(false)
     expect(Object.keys(en.connections)).toEqual(['quality'])
   })
 })

@@ -12,7 +12,8 @@ import { useSession } from '../../lib/authContext'
 import { cn } from '../../lib/cn'
 import { formatDate, formatDateTime } from '../../lib/format'
 import { useCan } from '../../lib/permissions'
-import { reportsApi, type BriefingBody, type Checklist } from '../../lib/reportsApi'
+import { formatValue } from '../../lib/goalFormat'
+import { reportsApi, type BriefingBody, type Checklist, type TodayGoal } from '../../lib/reportsApi'
 import { teamApi } from '../../lib/teamApi'
 import { BriefingView } from '../reports/views'
 import { askLink, TODAY } from './links'
@@ -98,6 +99,90 @@ function OnboardingChecklist({ checklist, health }: { checklist: Checklist; heal
           )
         })}
       </ol>
+    </section>
+  )
+}
+
+const GOAL_TONE: Record<string, string> = {
+  on_track: 'bg-gain-soft text-gain',
+  achieved: 'bg-gain-soft text-gain',
+  at_risk: 'bg-caution-soft text-ink',
+  behind: 'bg-loss-soft text-loss',
+  missed: 'bg-loss-soft text-loss',
+}
+
+/** Running goals, off-track first (BUILD_SPEC 11a.8 "goal progress"): as last checked, no source is read. */
+function TodayGoals({ goals }: { goals: TodayGoal[] }) {
+  const { t } = useTranslation()
+  return (
+    <section aria-labelledby="today-goals">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 id="today-goals" className="m-0 text-h4">
+          {t('today.goals.title')}
+        </h2>
+        <Link to="/goals" className="text-small text-neel">
+          {t('today.goals.all')}
+        </Link>
+      </div>
+      <ul className="m-0 mt-2 list-none p-0">
+        {goals.map((goal) => {
+          const reached =
+            goal.actual !== null && goal.target > 0
+              ? Math.max(0, Math.min(100, (goal.actual / goal.target) * 100))
+              : 0
+          const progress =
+            goal.actual === null
+              ? t('today.goals.notChecked')
+              : t(
+                  goal.direction === 'at_most'
+                    ? 'today.goals.progressAtMost'
+                    : 'today.goals.progress',
+                  {
+                    actual: formatValue(goal.actual, goal.unit),
+                    target: formatValue(goal.target, goal.unit),
+                  },
+                )
+          return (
+            <li key={goal.id} className="flex flex-col gap-2 border-b border-line py-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-body font-medium">{goal.label}</span>
+                {goal.status ? (
+                  <span
+                    className={cn(
+                      'rounded-pill px-3 py-0.5 text-caption font-semibold',
+                      GOAL_TONE[goal.status] ?? 'bg-neel-soft text-neel',
+                    )}
+                  >
+                    {t(`goalStatus.${goal.status}`, { defaultValue: goal.status })}
+                  </span>
+                ) : null}
+              </div>
+              <div
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(reached)}
+                aria-label={goal.label}
+                className="h-2 overflow-hidden rounded-full bg-neel-soft"
+              >
+                <div
+                  className={cn(
+                    'h-full rounded-full',
+                    goal.status === 'behind' || goal.status === 'missed' ? 'bg-loss' : 'bg-neel',
+                  )}
+                  style={{ width: `${reached}%` }}
+                />
+              </div>
+              <p className="m-0 text-small text-ink-muted tabular">
+                {progress}
+                {goal.projection !== null && goal.status !== 'achieved'
+                  ? `, ${t('today.goals.heading', { value: formatValue(goal.projection, goal.unit) })}`
+                  : ''}
+              </p>
+            </li>
+          )
+        })}
+      </ul>
     </section>
   )
 }
@@ -192,6 +277,8 @@ export function TodayPage() {
               />
             )}
           </section>
+
+          {data.goals.length > 0 ? <TodayGoals goals={data.goals} /> : null}
 
           {canAsk ? (
             <section aria-labelledby="suggestions-title">

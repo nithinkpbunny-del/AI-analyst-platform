@@ -57,12 +57,21 @@ for (const screen of screens) {
       if (screen === 'today') {
         await expect(page.getByText('2 of 4 done')).toBeVisible()
         await expect(page.getByText('Revenue, last 7 days')).toBeVisible()
+        await expect(page.getByText('November sales')).toBeVisible()
       }
       if (screen === 'briefings') {
         await expect(page.getByText('Not sent: nothing needed attention')).toBeVisible()
       }
       if (screen === 'tasks') {
         await expect(page.getByText('Fetching Marketing from Google Sheets')).toBeVisible()
+      }
+      if (screen === 'goals') {
+        await expect(page.getByText('₹2.1 L a day is needed from here.')).toBeVisible()
+        await expect(page.getByText('1 goal may fall short.', { exact: false })).toBeVisible()
+      }
+      if (screen === 'dashboard') {
+        await expect(page.getByText('₹44.7 L')).toBeVisible()
+        await expect(page.getByText('From Ravi Kumar')).toBeVisible()
       }
       if (screen === 'activity') {
         await expect(page.getByText('Turned on two-step verification')).toBeVisible()

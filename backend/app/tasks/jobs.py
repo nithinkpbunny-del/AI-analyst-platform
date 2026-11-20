@@ -132,6 +132,32 @@ def send_briefing(
     )
 
 
+# Goal progress and dashboard tiles: analytics over live data, no AI call (M15).
+REFRESH_TIME_LIMIT_SECONDS = 600
+
+
+@celery_app.task(name="app.tasks.jobs.refresh_goals", time_limit=REFRESH_TIME_LIMIT_SECONDS)
+def refresh_goals(
+    org_id: str, user_id: str
+) -> str:  # pragma: no cover - body: goals.service.refresh
+    """Compute one person's goal progress with their permissions (M15)."""
+    from app.goals import service as goal_service
+
+    return goal_service.refresh(worker_runtime(), uuid.UUID(org_id), uuid.UUID(user_id))
+
+
+@celery_app.task(name="app.tasks.jobs.refresh_tiles", time_limit=REFRESH_TIME_LIMIT_SECONDS)
+def refresh_tiles(
+    org_id: str, user_id: str, tile_ids: list[str]
+) -> int:  # pragma: no cover - body: dashboard.service.refresh
+    """Re-run dashboard tiles for one person with their permissions (M15)."""
+    from app.dashboard import service as dashboard
+
+    return dashboard.refresh(
+        worker_runtime(), uuid.UUID(org_id), uuid.UUID(user_id), [uuid.UUID(t) for t in tile_ids]
+    )
+
+
 @celery_app.task(name="app.tasks.jobs.schedule_briefings")
 def schedule_briefings() -> (
     int

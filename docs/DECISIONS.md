@@ -1480,3 +1480,72 @@ a missing one.
   `scripts/demo_db/*` with a read-only user (`analyst_ro`) and an owner who can write (`demo_owner`); demo passwords,
   documented, not secrets. Tests use a separate database in the test container (real PostgreSQL behind a "public"
   name) and a fake MySQL that answers catalog questions and runs the connector's SQL on DuckDB.
+
+### D103. Goals: who sees them, how progress is projected, and the status (M15, BUILD_SPEC X7, 10.1, 6.2)
+- **One table, `goals`** (migration `0015`, RLS + `tenant_isolation`): a target for one dictionary metric over a
+  period, "at least" (sales, orders) or "at most" (refunds, discounts, costs; the default when the metric's good
+  direction is down), an optional name and up to 3 filters (`column = value`, or `table.column` of a joined table).
+  Goals belong to the workspace: Owners and Analysts set, change and remove any goal they can see; Viewers look.
+- **Visibility.** A person sees a goal only when its metric and every filter column are in the part of the
+  dictionary they may see (connection access, D50). Others get 404, like another workspace's id, and the agent's
+  `list_sources` does not list it. Setting a goal on a metric you cannot see is refused (422 `unknown_metric`).
+- **Progress (code only, P4).** Actual = the metric from the period's start to the latest day of data (the newest
+  day its table covers, up to yesterday). For a metric that adds up (SUM/COUNT): run-rate = actual × days in
+  period / days so far; seasonal = actual × (last year's whole period / last year's same days), used as the
+  projection when last year covers the whole period. An average or ratio (AOV) is projected at its value so far.
+  "Needed per day" = what is still missing / days left (at-least goals).
+- **Status.** `not_started` (no data in the period yet), `on_track` (projection meets the target), `at_risk`
+  (misses by less than 10% of the target), `behind`, `achieved` (met; an at-least goal that adds up is achieved as
+  soon as the actual reaches it), `missed` (period over and not met; an at-most goal that adds up is missed as soon
+  as the actual passes the cap). A period is over by the calendar (yesterday ≥ its end), even when the data stopped
+  earlier; a note says where the data ends. The 10% margin is a constant for now.
+- **Computed for the person looking, in the background.** Progress reads live data (cache-aware, R1), so
+  `POST /goals/refresh` queues a Celery job (`refresh_goals`) with the person's permissions; results are kept in
+  Redis per person for 15 minutes (24 h at most; aggregates only, BUILD_SPEC 6.6). Changing a goal drops everyone's
+  kept progress. No AI call.
+
+### D104. Goals in the agent, briefings and Today (M15, BUILD_SPEC 7.3, 13.2, 11a.8)
+- **Agent tool `goal_progress`**: no arguments = every goal the person may see; `goal_ids` = some; or an ad-hoc
+  `metric` + `target` + `period` for a target the person has in mind. Same analytics and provenance as the screen.
+  The goal-tracking playbook now starts with it and says to use the tool's status, never to decide one.
+- **Briefings** get a **Goals** section (after "Working well"): goals running today or ended in the last week, off
+  track first, each sentence cited. A goal at risk or behind makes the briefing notable (no "Business health"
+  summary alone) and can lead the headline; it is the early warning of X7. When the AI's text leaves goals out,
+  code writes them, so the warning is never lost.
+- **Today** shows running goals without reading any source: the progress the Goals screen last computed for the
+  person, else the goals of their latest briefing.
+
+### D105. Pinned tiles keep the analytics, not the AI's words (M15, BUILD_SPEC X8, P4)
+- Pinning an answer stores, in `dashboard_tiles.spec`, the tool calls that produced the results the answer cited
+  and the charts it showed (plus data-loading calls), never `list_sources`/`describe_dataset` or calls that failed;
+  at most 16 calls. It also stores where the answer's **key figure** lives (the result, column and the row's text
+  labels, e.g. `metric = revenue`), so a refresh shows the same figure from new data, with its change when the row
+  has one. An answer with no results from data cannot be pinned (409 `not_pinnable`).
+- **Refreshing re-runs those calls only** (no AI call, nothing metered): the tile shows the key figure, the charts
+  or, without a chart, the cited result as a small table (8 rows), each with its source marks. Up to 30 tiles per
+  person; new pins go on top.
+- **Dates (`rolling` by default, or `fixed`).** Rolling moves each period forward by the time since the answer, in
+  the period's own unit: calendar months, quarters and years by whole months/quarters/years ("last month" stays last
+  month), Monday-to-Sunday weeks by weeks, anything else by days. SQL the agent wrote itself (`run_sql`,
+  `query_source`) keeps its dates; the tile says so. Changing the dates drops the kept results.
+- **Out of date.** When a re-run fails because the dictionary changed (a metric or column is gone), the tile says
+  "ask again and pin the new answer" instead of guessing.
+
+### D106. Tiles run with the viewer's permissions; "Show on everyone's dashboard" (M15, BUILD_SPEC 6.2, P6)
+- A tile is its owner's (Owners and Analysts pin; changes to someone else's tile are 404). Its owner may show it on
+  everyone's dashboard (`shared`); this is a workspace-wide switch rather than per-person sharing, since BUILD_SPEC
+  6.2 only says Viewers "view shared" tiles. Each person sees a shared tile only when they may see every table it
+  reads (otherwise even its title could tell them about data they have no access to), and it re-runs with **their**
+  permissions: the results are kept per tile and person (Redis, 24 h, aggregates only).
+- Refresh: opening the dashboard re-runs tiles whose `refresh_minutes` (15 min, 1 h, 4 h, 1 day; default 1 h) have
+  passed; "Refresh all" forces it. One Celery job (`refresh_tiles`) per person and request; a Redis marker stops the
+  same tile being queued twice for a person; the live-data cache (R1) stops repeated fetches.
+- A stored spec only reaches the same tools as the agent: the SQL guard, the read-only DuckDB workspace and the
+  person's visible tables (tested with a tampered spec: writes, file access and hidden tables are refused).
+
+### D107. Every screen in the navigation is built; the placeholder screen is gone (M15)
+- With Dashboard and Goals built, no navigation item used the M1b placeholder screen any more, so
+  `features/placeholder/PlaceholderPage.tsx` and its route loop were removed. The `pages.*` strings stay.
+- The Dashboard and Goals screens load on first visit with their own strings files (`locales/en/dashboard.ts`,
+  `locales/en/goals.ts`, D99); the Pin dialog loads from Ask only when opened. The app shell is 177.3 KB of 200 KB.
+- UI translations stay deferred (D41): M15 adds no language files.

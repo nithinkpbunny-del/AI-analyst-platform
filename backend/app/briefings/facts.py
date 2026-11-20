@@ -11,7 +11,9 @@ Every figure comes from the same analytics tools the agent uses, through a ``Too
 * **Upcoming risks**: data-quality warnings of the tables read, connections that stopped working, and data that has
   not moved for days.
 * **Finished long tasks** since the previous briefing.
-* Goals arrive with M15.
+* **Goals** (M15, X7): progress of the goals the recipient may see that are running or ended in the last week,
+  with the projection to the end of their period and a status decided by code; a goal at risk or behind is the
+  early warning and makes the briefing notable.
 
 "Latest day of data" is the newest day the main table covers, up to yesterday in the recipient's time zone: a demo
 workspace whose data ends months ago still gets a briefing about its last days, with a note saying how old it is.
@@ -46,6 +48,7 @@ from app.data.cache import DatasetCache
 from app.data.workspace import Workspace
 from app.db.tenant import scope_to_org
 from app.dictionary import service as dictionary_service
+from app.goals import service as goal_service
 from app.llm.base import ToolCall
 from app.models import Connection, Task
 
@@ -57,6 +60,7 @@ SUPPRESS_DAYS = 3
 GROWTH_SUPPRESS_DAYS = 7
 STALE_DATA_DAYS = 3
 MAX_ITEMS = 3
+MAX_GOALS = 5
 
 
 class NoBriefing(Exception):
@@ -81,6 +85,7 @@ class Facts:
     growth: list[dict[str, Any]] = field(default_factory=list)
     risks: list[dict[str, Any]] = field(default_factory=list)
     tasks: list[dict[str, Any]] = field(default_factory=list)
+    goals: list[dict[str, Any]] = field(default_factory=list)
     notes: list[dict[str, Any]] = field(default_factory=list)
     fingerprints: list[str] = field(default_factory=list)
     impact_threshold_inr: float = 100_000.0
@@ -88,7 +93,12 @@ class Facts:
 
     @property
     def notable(self) -> bool:
-        return bool(self.unusual or self.growth or self.alerts)
+        return bool(self.unusual or self.growth or self.alerts or self.goals_off_track)
+
+    @property
+    def goals_off_track(self) -> list[dict[str, Any]]:
+        """The early warning (X7): running goals whose projection falls short."""
+        return [g for g in self.goals if g.get("status") in ("at_risk", "behind")]
 
     @property
     def alerts(self) -> list[dict[str, Any]]:
@@ -114,6 +124,7 @@ class Facts:
             "growth": self.growth,
             "risks": [r for r in self.risks if r not in self.alerts],
             "finished_tasks": [{"title": t["title"]} for t in self.tasks],
+            "goals": self.goals,
             "notable": self.notable,
             "impact_rule": {
                 "threshold_inr": self.impact_threshold_inr,
@@ -145,6 +156,7 @@ def gather(
             db.commit()
             raise NoBriefing("no_access") from error
         active = dictionary_service.active(db, org_id)
+        goal_specs = goal_service.all_specs(db, org_id)
         broken = [
             {"kind": "connection", "connection": c.name, "status": c.status}
             for c in db.scalars(
@@ -188,6 +200,7 @@ def gather(
         store=ResultStore(),
         today=today,
         max_rows=rt.settings.rows_to_llm_per_tool_call,
+        goals=goal_service.visible_specs(goal_specs, visible),
     )
     try:
         facts = compute(ctx, access, visible, reported=reported or set())
@@ -248,6 +261,7 @@ def compute(
     _kpis(ctx, facts, metrics, as_of)
     _unusual(ctx, facts, metrics[0], as_of, reported)
     _growth(ctx, facts, metrics, as_of, reported)
+    _goals(ctx, facts)
     for table, warnings in ctx.quality.items():
         for warning in warnings[:2]:
             facts.risks.append(
@@ -411,3 +425,38 @@ def _growth(
         facts.fingerprints.append(fingerprint)
         if len(facts.growth) >= MAX_ITEMS:
             break
+
+
+GOAL_FIELDS = (
+    "goal_id",
+    "name",
+    "metric",
+    "unit",
+    "direction",
+    "target",
+    "period_start",
+    "period_end",
+    "as_of",
+    "elapsed_pct",
+    "actual",
+    "projection",
+    "projected_pct_of_target",
+    "needed_per_day",
+    "method",
+    "status",
+)
+
+
+def _goals(ctx: ToolContext, facts: Facts) -> None:
+    """Goals running today or ended in the last week (at most ``MAX_GOALS``), off-track ones first."""
+    chosen = goal_service.current(ctx.goals, ctx.today)[:MAX_GOALS]
+    if not chosen:
+        return
+    payload = goal_service.compute(ctx, chosen)
+    order = {"behind": 0, "at_risk": 1, "missed": 2, "on_track": 3, "achieved": 4}
+    rows = [
+        {"result_id": row["result_id"], **{k: row.get(k) for k in GOAL_FIELDS}}
+        for row in payload["goals"].values()
+        if row.get("status") in order
+    ]
+    facts.goals = sorted(rows, key=lambda r: order.get(str(r.get("status")), 9))

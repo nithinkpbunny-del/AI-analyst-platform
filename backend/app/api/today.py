@@ -3,7 +3,8 @@
 Everything here is read from what already exists, so opening Today costs no AI call and reads no data source:
 the latest briefing (its top items and KPIs), three suggested questions written by code from the person's own data
 (the briefing's findings and the dictionary they may see), the onboarding checklist (Company details, Connect data,
-Confirm dictionary, Ask first question), my latest long tasks and what others shared with me.
+Confirm dictionary, Ask first question), my latest long tasks and what others shared with me, and goal progress
+(M15: as the Goals screen last computed it for me, else as my latest briefing did).
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 import contextlib
 from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sqlalchemy import select
 
 from app.agent.access import NoAccess, access_context, visible_dictionary
@@ -20,6 +21,7 @@ from app.api.reports import _report_out, list_shared
 from app.api.tasks import task_out
 from app.auth.permissions import Permission
 from app.dictionary import service as dictionary_service
+from app.goals import service as goal_service
 from app.models import Connection, DictionaryVersion, Message, Report, Task
 from app.schemas.reports import ChecklistOut, TodayOut
 
@@ -132,8 +134,66 @@ def checklist(tenant: Tenant) -> ChecklistOut:
     )
 
 
+GOAL_FIELDS = (
+    "status",
+    "actual",
+    "target",
+    "projection",
+    "projected_pct_of_target",
+    "unit",
+    "direction",
+    "period_start",
+    "period_end",
+    "as_of",
+)
+MAX_GOALS = 4
+_GOAL_ORDER = {"behind": 0, "at_risk": 1, "on_track": 2, "achieved": 3, "missed": 4}
+
+
+def goal_items(request: Request, tenant: Tenant, briefing: Report | None) -> list[dict[str, Any]]:
+    """Running goals the person may see, off-track first; numbers as last computed for them (no source read)."""
+    seen = None
+    with contextlib.suppress(NoAccess):
+        access = access_context(tenant.db, tenant.org_id, tenant.auth.user.id)
+        active = dictionary_service.active(tenant.db, tenant.org_id)
+        if active.dictionary is not None:
+            seen = visible_dictionary(active.dictionary, access)
+    if seen is None:
+        return []
+    today = tenant.service.clock().date()
+    goals = [
+        g
+        for g in goal_service.all_goals(tenant.db, tenant.org_id)
+        if goal_service.visible(seen.dictionary, g) and g.period_start <= today <= g.period_end
+    ]
+    if not goals:
+        return []
+    payload = goal_service.read(
+        request.app.state.connector_runtime, tenant.org_id, tenant.auth.user.id
+    )
+    rows: dict[str, Any] = dict((payload or {}).get("goals") or {})
+    if not rows and briefing is not None:
+        rows = {str(g.get("goal_id")): g for g in dict(briefing.body).get("goals") or []}
+    out = []
+    for goal in goals:
+        row = rows.get(str(goal.id)) or {}
+        out.append(
+            {
+                "id": str(goal.id),
+                "label": goal.name or f"{goal_service.metric_label(goal.metric_key)} goal",
+                **{k: row.get(k) for k in GOAL_FIELDS},
+                "target": goal.target_value,
+                "period_start": goal.period_start.isoformat(),
+                "period_end": goal.period_end.isoformat(),
+                "direction": goal.direction,
+            }
+        )
+    out.sort(key=lambda g: _GOAL_ORDER.get(str(g.get("status")), 9))
+    return out[:MAX_GOALS]
+
+
 @router.get("/today", response_model=TodayOut, responses=_ERRORS, summary="The home screen")
-def today(tenant: Mine) -> TodayOut:
+def today(request: Request, tenant: Mine) -> TodayOut:
     me = tenant.auth.user.id
     briefing = tenant.db.scalar(
         select(Report)
@@ -157,4 +217,5 @@ def today(tenant: Mine) -> TodayOut:
         checklist=checklist(tenant),
         tasks=[task_out(t) for t in tasks],
         shared=list_shared(tenant).items[:3],
+        goals=goal_items(request, tenant, briefing),
     )

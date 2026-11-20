@@ -168,6 +168,22 @@ export const demoToday: Today = {
       created_at: '2026-11-12T12:00:00Z',
     },
   ],
+  goals: [
+    {
+      id: 'goal-nov',
+      label: 'November sales',
+      status: 'behind',
+      actual: 1840000,
+      target: 5000000,
+      projection: 3480000,
+      projected_pct_of_target: 69.6,
+      unit: 'INR',
+      direction: 'at_least',
+      period_start: '2026-11-01',
+      period_end: '2026-11-30',
+      as_of: '2026-11-15',
+    },
+  ],
 }
 
 export const demoBriefingSettings: BriefingSettings = {

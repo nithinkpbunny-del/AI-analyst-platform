@@ -41,19 +41,16 @@ describe('app shell', () => {
     renderApp()
     const nav = screen.getByTestId('side-nav')
     await userEvent.click(within(nav).getByRole('link', { name: 'Goals' }))
-    expect(screen.getByRole('heading', { level: 1, name: 'Goals' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Goals' })).toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: 'Goals' })).toHaveAttribute('aria-current', 'page')
   })
 
-  it('every placeholder screen has one sentence and one primary action', () => {
+  it('every screen in the navigation is built (no placeholders left after M15)', async () => {
     renderApp('/goals')
-    const main = screen.getByRole('main')
-    expect(
-      within(main).getByText('Set your first target to track progress every day.'),
-    ).toBeInTheDocument()
-    expect(within(main).getByRole('link', { name: 'Ask a question' })).toHaveAttribute(
-      'href',
-      '/ask',
+    expect(await screen.findByRole('heading', { level: 1, name: 'Goals' })).toBeInTheDocument()
+    renderApp('/dashboard')
+    expect(await screen.findAllByRole('heading', { level: 1, name: 'Dashboard' })).not.toHaveLength(
+      0,
     )
   })
 
@@ -97,7 +94,7 @@ describe('app shell', () => {
 
   it('shows the floating Ask button everywhere except on Ask', async () => {
     renderApp('/dashboard')
-    await userEvent.click(screen.getByTestId('ask-fab'))
+    await userEvent.click(await screen.findByTestId('ask-fab'))
     expect(screen.getByRole('heading', { level: 1, name: 'Ask' })).toBeInTheDocument()
     expect(screen.queryByTestId('ask-fab')).not.toBeInTheDocument()
   })

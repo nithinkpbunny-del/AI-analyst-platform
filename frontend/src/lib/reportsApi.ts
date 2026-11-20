@@ -46,7 +46,7 @@ export interface KpiFact {
 }
 
 export type BriefingSectionKey =
-  'alerts' | 'unusual' | 'suggested' | 'growth' | 'risks' | 'tasks' | 'health'
+  'alerts' | 'unusual' | 'suggested' | 'growth' | 'goals' | 'risks' | 'tasks' | 'health'
 
 export interface BriefingBody {
   kind: 'briefing'
@@ -180,6 +180,22 @@ export interface Checklist {
   done: boolean
 }
 
+/** A running goal on Today, as last computed for this person (M15). */
+export interface TodayGoal {
+  id: string
+  label: string
+  status: string | null
+  actual: number | null
+  target: number
+  projection: number | null
+  projected_pct_of_target: number | null
+  unit: string | null
+  direction: 'at_least' | 'at_most'
+  period_start: string
+  period_end: string
+  as_of: string | null
+}
+
 export interface Today {
   name: string | null
   briefing: Report | null
@@ -188,6 +204,7 @@ export interface Today {
   checklist: Checklist
   tasks: Task[]
   shared: SharedSummary[]
+  goals: TodayGoal[]
 }
 
 export const reportsApi = {

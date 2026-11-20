@@ -36,6 +36,7 @@ from app.data.cache import DatasetCache
 from app.data.workspace import Workspace
 from app.db.tenant import scope_to_org
 from app.dictionary import service as dictionary_service
+from app.goals import service as goal_service
 from app.llm import keys, usage
 from app.llm.base import LLMFactory, LLMResponse, close_client
 from app.llm.usage import UsageLimitReached
@@ -275,6 +276,7 @@ def run_agent(
             db.commit()
             raise RunRefused("no_access") from error
         active = dictionary_service.active(db, spec.org_id)
+        goal_specs = goal_service.all_specs(db, spec.org_id)
         org = db.get(Organization, spec.org_id)
         resolved = None
         failure = None
@@ -322,6 +324,7 @@ def run_agent(
         today=today,
         max_rows=settings.rows_to_llm_per_tool_call,
         progress=progress,
+        goals=goal_service.visible_specs(goal_specs, visible),
         pushdown=pushdown_runner(
             rt,
             org_id=spec.org_id,

@@ -201,6 +201,7 @@ class TodayOut(BaseModel):
     checklist: ChecklistOut
     tasks: list[TaskOut]
     shared: list[SharedSummary]
+    goals: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def clean_title(value: str) -> str:

@@ -22,6 +22,7 @@ export function AnswerView({
   onRetry,
   onExport,
   onShare,
+  onPin,
 }: {
   message: ChatMessage
   onNextQuestion: (question: string) => void
@@ -30,6 +31,7 @@ export function AnswerView({
   onRetry?: () => void
   onExport?: () => void
   onShare?: () => void
+  onPin?: () => void
 }) {
   const { t } = useTranslation()
   const sources = useSources(message)
@@ -139,6 +141,7 @@ export function AnswerView({
         nextQuestions={answer.next_questions}
         onNextQuestion={onNextQuestion}
         onSave={onSave}
+        onPin={onPin}
         onExport={onExport}
         onShare={onShare}
         onShowWork={onShowWork}

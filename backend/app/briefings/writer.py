@@ -2,8 +2,8 @@
 
 * **The AI writes it** in one small call (``write_briefing`` tool) from the compact facts only: no rows, no
   personal data. It follows the daily-briefing playbook: a subject line with the single most important item;
-  sections Today's alerts, Unusual numbers, Suggested changes (₹ impact per R9), Working well, or a short Business
-  health summary when nothing is notable. Every figure carries its result id, and the number check (R14) removes any
+  sections Today's alerts, Unusual numbers, Suggested changes (₹ impact per R9), Working well, Goals (M15), or a
+  short Business health summary when nothing is notable. Every figure carries its result id, and the number check (R14) removes any
   item with a figure that is not in a result. Identical facts reuse the words already written (Redis, one day),
   so two people with the same access cost one call.
 * **Code writes it** when AI cannot be used (no key, quota, an error, an unusable answer): plain sentences from the
@@ -27,7 +27,7 @@ from app.llm.base import LLMClient, LLMError, LLMResponse, ToolSpec, UserMessage
 
 logger = logging.getLogger(__name__)
 
-SECTIONS = ("alerts", "unusual", "suggested", "growth", "risks", "tasks", "health")
+SECTIONS = ("alerts", "unusual", "suggested", "growth", "goals", "risks", "tasks", "health")
 MAX_ITEMS = 3
 MAX_TEXT = 400
 CACHE_PREFIX = "briefing:words:"
@@ -58,7 +58,7 @@ WRITE_TOOL = ToolSpec(
             },
             **{
                 key: {"type": "array", "items": {"type": "string"}}
-                for key in ("alerts", "unusual", "suggested", "growth", "risks", "health")
+                for key in ("alerts", "unusual", "suggested", "growth", "goals", "risks", "health")
             },
         },
         "required": ["subject", "headline"],
@@ -76,6 +76,8 @@ Rules:
 - suggested: at most 2 concrete changes that follow from the findings. Give a rupee impact only when it is in the
   facts (upside_next_period) and it is material: at least {threshold_inr} or {threshold_pct}% of the monthly figure.
 - growth: segments that grew several periods in a row; say how much came from repeat customers when given.
+- goals: one item per goal in the facts: actual so far against the target and where it is heading by the end of
+  its period. Say plainly when a goal is at_risk or behind (this is the early warning) and what is needed per day.
 - risks: data-quality issues and other risks in the facts.
 - health: only when notable is false: 1-2 sentences on the main metrics and their change.
 - Say when the data is old (data_as_of is before yesterday).
@@ -229,6 +231,7 @@ def write_with_code(facts: Facts) -> Written:
         sections["suggested"].append(
             f"Back what is working in {top['segment']}: keep it in stock and in your marketing while it grows."
         )
+    sections["goals"] = goal_sentences(facts.goals)
     for item in facts.risks:
         if item.get("kind") == "quality":
             sections["risks"].append(f"{item['table']}: {item.get('message') or item.get('issue')}")
@@ -273,6 +276,10 @@ def _headline(
     for key in ("alerts", "unusual", "growth"):
         if sections[key]:
             return sections[key][0], _first_figure(sections[key][0])
+    off_track = [g for g in facts.goals if g.get("status") in ("at_risk", "behind")]
+    if off_track:
+        first = goal_sentences(off_track)[0]
+        return first, _first_figure(first)
     if health:
         return health[0], _first_figure(health[0])
     return "No data arrived for this briefing yet.", None
@@ -281,3 +288,69 @@ def _headline(
 def _first_figure(text: str) -> str | None:
     found = provenance.figures(text)
     return found[0].text if found else None
+
+
+# ----------------------------------------------------------------------------------------------- goals
+GOAL_WORDS = {
+    "on_track": "On track.",
+    "at_risk": "At risk: it may fall a little short.",
+    "behind": "Behind: at this pace it will fall short.",
+    "achieved": "Achieved.",
+    "missed": "Missed.",
+}
+
+
+def period_text(start: str, end: str) -> str:
+    """A whole calendar month as "November 2026", any other period as "1 Oct to 31 Dec 2026"."""
+    from calendar import monthrange
+    from datetime import date
+
+    try:
+        a, b = date.fromisoformat(start[:10]), date.fromisoformat(end[:10])
+    except ValueError:
+        return f"{start} to {end}"
+    if (
+        a.day == 1
+        and a.year == b.year
+        and a.month == b.month
+        and b.day == monthrange(b.year, b.month)[1]
+    ):
+        return f"{a:%B %Y}"
+    return f"{a.day} {a:%b} to {b.day} {b:%b %Y}"
+
+
+def goal_label(goal: dict[str, Any]) -> str:
+    name = goal.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return f"{_label(goal.get('metric'))} goal"
+
+
+def goal_sentences(goals: list[dict[str, Any]]) -> list[str]:
+    """One cited sentence per goal; every figure is a value of the goal_progress result."""
+    out = []
+    for goal in goals:
+        rid, unit = goal["result_id"], goal.get("unit")
+        status = str(goal.get("status"))
+        if status not in GOAL_WORDS:
+            continue
+        when = period_text(str(goal.get("period_start")), str(goal.get("period_end")))
+        target = f"{format_value(goal.get('target'), unit)} [{rid}]"
+        actual = f"{format_value(goal.get('actual'), unit)} [{rid}]"
+        head = f"{goal_label(goal)} ({'at most ' if goal.get('direction') == 'at_most' else ''}{target}, {when})"
+        if status in ("achieved", "missed") and goal.get("method") == "final":
+            text = f"{head}: ended at {actual}. {GOAL_WORDS[status]}"
+        elif status == "achieved":
+            text = f"{head}: {actual} already. {GOAL_WORDS[status]}"
+        elif status == "missed":
+            text = f"{head}: {actual} so far, past the limit. {GOAL_WORDS[status]}"
+        else:
+            projection = format_value(goal.get("projection"), unit)
+            pct = goal.get("projected_pct_of_target")
+            share = f", {pct:.0f}% [{rid}] of the target" if isinstance(pct, int | float) else ""
+            text = f"{head}: {actual} so far, heading for {projection} [{rid}]{share}. {GOAL_WORDS[status]}"
+            need = goal.get("needed_per_day")
+            if status in ("at_risk", "behind") and isinstance(need, int | float) and need > 0:
+                text += f" {format_value(need, unit)} [{rid}] a day is needed from here."
+        out.append(text)
+    return out

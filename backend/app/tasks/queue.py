@@ -26,6 +26,8 @@ DRAFT_DICTIONARY = "app.tasks.jobs.draft_dictionary"
 ANSWER_QUESTION = "app.tasks.jobs.answer_question"
 RUN_TASK = "app.tasks.jobs.run_task"
 SEND_BRIEFING = "app.tasks.jobs.send_briefing"
+REFRESH_GOALS = "app.tasks.jobs.refresh_goals"
+REFRESH_TILES = "app.tasks.jobs.refresh_tiles"
 
 
 class JobQueue(Protocol):
@@ -63,6 +65,16 @@ class JobQueue(Protocol):
         """Compose and send one briefing run (M10)."""
         ...
 
+    def refresh_goals(self, *, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """Compute one person's goal progress (M15; the caller reserved it with ``goals.service.reserve``)."""
+        ...
+
+    def refresh_tiles(
+        self, *, org_id: uuid.UUID, user_id: uuid.UUID, tile_ids: list[uuid.UUID]
+    ) -> None:
+        """Re-run dashboard tiles for one person (M15; reserved with ``dashboard.service.reserve``)."""
+        ...
+
 
 def _answer_kwargs(asked: agent_service.Asked) -> dict[str, Any]:
     return {
@@ -98,6 +110,15 @@ def _sync_kwargs(
         "file_version_id": str(file_version_id) if file_version_id else None,
         "accept_changes": accept_changes,
     }
+
+
+def _refresh_kwargs(
+    org_id: uuid.UUID, user_id: uuid.UUID, tile_ids: list[uuid.UUID] | None = None
+) -> dict[str, Any]:
+    out: dict[str, Any] = {"org_id": str(org_id), "user_id": str(user_id)}
+    if tile_ids is not None:
+        out["tile_ids"] = [str(t) for t in tile_ids]
+    return out
 
 
 class CeleryJobQueue:
@@ -145,6 +166,18 @@ class CeleryJobQueue:
         from app.tasks.celery_app import celery_app
 
         celery_app.send_task(SEND_BRIEFING, kwargs={"org_id": str(org_id), "run_id": str(run_id)})
+
+    def refresh_goals(self, *, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        from app.tasks.celery_app import celery_app
+
+        celery_app.send_task(REFRESH_GOALS, kwargs=_refresh_kwargs(org_id, user_id))
+
+    def refresh_tiles(
+        self, *, org_id: uuid.UUID, user_id: uuid.UUID, tile_ids: list[uuid.UUID]
+    ) -> None:
+        from app.tasks.celery_app import celery_app
+
+        celery_app.send_task(REFRESH_TILES, kwargs=_refresh_kwargs(org_id, user_id, tile_ids))
 
 
 class InlineJobQueue:
@@ -213,6 +246,19 @@ class InlineJobQueue:
 
         briefings.send_briefing(self._runtime, self._llm_factory, org_id, run_id)
 
+    # No AI is involved: these run even without an AI factory.
+    def refresh_goals(self, *, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        from app.goals import service as goal_service
+
+        goal_service.refresh(self._runtime, org_id, user_id)
+
+    def refresh_tiles(
+        self, *, org_id: uuid.UUID, user_id: uuid.UUID, tile_ids: list[uuid.UUID]
+    ) -> None:
+        from app.dashboard import service as dashboard
+
+        dashboard.refresh(self._runtime, org_id, user_id, tile_ids)
+
 
 @dataclass
 class RecordingJobQueue:
@@ -252,3 +298,11 @@ class RecordingJobQueue:
 
     def send_briefing(self, *, org_id: uuid.UUID, run_id: uuid.UUID) -> None:
         self.jobs.append((SEND_BRIEFING, {"org_id": str(org_id), "run_id": str(run_id)}))
+
+    def refresh_goals(self, *, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        self.jobs.append((REFRESH_GOALS, _refresh_kwargs(org_id, user_id)))
+
+    def refresh_tiles(
+        self, *, org_id: uuid.UUID, user_id: uuid.UUID, tile_ids: list[uuid.UUID]
+    ) -> None:
+        self.jobs.append((REFRESH_TILES, _refresh_kwargs(org_id, user_id, tile_ids)))

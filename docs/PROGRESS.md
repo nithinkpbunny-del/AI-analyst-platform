@@ -1,17 +1,17 @@
-**Next milestone: M15: Goals, pinned dashboard, UI translations** (then the Phase 2 review). M13 (Zoho Books) and M14
-(PostgreSQL/MySQL) were built in one chat by the human's choice, on branch `m13-zoho-books`, and wait for the human's
-check and commit (suggested: "M13: Zoho Books connector", then "M14: PostgreSQL/MySQL connector"; M12 is committed,
-1f1bdb2). **M10b (public website, then the Phase 1 review) is still not built**; the human chose to go on with Phase 2
-first, ask before skipping it for good. UI translations stay deferred (D41).
-**Unfinished work:** none for M13/M14. Carry into M10b and later:
+**Next: the Phase 2 review** (BUILD_SPEC 0.3: the end of Phase 2 is a larger review), then M16 (Tally bridge) when the
+human says "continue". M15 (Goals, pinned dashboard; UI translations deferred, D41) was built on branch
+`m15-goals-dashboard` and waits for the human's check and commit (suggested: "M15: Goals, pinned dashboard (UI translations deferred)"). M1 to
+M14 are committed and merged to main. **M10b (public website, then the Phase 1 review) is still not built**; the human
+chose to go on with Phase 2 first, ask before skipping it for good.
+**Unfinished work:** none for M15. Carry into the Phase 2 review, M10b and later:
 - **Never run against a real model yet** (M8-M10): the agent, the briefing writer and `make eval` are tested with the
   fake client only. The real-AI checks of M10 (AI-written briefing, health check, export and share of a real answer, a
   long task) are still untested (Gemini was overloaded). Phase 1 sign-off needs >= 85% on `make eval` with a real model
   (BUILD_SPEC 12.2): run it by name when you are ready (`make eval LIST=1` lists the 48 questions).
 - M10b's final design QA (11a.9) should look again at the Today, Briefings, Tasks and report screens on phones.
-- The app shell is at **176.9 KB** of its 200 KB budget after M13 (197.4 after M12): the Connections and Dictionary
-  screens now load on demand with their own strings files (`locales/en/*.ts`, D99). New screens keep loading lazily;
-  `src/locales/locales.test.ts` checks every literal key exists.
+- The app shell is at **177.3 KB** of its 200 KB budget after M15 (176.9 after M13): Connections, Dictionary,
+  Dashboard and Goals load on demand with their own strings files (`locales/en/*.ts`, D99). New screens keep loading
+  lazily; `src/locales/locales.test.ts` checks every literal key exists.
 - New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`); questions and long tasks run through
   `agent.service.run_agent`. Every number comes from code and cites a result id (D67).
 - Every new tenant table needs RLS, the `tenant_isolation` policy and `app_tenant` grants; every new route goes in
@@ -38,8 +38,11 @@ first, ask before skipping it for good. UI translations stay deferred (D41).
   "certificate checked" before launch. SSH tunnels are not built (D100).
 - `make dev` now also starts `demo-postgres` (127.0.0.1:5433) and `demo-mysql` (127.0.0.1:3307), development only.
 - Small fix asked for later: removing a source and uploading the same file again loses its dictionary edits (D76).
+- Goals and dashboard tiles have never run against real customer data or a real model's answers: pinning is tested
+  with answers made by the fake model and the real tools. How often real answers carry a key figure the tile can find
+  again (D105) is worth a look in the review.
 **Deferred:** multilingual answers, briefings and UI translations (D41): everything is in English, all UI text in
-`locales/en.ts`. Pin to dashboard and goals (M15). What-if levers for stock, staffing and product mix (D71).
+`locales/en.ts` and `locales/en/*.ts`. What-if levers for stock, staffing and product mix (D71).
 
 ## Milestone checklist (BUILD_SPEC §14)
 
@@ -62,7 +65,7 @@ first, ask before skipping it for good. UI translations stay deferred (D41).
 - [x] M12: Shopify connector
 - [x] M13: Zoho Books connector
 - [x] M14: PostgreSQL/MySQL connector
-- [ ] M15: Goals, pinned dashboard, UI translations (translations deferred, D41) (then Phase 2 review, stop)
+- [x] M15: Goals, pinned dashboard, UI translations (translations deferred, D41) (then Phase 2 review, stop)
 
 ### Phase 3
 - [ ] M16: Tally bridge
@@ -1100,3 +1103,62 @@ certificate not checked").
 - Push-down results skip the dictionary's unit conversion (the agent is told; D102).
 - PyMySQL with "certificate checked" connects by name after the address check (small window, D101).
 - MySQL is covered by a fake in the automated tests and by the demo container by hand.
+
+
+---
+
+## M15: Goals, pinned dashboard (UI translations deferred, D41) (done)
+
+**Built**
+- **Database** (migration `0015`, reversible): `goals` and `dashboard_tiles`, each with RLS, the `tenant_isolation`
+  policy and grants.
+- **Goals** (`app/analytics/goals.py`, `app/goals/service.py`, `/goals`): a target for a dictionary metric over a
+  period, at least or at most, optional name and filter. Progress by code: actual so far, run-rate and seasonal
+  (last year's pattern) projections, the gap, what is needed per day, and a status (on track, at risk, behind,
+  achieved, missed, not started) (D103). Each person sees only goals on data they may see; progress is computed in
+  the background with their permissions and kept 15 minutes; no AI call.
+- **Agent tool `goal_progress`** (all goals, some, or an ad-hoc target), listed goals in `list_sources`, and the
+  goal-tracking playbook uses it (D104).
+- **Briefings**: a cited **Goals** section; an off-track goal is the early warning and makes the briefing notable;
+  code writes the goals when the AI left them out. **Today** shows running goals as last computed (D104).
+- **Pinned dashboard** (`app/dashboard/`, `/dashboard`): pin your own answer (Pin button on every finished answer);
+  the tile keeps the answer's tool calls, its key figure's place and its charts, and re-runs them, never the AI.
+  Rolling or fixed dates; refresh every 15 min / hour / 4 h / day or on "Refresh all"; rename, reorder (drag, or Move
+  up/down), remove; "Show on everyone's dashboard". Every tile re-runs with the permissions of the person looking,
+  and people who cannot see its tables do not see it (D105, D106).
+- **Web app**: Goals screen (progress bars with a time marker, projection, warning, source marks, set/edit/remove
+  dialog), Dashboard screen (tiles with key figure and change, charts or a small table, source marks, notes, team
+  tiles), Pin dialog on Ask, goals on Today, "Goals" heading in briefings, activity-log sentences. The screens load on
+  demand with their own strings (`locales/en/goals.ts`, `locales/en/dashboard.ts`); the unused placeholder screen
+  is gone (D107). Storybook: "Screens/Goals and dashboard".
+- New jobs: `refresh_goals`, `refresh_tiles` (Celery, no AI). No new dependencies and no new environment variables.
+
+**Test status**
+- **Backend:** 2612 passed; ruff and mypy (strict) clean. New: goal analytics against the demo company (actual,
+  run-rate and seasonal projections computed independently with pandas, every status rule, at-most goals, averages,
+  filters, data that ends early), the `goal_progress` tool (all, some, ad hoc, hidden tables), goals in briefings
+  (cited, number-checked, early warning first); tile specs from real tool traces, rolling dates (months, quarters,
+  years, weeks, days), replay for another person (no access, out of date, fixed SQL dates); API: goals (set, progress,
+  options, validation, change, remove, freshness, visibility, other workspace, briefing and Today) and the dashboard
+  (pin, no AI call on refresh, limits, refresh due/forced, settings, reorder, sharing with the viewer's permissions,
+  hidden data, personal routes); security (RLS on both tables, a tampered tile spec cannot write, read files or
+  reach hidden tables); route matrix with the 9 new workspace routes (634 cases) plus 3 personal routes tested in
+  their own file.
+- **Frontend:** vitest 383 passed; eslint, prettier, tsc and tokens:check clean. Build OK: shell 177.3 KB of 200 KB
+  gzipped. Storybook builds ("Screens/Goals and dashboard").
+- **Playwright** (run once, `--update-snapshots=changed`): 317 passed, 31 skipped by design. Re-recorded and reviewed:
+  Goals and Dashboard (they were placeholders), Today (goals block) and the workspace switcher (it opens over Today),
+  light/dark × desktop/phone, axe clean. One unrelated baseline re-rendered with sub-pixel noise (desktop-dark
+  what-if result) was restored. The review found an empty footer line on team tiles with no result; fixed, and only
+  the Dashboard spec was re-run (8 passed).
+- **No AI calls were made.** `make eval` and `make llm-check` were not run.
+
+**How to try it:** see the testing steps given at the end of M15.
+
+**Known gaps / notes**
+- Read-only: goals and tiles only read through the analytics and the read-only workspace; nothing in a source changes.
+- Rolling dates move `{start, end}` periods; SQL the agent wrote itself keeps its dates (the tile says so).
+- A tile whose answer had no findable key figure shows its chart or table only.
+- The 10% "at risk" margin and the 15-minute freshness of goal progress are constants for now (D103).
+- Goals use calendar months/quarters in the "Period" presets; India's financial-year quarters can be chosen as dates.
+- UI translations (Hindi, Kannada) stay deferred (D41).

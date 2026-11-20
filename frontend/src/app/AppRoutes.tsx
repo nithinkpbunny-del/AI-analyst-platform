@@ -15,11 +15,9 @@ import { SecureAccountPage } from '../features/auth/SecureAccountPage'
 import { SignInPage } from '../features/auth/SignInPage'
 import { SignUpPage } from '../features/auth/SignUpPage'
 import { LoginSetupPage, RequiredSetupPage, TwoFactorPage } from '../features/auth/TwoFactorPages'
-import { PlaceholderPage } from '../features/placeholder/PlaceholderPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { TeamPage } from '../features/team/TeamPage'
 import { AppShell } from './AppShell'
-import { adminNav, mainNav } from './nav'
 import { RedirectIfSignedIn, RequireAuth } from './RequireAuth'
 
 // The What-if screen loads on first visit: it brings the chart code and keeps the shell under its budget.
@@ -71,24 +69,19 @@ const SharedItemPage = lazy(() =>
   import('../features/reports/ReportPages').then((m) => ({ default: m.SharedItemPage })),
 )
 
+// M15: Dashboard and Goals load on first visit, with their own strings (DECISIONS D99).
+const DashboardPage = lazy(() =>
+  import('../features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+)
+const GoalsPage = lazy(() =>
+  import('../features/goals/GoalsPage').then((m) => ({ default: m.GoalsPage })),
+)
+
 function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={null}>{children}</Suspense>
 }
 
 export function AppRoutes() {
-  const built = new Set([
-    'settings',
-    'team',
-    'activity',
-    'connections',
-    'dictionary',
-    'ask',
-    'whatIf',
-    'today',
-    'briefings',
-    'tasks',
-  ])
-  const placeholders = [...mainNav, ...adminNav].filter((item) => !built.has(item.key))
   return (
     <Routes>
       <Route element={<AuthLayout />}>
@@ -115,9 +108,6 @@ export function AppRoutes() {
         </Route>
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/today" replace />} />
-          {placeholders.map((item) => (
-            <Route key={item.key} path={item.path} element={<PlaceholderPage item={item} />} />
-          ))}
           <Route
             path="/what-if"
             element={
@@ -131,6 +121,22 @@ export function AppRoutes() {
             element={
               <Lazy>
                 <TodayPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <Lazy>
+                <DashboardPage />
+              </Lazy>
+            }
+          />
+          <Route
+            path="/goals"
+            element={
+              <Lazy>
+                <GoalsPage />
               </Lazy>
             }
           />

@@ -37,7 +37,7 @@ from app.reports import service as reports
 
 logger = logging.getLogger(__name__)
 
-ORDER = ("alerts", "unusual", "suggested", "growth", "risks", "tasks", "health")
+ORDER = ("alerts", "unusual", "suggested", "growth", "goals", "risks", "tasks", "health")
 
 
 def _session(rt: ConnectorRuntime, org_id: uuid.UUID) -> DbSession:
@@ -267,6 +267,9 @@ def _write(
         rt.redis.set(key, json.dumps(written.__dict__), ex=writer.CACHE_SECONDS)
     # Finished long tasks are listed by code (titles, no figures).
     written.sections["tasks"] = [f"Your analysis is ready: {t['title']}" for t in facts.tasks]
+    # The goals' early warning is never lost: when the AI left them out, code writes them (X7).
+    if facts.goals and not written.sections.get("goals"):
+        written.sections["goals"] = writer.goal_sentences(facts.goals)
     return written
 
 
@@ -289,6 +292,7 @@ def _body(facts: briefing_facts.Facts, written: writer.Written) -> dict[str, Any
         "unusual": facts.unusual,
         "growth": facts.growth,
         "tasks": facts.tasks,
+        "goals": facts.goals,
         "notable": facts.notable,
         "notes": [*facts.notes, *written.notes],
     }
