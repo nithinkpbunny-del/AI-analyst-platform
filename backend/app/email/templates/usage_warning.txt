@@ -1,0 +1,15 @@
+{% if reached %}
+{{ org_name }} has used all its questions this month.
+
+{{ used }} of {{ limit }} questions and long analyses are used. New questions are paused until {{ resets }}.
+
+To keep going before then, an Owner can add the workspace's own AI key in Settings. Nothing is charged: billing is not switched on.
+{% else %}
+{{ org_name }} has used 80% of this month's questions.
+
+{{ used }} of {{ limit }} questions and long analyses are used. The count starts again on {{ resets }}.
+
+You can see usage in Settings, and add the workspace's own AI key there to remove the limit. Nothing is charged: billing is not switched on.
+{% endif %}
+
+Open Settings: {{ link }}

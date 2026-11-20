@@ -56,6 +56,22 @@ export const INDUSTRIES: Industry[] = [
   'other',
 ]
 
+/** What a person sees of an industry template (M17); the server holds the rest. */
+export interface IndustryTemplate {
+  key: Industry
+  name: string
+  summary: string
+  words: string
+  kpis: {
+    key: string
+    label: string
+    meaning: string
+    unit: 'INR' | 'count' | 'percent' | 'litres' | 'days' | 'ratio'
+    good_direction: 'up' | 'down' | null
+  }[]
+  starter_questions: string[]
+}
+
 export interface OrganizationSettings {
   id: string
   name: string
@@ -124,6 +140,7 @@ export const teamApi = {
     authedRequest<void>(`/team/invitations/${id(invitationId)}`, { method: 'DELETE' }),
 
   organization: () => authedRequest<OrganizationSettings>('/org'),
+  templates: () => authedRequest<IndustryTemplate[]>('/org/templates'),
   updateOrganization: (changes: { name?: string; timezone?: string; industry?: Industry }) =>
     authedRequest<OrganizationSettings>('/org', { method: 'PATCH', body: changes }),
   requestDeletion: (confirmName: string) =>

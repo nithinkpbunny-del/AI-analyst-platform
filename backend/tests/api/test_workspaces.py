@@ -72,6 +72,59 @@ class TestOrgProfile:
             assert client.patch("/org", json=body, headers=headers).status_code == 422
 
 
+class TestIndustryTemplates:
+    """M17: choosing the kind of business, and the templates people can choose from."""
+
+    def test_every_member_sees_the_seven_templates_and_signed_out_does_not(
+        self, client: TestClient, world: World
+    ) -> None:
+        assert client.get("/org/templates").status_code == 401
+        for who in ("owner_a", "analyst_a", "viewer_a"):
+            body = client.get("/org/templates", headers=world.headers(who)).json()
+            assert [t["key"] for t in body] == [
+                "retail",
+                "d2c",
+                "restaurant",
+                "fuel_station",
+                "services",
+                "manufacturing",
+                "other",
+            ]
+            first = body[0]
+            assert first["name"] == "Retail" and len(first["kpis"]) >= 5
+            assert first["kpis"][0].keys() == {"key", "label", "meaning", "unit", "good_direction"}
+            assert len(first["starter_questions"]) >= 4
+
+    def test_the_internal_parts_are_not_sent(self, client: TestClient, world: World) -> None:
+        text = client.get("/org/templates", headers=world.headers("owner_a")).text
+        assert "playbook_tweaks" not in text and "elasticities" not in text
+
+    def test_owner_chooses_the_industry_and_it_is_logged_but_others_cannot(
+        self, client: TestClient, db: DbSession, world: World
+    ) -> None:
+        for who in ("analyst_a", "viewer_a"):
+            denied = client.patch(
+                "/org", json={"industry": "restaurant"}, headers=world.headers(who)
+            )
+            assert denied.status_code == 403
+        done = client.patch(
+            "/org", json={"industry": "restaurant"}, headers=world.headers("owner_a")
+        )
+        assert done.status_code == 200 and done.json()["industry"] == "restaurant"
+        entry = db.scalars(select(AuditLog).where(AuditLog.action == "org.settings_changed")).one()
+        assert entry.details == {"industry": {"from": None, "to": "restaurant"}}
+        assert (
+            client.patch(
+                "/org", json={"industry": "pet_shop"}, headers=world.headers("owner_a")
+            ).status_code
+            == 422
+        )
+
+    def test_each_workspace_keeps_its_own_choice(self, client: TestClient, world: World) -> None:
+        client.patch("/org", json={"industry": "services"}, headers=world.headers("owner_a"))
+        assert client.get("/org", headers=world.headers("owner_b")).json()["industry"] != "services"
+
+
 class TestSwitching:
     def test_switch_to_another_workspace(
         self, client: TestClient, db: DbSession, world: World, settings: Settings, clock: FakeClock

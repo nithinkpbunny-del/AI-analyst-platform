@@ -1,0 +1,27 @@
+key: restaurant
+name: Restaurant
+business: restaurant
+summary: Restaurants, cafes and cloud kitchens. Watches covers, average bill, food cost, wastage and delivery share.
+words: "bills or covers (not orders), outlets, tables, dine-in versus delivery, menu items, food cost, wastage."
+kpis:
+  - {key: revenue, label: Sales, meaning: "Sales value after discounts.", unit: INR, good_direction: up}
+  - {key: orders, label: Bills, meaning: "Number of bills or covers served.", unit: count, good_direction: up}
+  - {key: aov, label: Average bill, meaning: "Sales divided by bills.", unit: INR, good_direction: up}
+  - {key: food_cost_pct, label: Food cost, meaning: "Cost of ingredients as a share of sales.", unit: percent, good_direction: down}
+  - {key: discount_rate, label: Discount given, meaning: "Discounts and offers as a share of sales.", unit: percent, good_direction: down}
+  - {key: delivery_share, label: Delivery share, meaning: "Share of sales that came through delivery apps.", unit: percent}
+starter_questions:
+  - Which outlet or day of the week sold the most last month?
+  - Is food cost rising, and which menu items push it up?
+  - How much of our sales come through delivery apps, and what do they cost us?
+  - What were the busiest hours and the slowest days?
+playbook_tweaks:
+  why_changed: Split by outlet, then by day of week and meal time, and dine-in versus delivery; compare bills with the average bill.
+  profitability: Check food cost by menu item and delivery-app commissions; both can hide a falling margin behind rising sales.
+  anomaly_review: A sudden drop is often a closed outlet, a power or gas problem, or a delivery app going offline; name the outlet and channel.
+  forecasting: Weekends, festivals and weather shift sales a lot; forecast by day of week and say which holidays the history covers.
+elasticities:
+  price: -0.8
+  discount: -1.0
+  spend: 0.3
+  basis: Regulars notice menu price changes less than shoppers notice shelf prices; offers mostly pull in extra covers at quiet hours.

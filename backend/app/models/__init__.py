@@ -3,6 +3,7 @@
 from app.models.ai import LlmKey, Secret, UsageEvent
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken, Session, UserToken
+from app.models.billing import BillingEvent
 from app.models.chat import Conversation, Message, SavedQuestion
 from app.models.connection import (
     Connection,
@@ -23,6 +24,7 @@ from app.models.user import User
 
 __all__ = [
     "AuditLog",
+    "BillingEvent",
     "BriefingRun",
     "BriefingSetting",
     "Connection",

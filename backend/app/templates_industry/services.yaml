@@ -1,0 +1,27 @@
+key: services
+name: Services
+business: services
+summary: Clinics, agencies, salons, training and other businesses that bill for work. Watches billing, clients, collections and utilisation.
+words: "clients (not customers), invoices, billed hours or appointments, retainers, collections, outstanding payments."
+kpis:
+  - {key: revenue, label: Billing, meaning: "Value of invoices raised.", unit: INR, good_direction: up}
+  - {key: orders, label: Jobs or appointments, meaning: "Number of jobs, sessions or appointments billed.", unit: count, good_direction: up}
+  - {key: aov, label: Average job value, meaning: "Billing divided by jobs.", unit: INR, good_direction: up}
+  - {key: receivables, label: Outstanding payments, meaning: "Invoiced money not yet collected.", unit: INR, good_direction: down}
+  - {key: collection_days, label: Days to collect, meaning: "Average days from invoice to payment.", unit: days, good_direction: down}
+  - {key: repeat_rate, label: Returning clients, meaning: "Share of clients who came back.", unit: percent, good_direction: up}
+starter_questions:
+  - Which clients or services brought in the most billing last quarter?
+  - How much is outstanding, and which invoices are the oldest?
+  - Are returning clients coming back as often as before?
+  - How did billing change month by month this year?
+playbook_tweaks:
+  why_changed: Split by service, by client and by staff member or branch, and compare the number of jobs with the average job value.
+  profitability: Check billing against staff cost per service; slow-paying clients cost money even when the work is profitable.
+  customer_retention: Look at how often each client returns and which services bring first-time clients back.
+  budget_variance: Staff cost is the main line; compare it with billing before looking at small expenses.
+elasticities:
+  price: -0.7
+  discount: -0.9
+  spend: 0.4
+  basis: Clients value trust and results over small price gaps; referrals and local marketing bring most new work.

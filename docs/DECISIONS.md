@@ -1659,3 +1659,118 @@ a missing one.
 - The bridge is plain Python 3.12 (httpx, defusedxml) built for Windows with PyInstaller (`bridge/tally/
   tally_bridge.spec`). It is tested, linted and type-checked with the backend (same interpreter); the Windows build,
   DPAPI and real TallyPrime are untested here (docs/SETUP_TALLY.md).
+
+## M17: Industry templates
+
+### D114. A template is plain data, validated, with no AI call (M17, BUILD_SPEC X9, 9 step 2, 10.4)
+- Seven YAML files in `backend/app/templates_industry/` (retail, d2c, restaurant, fuel_station, services,
+  manufacturing, and a generic `other`), loaded and validated by `templates_industry.load` (pydantic, unknown fields
+  refused, elasticities within the what-if bounds). The keys are exactly the industries the workspace
+  (`organizations.industry_template`), the settings request and the dictionary already accept; a test keeps the three lists
+  equal. A workspace with no industry, or an unknown one, gets the generic template.
+- A template holds: the name the prompts use (`business`, "a retail business in India"), a summary, the business's own
+  words (bills not orders, litres not units), 3-8 KPIs (key, label, plain meaning, unit, good direction), 3-5
+  starter questions, playbook tweaks (a sentence or two per playbook file) and the what-if elasticities with a `basis`.
+  Nothing in a template reads customer data or creates a metric by itself: KPIs are names and meanings only.
+- It does not add an AI call anywhere. It changes text the existing calls already send, so the cost is a few hundred
+  characters per question (only the playbooks that were chosen add their tweak; the generic template adds nothing).
+- Where each part goes: KPIs, words and the chosen playbooks' tweaks -> the agent's system prompt ("What matters in a
+  retail business"); KPI keys -> `typical_metrics` in the dictionary draft's existing call (names only, never data;
+  BUILD_SPEC 9 step 2); elasticities -> the what-if defaults; starter questions -> Ask and Today.
+
+### D115. What-if defaults live in the templates and say where they come from (M17, BUILD_SPEC 10.4)
+- `whatif.DEFAULTS` is now built from the templates. The numbers are the ones M9 shipped (d2c -1.4/-1.8/0.45,
+  retail -1.0/-1.3/0.35 ...), so no earlier result changes. The generic template keeps M9's "other" values.
+- A default elasticity carries its `basis` ("Online shoppers compare prices easily ...") into the assumption list of
+  the result, so the agent and the screen can say why the assumption is what it is. History still wins whenever it is
+  informative; a default is still labelled `default` and the confidence is still low.
+- These are starting assumptions, not measured industry data. They were written from general business reasoning, not
+  from a dataset: say so when asked, and invite the person's own number (the what-if playbook already does).
+
+### D116. Choosing the template (M17, BUILD_SPEC 11a.8, X9)
+- "Chosen at onboarding": the checklist's first step ("Company details") now opens a dialog on Today where an Owner
+  picks the kind of business and sees what the template sets up before saving. Settings keeps its "Kind of business"
+  choice and shows the same preview, also before saving. Both use `PATCH /org` (Owners, written to the activity log as
+  before); the list comes from `GET /org/templates` (any signed-in member; reference data, the same for everyone; the
+  playbook tweaks and elasticities are not sent).
+- Both screens load on demand (dialog and preview are separate chunks), so the app shell did not grow beyond a few
+  hundred bytes (the starter-question hook in Ask).
+- Starter questions: Ask shows the template's questions once an industry other than "something else" is chosen and the
+  templates loaded; otherwise the three general ones. Today's three suggestions still come from the person's own
+  findings and metrics first; the template's questions only fill the empty places.
+- Changing the template later changes the prompt, suggestions and what-if defaults from the next question on. It does
+  not rewrite the confirmed dictionary (its own `company.industry` stays what the Owner confirmed, as in M7).
+- Language: the template texts are English (multilingual is deferred, D41); the UI words around them are in
+  `locales/en/templates.ts`.
+
+## M18: Billing hooks (no payments)
+
+### D117. What "billing hooks" means here: record, warn, summarise, never charge (M18, BUILD_SPEC R7, 14 M18)
+- Scope as the milestone says: a **plan change flow**, **limit warnings at 80% and 100%** and **invoice-ready usage
+  summaries**. Nothing collects money: no gateway, no key, no price, no card or customer-payment record, no network
+  call. Every screen says so ("Billing is not switched on"); prices read "coming soon" (BUILD_SPEC 11b).
+- Plans, limits and usage are M5's, unchanged: two plans (`managed`, `byok`), the Managed plan's monthly question
+  limit (`organizations.monthly_question_limit`), usage counted by `app.llm.usage.questions_used` (question and long-task
+  runs on the platform's key in the workspace's calendar month and time zone; briefings, checks and dictionary
+  drafts never count; BYOK has no platform limit). The new code calls those functions and never re-counts.
+- Everything is Owner-only (`org.manage`), like the AI plan and usage (BUILD_SPEC 6.2). No new role or permission.
+
+### D118. The provider interface and its one stand-in (M18)
+- `BillingProvider` (`app/billing/provider.py`) has one method, `deliver(event) -> Delivery`. Every billing event is
+  offered to the configured provider before it is stored, so a real provider added later receives events with no
+  change elsewhere.
+- **STAND-IN:** `StandInProvider` is the only provider. It accepts every event and sends it nowhere (`delivery =
+  not_sent`, `provider = stand-in`). `BILLING_PROVIDER` accepts only `stand_in`; any other value fails at start-up, so no
+  one can believe a real provider is connected. A test makes sure the package imports no HTTP or socket code and that
+  the stand-in opens no connection.
+- **Everything that must be replaced when a real provider is chosen** (a checklist, not a design): the provider class and
+  `BILLING_PROVIDER`; prices (`PlanInfo.price_inr_per_month` is `None` and the screens say "coming soon"); the
+  `amount_due_inr: 0` and `draft_no_payment` status in the summary; a checkout / invoice / webhook flow (none exists);
+  tax details (GST, invoice numbers) which the summary deliberately does not pretend to have; the "not switched on" and
+  "Nothing is charged" texts in `locales/en/billing.ts` and the warning email.
+
+### D119. Warnings at 80% and 100%: once a month, from the run that crossed them (M18)
+- `billing.limits.after_limited_run` runs once after each question or long task that used the platform's key (called from
+  `agent.service.run_agent`, which both use). It reads M5's count and, if the workspace is at 80% or more (or at its
+  limit), records **one** `usage_warning` or `usage_limit_reached` billing event per workspace per month (a unique key
+  `(org_id, kind, period)` makes this safe when two runs finish together) and emails each Owner **once** then. Going
+  straight past 80% to 100% records only the 100% event.
+- It never raises: a failing check or email is logged and the answer is unaffected (tested).
+- Asking is still stopped by M5's rule (`ensure_within_limit`, 429 "usage_limit_reached"); billing only tells people
+  earlier. The limit is still checked before a question starts, so two questions asked at the same moment may overshoot
+  by one or two, as M5 accepted (D42).
+- The Owner sees it too on Today (`usage_warning` in `GET /today`, Owners only) and in Settings > Plan and billing
+  (meter, same words at 80% and 100%). Analysts and Viewers are not told (they get M5's message when a question is
+  refused). BYOK workspaces have no level and get no warning.
+- Not built: warnings at other percentages, per-person limits, a "buy more questions" action (nothing can be bought).
+
+### D120. Invoice-ready monthly summaries (M18)
+- `GET /org/billing/summary?month=` (and `.csv`) lists the lines a future invoice would carry: questions included in the
+  plan, questions used on the platform's AI, the amount above the limit, runs on the workspace's own key (billed by its
+  AI provider, not by us), briefings (not counted), and the estimated AI cost in USD (information only), plus plan
+  changes inside the month. Months are the workspace's calendar months in its own time zone (like M5's usage screen).
+- **It is not an invoice:** `amount_due_inr` is 0, `price_status` is `not_priced`, `status` is `draft_no_payment` and the
+  notes say so. No invoice number, no tax lines.
+- A finished month is **frozen once**: a beat job (every 6 hours, `close_billing_months`) stores last month's summary as a
+  `usage_summary` billing event for each workspace that existed in that month; later usage rows do not change it, and
+  the screen and API show the frozen copy ("Final: saved on ..."). The current month is always a live draft. A month
+  nobody froze yet (job not run) is shown live.
+- The CSV has one row per line with the workspace and month on every row; the workspace's name is guarded against
+  spreadsheet formulas like the activity-log export. Downloads are written to the activity log
+  (`billing.summary_exported`). The data export (DPDP) includes `billing.json`.
+
+### D121. The plan change flow: preview, then confirm (M18)
+- `POST /org/billing/plan-change/preview` reads and answers `allowed`, `blockers` (own key missing, Managed not set up,
+  same plan) and `effects` as codes the screen writes in words (limit, what this month already holds and counts from
+  now, near/at the limit, effective at once, history kept, nothing charged). `PUT /org/billing/plan` repeats the same
+  check and then changes the plan (409 with the blocker's code otherwise).
+- Rules are M5's: switching to your own key needs a saved key; switching to Managed needs the platform's AI to be set up;
+  switching to Managed when the month's questions are already used is allowed and says so (M5 allowed it too). Saving or
+  removing the key keeps its own routes and words (AI plan section).
+- One function changes a plan, `api.ai.change_plan`: it writes the activity-log entry (`org.plan_changed`, as before) and
+  offers a `plan_changed` billing event to the provider. The older routes (`PUT /org/ai/plan`, `DELETE /org/ai/key`) use
+  it too, so no path changes a plan without the event. Plan changes have no period, so any number is allowed.
+- Billing events (`billing_events`, migration 0017): RLS and `tenant_isolation`; workspace requests can read and add rows,
+  never change or delete them (like `usage_events`); deleted with the workspace.
+- Not built, on purpose: a trial, proration, a downgrade date, a "contact us" form for more questions (there is no
+  platform admin or sales channel in scope, BUILD_SPEC 2 "out of scope").

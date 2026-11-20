@@ -106,6 +106,26 @@ class OrganizationSettingsOut(BaseModel):
     deletion_due_at: datetime | None = None
 
 
+class TemplateKpiOut(BaseModel):
+    key: str
+    label: str
+    meaning: str
+    unit: str
+    good_direction: str | None = None
+
+
+class IndustryTemplateOut(BaseModel):
+    """What a person sees of an industry template (M17): the rest (playbook tweaks, default assumptions) works
+    inside the agent and the what-if tool."""
+
+    key: str
+    name: str
+    summary: str
+    words: str
+    kpis: list[TemplateKpiOut]
+    starter_questions: list[str]
+
+
 class OrganizationSettingsRequest(_Strict):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     timezone: str | None = Field(default=None, min_length=1, max_length=64)

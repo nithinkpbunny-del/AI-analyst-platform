@@ -12,6 +12,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Request, Response, status
 from sqlalchemy import select
 
+from app import templates_industry
 from app.api.auth import send_queued
 from app.api.deps import Tenant, requires
 from app.api.errors import ApiError
@@ -22,7 +23,13 @@ from app.email import templates
 from app.models import Membership, Organization, User
 from app.privacy import deletion
 from app.privacy import export as data_export
-from app.schemas.team import DeletionRequest, OrganizationSettingsOut, OrganizationSettingsRequest
+from app.schemas.team import (
+    DeletionRequest,
+    IndustryTemplateOut,
+    OrganizationSettingsOut,
+    OrganizationSettingsRequest,
+    TemplateKpiOut,
+)
 
 router = APIRouter(prefix="/org", tags=["workspace"])
 
@@ -62,6 +69,29 @@ def _org(tenant: Tenant, *, lock: bool = False) -> Organization:
 )
 def get_org(tenant: Annotated[Tenant, requires(Permission.SHARED_VIEW)]) -> OrganizationSettingsOut:
     return _out(_org(tenant))
+
+
+@router.get(
+    "/templates",
+    response_model=list[IndustryTemplateOut],
+    responses=_ERRORS,
+    summary="The industry templates a workspace can choose from",
+)
+def list_templates(
+    tenant: Annotated[Tenant, requires(Permission.SHARED_VIEW)],
+) -> list[IndustryTemplateOut]:
+    """Reference data, the same for everyone (BUILD_SPEC X9). Needs a signed-in member; no workspace data is read."""
+    return [
+        IndustryTemplateOut(
+            key=t.key,
+            name=t.name,
+            summary=t.summary,
+            words=t.words,
+            kpis=[TemplateKpiOut(**k.model_dump()) for k in t.kpis],
+            starter_questions=list(t.starter_questions),
+        )
+        for t in templates_industry.all_templates()
+    ]
 
 
 @router.patch(

@@ -157,6 +157,7 @@ export const demoToday: Today = {
   health_check:
     'Give me a health check of the business for the last complete month: the main numbers, what changed and why, and what is working well.',
   checklist: { company: true, connect: true, dictionary: false, ask: false, done: false },
+  usage_warning: null,
   tasks: [demoTask()],
   shared: [
     {

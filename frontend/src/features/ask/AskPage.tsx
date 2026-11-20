@@ -3,6 +3,7 @@ import { Bookmark, History, MessageSquareText, Plus, Trash2, X } from 'lucide-re
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { useStarterQuestions } from '../templates/useTemplates'
 import { EmptyState } from '../../components/EmptyState'
 import { FormAlert } from '../../components/FormAlert'
 import { PageHeader } from '../../components/PageHeader'
@@ -197,6 +198,10 @@ export function AskPage() {
   const canExport = useCan('export')
   const canShare = useCan('share')
   const canPin = useCan('dashboard.edit')
+  // Starter questions fit the kind of business once it is chosen (M17); until then the three general ones.
+  const templateStarters = useStarterQuestions()
+  const starters =
+    templateStarters ?? (['q1', 'q2', 'q3'] as const).map((k) => t(`ask.starters.${k}`))
   const box = useRef<HTMLTextAreaElement>(null)
   useSlashFocus(box)
   const [lens, setLens] = useState<Lens>('business')
@@ -398,14 +403,14 @@ export function AskPage() {
                 {t('ask.starters.title')}
               </h2>
               <div className="flex flex-wrap gap-2">
-                {(['q1', 'q2', 'q3'] as const).map((key) => (
+                {starters.map((question) => (
                   <button
-                    key={key}
+                    key={question}
                     type="button"
-                    onClick={() => askFresh(t(`ask.starters.${key}`), lens)}
+                    onClick={() => askFresh(question, lens)}
                     className="min-h-11 rounded-pill border border-line-strong px-4 text-left text-small text-ink hover:bg-neel-soft"
                   >
-                    {t(`ask.starters.${key}`)}
+                    {question}
                   </button>
                 ))}
               </div>

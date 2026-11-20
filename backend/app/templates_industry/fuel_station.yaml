@@ -1,0 +1,27 @@
+key: fuel_station
+name: Fuel station
+business: fuel station
+summary: Petrol and diesel pumps with a shop or services. Watches litres sold, margin per litre, credit and stock loss.
+words: "litres sold (not units), pumps and nozzles, petrol and diesel, shifts, credit customers, dip readings, stock loss."
+kpis:
+  - {key: revenue, label: Sales, meaning: "Fuel and other sales in rupees.", unit: INR, good_direction: up}
+  - {key: litres_sold, label: Litres sold, meaning: "Fuel sold in litres.", unit: litres, good_direction: up}
+  - {key: margin_per_litre, label: Margin per litre, meaning: "Selling price less cost, per litre sold.", unit: INR, good_direction: up}
+  - {key: stock_loss_litres, label: Stock loss, meaning: "Litres missing between dip readings and sales.", unit: litres, good_direction: down}
+  - {key: credit_outstanding, label: Credit outstanding, meaning: "Money owed by credit customers.", unit: INR, good_direction: down}
+  - {key: non_fuel_share, label: Non-fuel share, meaning: "Share of sales from lubricants, shop and services.", unit: percent, good_direction: up}
+starter_questions:
+  - How many litres did each pump sell last month, petrol versus diesel?
+  - Is any pump or shift showing unusual stock loss?
+  - Which credit customers owe us the most, and for how long?
+  - How is margin per litre changing?
+playbook_tweaks:
+  why_changed: Split litres by fuel type, pump and shift first; prices are set outside the station, so look at volume and margin rather than at price.
+  anomaly_review: Compare sales litres with dip readings; a gap on one pump or shift points to a meter, a leak or a process problem.
+  profitability: Margin per litre is small and fixed by rules, so non-fuel sales and credit cost (days of credit given) often decide profit.
+  forecasting: Volume follows holidays, highway traffic and fuel price changes; forecast litres, not rupees, and say so.
+elasticities:
+  price: -0.3
+  discount: -0.4
+  spend: 0.1
+  basis: Fuel prices are set by the market, and drivers rarely change how much they buy; only nearby competition shifts volume a little.

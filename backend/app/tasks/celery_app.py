@@ -38,6 +38,11 @@ celery_app.conf.update(
         "schedule-briefings": {"task": "app.tasks.jobs.schedule_briefings", "schedule": 300.0},
         # Workspaces past their 7-day deletion grace period (BUILD_SPEC 6.6).
         "purge-deleted-orgs": {"task": "app.tasks.jobs.purge_deleted_orgs", "schedule": 3600.0},
+        # Last month's invoice-ready usage summary, frozen once per workspace (M18; nothing is charged).
+        "close-billing-months": {
+            "task": "app.tasks.jobs.close_billing_months",
+            "schedule": 21600.0,
+        },
     },
 )
 

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.audit.query import AuditFilters, export_csv
 from app.models import (
+    BillingEvent,
     BriefingRun,
     BriefingSetting,
     Connection,
@@ -54,6 +55,7 @@ Files:
 - saved_questions.json, tasks.json, reports.json (long-task reports and briefings), shares.json.
 - briefings.json: briefing settings and what was sent when.
 - usage.json: AI calls (tokens, estimated cost), no content.
+- billing.json: plan changes, usage warnings and monthly usage summaries (no payments exist yet).
 - activity_log.csv: the activity log.
 
 Not included: passwords, connection credentials and AI keys (never exported); cached copies of your data sources
@@ -224,6 +226,21 @@ def build(db: DbSession, org_id: uuid.UUID, now: datetime) -> bytes:
                 for r in db.scalars(select(BriefingRun).where(BriefingRun.org_id == org_id))
             ],
         },
+        "billing.json": [
+            {
+                "kind": b.kind,
+                "period": b.period,
+                "details": b.details,
+                "provider": b.provider,
+                "delivery": b.delivery,
+                "at": _iso(b.created_at),
+            }
+            for b in db.scalars(
+                select(BillingEvent)
+                .where(BillingEvent.org_id == org_id)
+                .order_by(BillingEvent.created_at)
+            )
+        ],
         "usage.json": [
             {
                 "person": str(u.user_id) if u.user_id else None,

@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { PageHeader } from '../../components/PageHeader'
 import { Button } from '../../components/ui/button'
 import { useAuth, useSession } from '../../lib/authContext'
+import { useCan } from '../../lib/permissions'
 import { cn } from '../../lib/cn'
 import { useTheme, type ThemePreference } from '../../lib/theme'
 import { AiPlanSection } from './AiPlanSection'
@@ -13,6 +14,9 @@ import { SecuritySection } from './SecuritySection'
 import { SystemStatus } from './SystemStatus'
 import { UsageSection } from './UsageSection'
 import { WorkspaceSection } from './WorkspaceSection'
+
+// Plan and billing (M18) loads on demand and only for Owners.
+const BillingSection = lazy(() => import('../billing/BillingSection'))
 
 const options: { value: ThemePreference; key: string }[] = [
   { value: 'system', key: 'settings.themeSystem' },
@@ -55,6 +59,7 @@ function AccountSection() {
 export function SettingsPage() {
   const { t } = useTranslation()
   const { theme, setTheme } = useTheme()
+  const canManage = useCan('org.manage')
   useEffect(() => {
     document.title = `${t('pages.settings.title')} · ${t('app.name')}`
   }, [t])
@@ -69,6 +74,11 @@ export function SettingsPage() {
         <DevicesSection />
         <AiPlanSection />
         <UsageSection />
+        {canManage ? (
+          <Suspense fallback={null}>
+            <BillingSection />
+          </Suspense>
+        ) : null}
         <PrivacySection />
         <section className="rounded-panel border border-line bg-surface p-4 tablet:p-6">
           <h2 className="text-h4">{t('settings.appearance')}</h2>

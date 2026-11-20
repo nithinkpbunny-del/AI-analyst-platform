@@ -202,6 +202,8 @@ class TodayOut(BaseModel):
     tasks: list[TaskOut]
     shared: list[SharedSummary]
     goals: list[dict[str, Any]] = Field(default_factory=list)
+    # M18: an Owner on the Managed plan at 80% or 100% of the month's questions (None for everyone else).
+    usage_warning: dict[str, Any] | None = None
 
 
 def clean_title(value: str) -> str:

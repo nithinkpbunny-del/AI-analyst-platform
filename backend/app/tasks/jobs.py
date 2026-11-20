@@ -6,6 +6,7 @@ import logging
 import uuid
 
 from app.agent import service as agent_service
+from app.billing import summary as billing_summary
 from app.briefings import schedule as briefing_schedule
 from app.briefings import service as briefings
 from app.connectors import service
@@ -130,6 +131,15 @@ def send_briefing(
     return briefings.send_briefing(
         runtime, default_factory(runtime.settings), uuid.UUID(org_id), uuid.UUID(run_id)
     )
+
+
+@celery_app.task(name="app.tasks.jobs.close_billing_months")
+def close_billing_months() -> (
+    int
+):  # pragma: no cover - the body is billing.summary.close_months, tested directly
+    """Freeze last month's invoice-ready usage summary for every workspace (M18). Nothing is charged."""
+    runtime = worker_runtime()
+    return billing_summary.close_months(runtime, runtime.clock())
 
 
 # Goal progress and dashboard tiles: analytics over live data, no AI call (M15).

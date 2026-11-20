@@ -15,11 +15,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Request
 from sqlalchemy import select
 
+from app import templates_industry
 from app.agent.access import NoAccess, access_context, visible_dictionary
 from app.api.deps import Tenant, requires
 from app.api.reports import _report_out, list_shared
 from app.api.tasks import task_out
 from app.auth.permissions import Permission
+from app.billing import limits as billing_limits
 from app.dictionary import service as dictionary_service
 from app.goals import service as goal_service
 from app.models import Connection, DictionaryVersion, Message, Report, Task
@@ -92,6 +94,10 @@ def suggestions(tenant: Tenant, briefing: Report | None) -> list[str]:
             out.append("What if we raise prices by 5%?")
     else:
         out.append("What can you tell me about my data?")
+    # M17: a business of a known kind gets its template's questions to fill what its own data did not suggest.
+    template = templates_industry.get(tenant.auth.organization.industry_template)
+    if not template.generic:
+        out.extend(template.starter_questions)
     return list(dict.fromkeys(out))[:3]
 
 
@@ -192,6 +198,22 @@ def goal_items(request: Request, tenant: Tenant, briefing: Report | None) -> lis
     return out[:MAX_GOALS]
 
 
+def usage_warning(tenant: Tenant) -> dict[str, Any] | None:
+    """Owners see when the Managed plan's monthly questions are at 80% or used up (M18, D119); nobody else does."""
+    if tenant.auth.role != "owner":
+        return None
+    current = billing_limits.status(tenant.db, tenant.auth.organization, tenant.service.clock())
+    if current.level not in ("warning", "reached"):
+        return None
+    return {
+        "level": current.level,
+        "used": current.used,
+        "limit": current.limit,
+        "percent": current.percent,
+        "resets_on": current.resets_on.isoformat(),
+    }
+
+
 @router.get("/today", response_model=TodayOut, responses=_ERRORS, summary="The home screen")
 def today(request: Request, tenant: Mine) -> TodayOut:
     me = tenant.auth.user.id
@@ -218,4 +240,5 @@ def today(request: Request, tenant: Mine) -> TodayOut:
         tasks=[task_out(t) for t in tasks],
         shared=list_shared(tenant).items[:3],
         goals=goal_items(request, tenant, briefing),
+        usage_warning=usage_warning(tenant),
     )

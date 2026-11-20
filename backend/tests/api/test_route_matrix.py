@@ -157,8 +157,11 @@ DEVICE = {
 
 # Routes whose success depends on the workspace's state (M10): cancelling a deletion needs one to be requested.
 # Tested in test_today_privacy.py (TestDeletion: success, 409, 401, 403 for Analysts, Viewers and Owners without 2FA).
+# M18: confirming a plan change needs the state the preview allows (a saved key to switch to your own key).
+# Tested in test_billing.py (TestPlanChange: 401, 403 for Analysts, Viewers and Owners without 2FA, 409, 422, success).
 STATEFUL = {
     ("DELETE", "/org/deletion"),
+    ("PUT", "/org/billing/plan"),
 }
 
 
@@ -292,6 +295,8 @@ CASES: dict[tuple[str, str], Case] = {
         "DELETE", "/team/invitations/{invitation}", P.MEMBERS_MANAGE, 204
     ),
     ("GET", "/org"): Case("GET", "/org", P.SHARED_VIEW, 200, check_leak=True),
+    # M17: the industry templates are reference data, the same for everyone (needs a signed-in member).
+    ("GET", "/org/templates"): Case("GET", "/org/templates", P.SHARED_VIEW, 200, check_leak=True),
     ("PATCH", "/org"): Case(
         "PATCH",
         "/org",
@@ -322,6 +327,32 @@ CASES: dict[tuple[str, str], Case] = {
     ),
     ("DELETE", "/org/ai/key"): Case("DELETE", "/org/ai/key", P.ORG_MANAGE, 204),
     ("POST", "/org/ai/check"): Case("POST", "/org/ai/check", P.ORG_MANAGE, 200),
+    # M18: billing hooks (Owners only; nothing is charged). Behaviour in test_billing.py.
+    ("GET", "/org/billing"): Case("GET", "/org/billing", P.ORG_MANAGE, 200, check_leak=True),
+    ("POST", "/org/billing/plan-change/preview"): Case(
+        "POST",
+        "/org/billing/plan-change/preview",
+        P.ORG_MANAGE,
+        200,
+        body={"plan": "byok"},
+        invalid_body={"plan": "gold"},
+    ),
+    ("GET", "/org/billing/summary"): Case(
+        "GET",
+        "/org/billing/summary",
+        P.ORG_MANAGE,
+        200,
+        invalid_query="?month=2026-13",
+        check_leak=True,
+    ),
+    ("GET", "/org/billing/summary.csv"): Case(
+        "GET",
+        "/org/billing/summary.csv",
+        P.ORG_MANAGE,
+        200,
+        invalid_query="?month=2026-13",
+        check_leak=True,
+    ),
     ("GET", "/org/usage"): Case(
         "GET", "/org/usage", P.ORG_MANAGE, 200, invalid_query="?month=2026-13", check_leak=True
     ),

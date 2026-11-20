@@ -180,3 +180,13 @@ web:    polls GET /conversations/{id} every second; ProgressSteps while running;
 - Tables (migration `0010`): `reports`, `tasks`, `briefing_settings`, `briefing_runs`, `shares`, each with RLS.
 - `eval/harness.py`, `eval/golden_questions.yaml`, `eval/run_eval.py` (`make eval`, real model, opt-in).
 - Decisions: D77-D87.
+
+## Industry templates and billing hooks (M17, M18)
+- **Templates** (`app/templates_industry/*.yaml`, D114-D116): plain validated data per kind of business (KPIs, the
+  business's own words, playbook tweaks, starter questions, default what-if elasticities). They only shape text the
+  existing AI calls already send (system prompt, the dictionary draft's `typical_metrics`), the what-if defaults and
+  the suggestions. No extra model call; no customer data is read.
+- **Billing hooks** (`app/billing/`, D117-D121): plan catalog, usage status and 80%/100% warnings on top of M5's usage
+  counting, invoice-ready monthly summaries (frozen once by a beat job), and a preview-then-confirm plan change. Every
+  event is stored in `billing_events` and offered to a `BillingProvider`; the only provider is a **stand-in that sends
+  nothing**. There is no payment, price or gateway anywhere.

@@ -1,7 +1,13 @@
-**Next: M17 (Industry templates)** when the human says "continue". M16 (Tally bridge) was built on branch
-`m16-tally-bridge` and waits for the human's check and commit (suggested: "M16: Tally bridge"). M1 to M15 are
-committed and merged to main. **M10b (public website, then the Phase 1 review) is still not built**; the human
-chose to go on first, ask before skipping it for good.
+**Next: M19 (Hardening, then the Phase 3 review)** when the human says "continue". M17 (Industry templates) and M18
+(Billing hooks, no payments) were built together on branch `m17-industry-templates` and wait for the human's check and
+commit (suggested: "M17: Industry templates" and "M18: Billing hooks (no payments)", or one combined commit).
+M1 to M16 are committed and merged to main. **M10b (public website, then the Phase 1 review) is still not built**; the
+human chose to go on first, ask before skipping it for good.
+**Unfinished work for M17/M18:** no real AI call was made (the Ask prompt with the industry section, the dictionary
+draft's `typical_metrics` hint and the AI-written text around templates are tested with the fake model only).
+The template texts (KPIs, playbook tweaks, default elasticities) are written from general business knowledge, not from
+data: have someone who knows each trade read them before launch (D115). **Nothing in M18 can charge anyone**: when a
+payment provider is chosen, D118 lists everything that is a stand-in and must be replaced.
 **Unfinished work for M16:** real TallyPrime and the Windows build are untested (no Windows PC, no Tally here); see
 docs/SETUP_TALLY.md "What is least certain" and the M16 section below. Before launch: build `tally-bridge.exe` on
 Windows, sign it, pair one real company and compare a month's day book, a ledger and the trial balance with Tally.
@@ -11,7 +17,7 @@ Windows, sign it, pair one real company and compare a month's day book, a ledger
   long task) are still untested (Gemini was overloaded). Phase 1 sign-off needs >= 85% on `make eval` with a real model
   (BUILD_SPEC 12.2): run it by name when you are ready (`make eval LIST=1` lists the 48 questions).
 - M10b's final design QA (11a.9) should look again at the Today, Briefings, Tasks and report screens on phones.
-- The app shell is at **177.4 KB** of its 200 KB budget after M16 (177.3 after M15): Connections, Dictionary,
+- The app shell is at **179.2 KB** of its 200 KB budget after M18 (177.4 after M16): Connections, Dictionary,
   Dashboard and Goals load on demand with their own strings files (`locales/en/*.ts`, D99). New screens keep loading
   lazily; `src/locales/locales.test.ts` checks every literal key exists.
 - New agent tools go in `app/agent/tools.py` (`SPECS` + `HANDLERS`); questions and long tasks run through
@@ -71,8 +77,8 @@ Windows, sign it, pair one real company and compare a month's day book, a ledger
 
 ### Phase 3
 - [x] M16: Tally bridge
-- [ ] M17: Industry templates
-- [ ] M18: Billing hooks (no payments)
+- [x] M17: Industry templates
+- [x] M18: Billing hooks (no payments)
 - [ ] M19: Hardening (then Phase 3 review, stop)
 
 ---
@@ -1259,3 +1265,80 @@ certificate not checked").
 - One company per connection; companies kept in another currency than rupees are not detected yet.
 - The bridge's IP limit for pairing sees the proxy's address behind a load balancer until trusted forwarding headers
   are set up (M19, same as sign-in).
+
+---
+
+## M17: Industry templates (done)
+
+**Built**
+- **Seven templates** as validated YAML in `backend/app/templates_industry/` (retail, d2c, restaurant, fuel_station, services,
+  manufacturing, and a generic "something else"): the business's own words, 5-7 KPIs (name, plain meaning, unit,
+  good direction), 4 starter questions, playbook tweaks for 3-4 playbooks, and default what-if elasticities with their
+  basis. No AI call and no customer data are involved. D114.
+- **Where they work:** the agent's system prompt gets a short "What matters in a ... business" section (KPIs, words and
+  only the chosen playbooks' tweaks; nothing for "something else"); the dictionary draft's existing AI call gets
+  `typical_metrics` (names only); `whatif.DEFAULTS` now comes from the templates with the same numbers as M9, and a
+  default assumption carries its `basis`; the briefing writer names the business kind properly. D115.
+- **Choosing:** the Today checklist's "Company details" step opens a picker dialog (an Owner chooses, sees the KPIs and
+  starter questions, saves); Settings shows the same preview under "Kind of business", also before saving. Ask shows the
+  template's starter questions once a kind is chosen; Today's suggestions use them to fill empty places. New route
+  `GET /org/templates` (any signed-in member). Both screens load on demand. D116.
+- No migration and no new env variables.
+
+**Test status:** see M18 (counts are for both milestones together).
+
+**Known gaps / notes**
+- The template texts and default elasticities come from general business reasoning, not from data; they should be read
+  by someone who knows each trade (D115). They are English only (D41).
+- Changing the template does not rewrite a confirmed dictionary's own industry field (D116).
+- Not run with a real model: the effect of the industry section on real answers is untested (fake client only).
+
+---
+
+## M18: Billing hooks, no payments (done)
+
+**Built** (hooks and placeholders only: no gateway, no price, no real money, no keys; D117-D121)
+- **Plans** (`app/billing/plans.py`): the two M5 plans with their M5 limits; prices are `None` ("coming soon").
+- **Provider interface + STAND-IN** (`app/billing/provider.py`): every billing event is offered to a `BillingProvider`;
+  the only one is `StandInProvider`, which sends nothing. `BILLING_PROVIDER` accepts only `stand_in`. D118 lists
+  everything to replace when a real provider is chosen.
+- **Table `billing_events`** (migration `0017`, reversible, RLS, read and add only): plan changes, 80% warnings, limit
+  reached, monthly summaries. Included in the data export (`billing.json`).
+- **Warnings at 80% and 100%** (`app/billing/limits.py`): after each question or long task on the platform's key, once
+  per workspace per month each, the Owners get one email (`usage_warning`) and the event is recorded; never raises.
+  Owners also see a notice on Today and the meter in Settings. Counting is M5's (`questions_used`). D119.
+- **Plan change flow** (`/org/billing/plan-change/preview`, `PUT /org/billing/plan`): preview what changes, then
+  confirm; same rules as M5; one function (`api.ai.change_plan`) changes plans everywhere and records the event. D121.
+- **Invoice-ready summaries** (`GET /org/billing/summary`, `.csv`): invoice lines for a month (included, used, over limit,
+  own-key runs, briefings, estimated AI cost); `amount_due_inr` 0, status `draft_no_payment`. A beat job
+  (`close_billing_months`, every 6 hours) freezes last month's once. CSV downloads are logged
+  (`billing.summary_exported`) and guarded against spreadsheet formulas. D120.
+- **Web app:** Settings > **Plan and billing** (Owners, loads on demand): not-switched-on notice, meter with 80%/100%
+  words, plan cards, plan change dialog (preview then confirm), month picker with the summary table and CSV download,
+  what billing recorded. Today shows the usage notice to Owners. Strings in `locales/en/billing.ts`.
+- New env (optional, `.env.example`): `BILLING_PROVIDER=stand_in`. No new dependencies.
+
+**Test status (M17 + M18 together)**
+- Backend: **2915 passed** (2791 after M16); ruff, ruff format and mypy (strict) clean. New: templates (files complete and
+  consistent with the accepted industries and playbook files, validation, prompt notes, what-if defaults and basis,
+  dictionary hints, the system prompt per industry), `/org/templates`, choosing the industry, Today's suggestions;
+  billing (levels, M5-equal counting, warnings once per month and per threshold, emails to Owners only, never raising, a
+  real question through the API, plan preview and confirm, blockers, the old plan routes, summaries and CSV, freezing,
+  January rollover, a failing workspace not stopping the others, the stand-in opens no network and the package imports
+  none); security (RLS, append-only history, no cross-workspace writes, once-per-month key, cascade on deletion, Owners-only
+  Today notice, export); route matrix with the 5 new routes (`PUT /org/billing/plan` as STATEFUL, tested in
+  `test_billing.py`). The migration round trip and the generic RLS test cover `billing_events`.
+- Frontend: vitest **409 passed** (390 after M16); eslint, prettier, tsc and tokens:check clean; build OK, first-load shell
+  **179.2 KB of 200 KB** (177.4 after M16).
+- Playwright (`make e2e` once, at the end): 313 passed, 31 skipped by design, axe clean; the 4 Settings snapshots changed
+  as intended (new Plan and billing section) and were re-recorded for light/dark x desktop/phone and reviewed: no overflow
+  at 375 px.
+- **No AI calls were made.** `make eval` and `make llm-check` were not run.
+
+**Known gaps / notes**
+- **Nothing can be paid for.** No price, checkout, invoice number, tax lines or webhook exist (D118, D120).
+- Warnings are recorded when a run finishes, so the email may arrive just after the question that crossed the line.
+- A month is frozen by the beat job up to 6 hours after it ends; until then the summary is a live draft.
+- The 80% notice is not shown to Analysts and Viewers (they see M5's message when a question is refused).
+- The summary line under the month picker reads "Draft: this month is still running. Managed AI" (plan name appended);
+  worth a wording pass in the M19 review.

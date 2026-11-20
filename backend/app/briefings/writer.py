@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from app import templates_industry
 from app.agent import provenance
 from app.agent.prompts import playbook_text
 from app.briefings.facts import Facts
@@ -111,7 +112,7 @@ def write_with_ai(
     """One model call. ``None`` when the answer cannot be used (the caller falls back to code)."""
     system = RULES.format(
         company=facts.org_name,
-        industry=facts.industry or "small or medium",
+        industry=templates_industry.get(facts.industry).business,
         threshold_inr=format_value(facts.impact_threshold_inr, "INR"),
         threshold_pct=f"{facts.impact_threshold_pct:g}",
         playbook=playbook_text("daily_briefing"),

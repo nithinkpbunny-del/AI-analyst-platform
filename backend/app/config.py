@@ -152,6 +152,9 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = Field(default=300, ge=0)
     snapshot_max_age_hours: int = Field(default=24, ge=1)
 
+    # --- Billing hooks (M18). No payments exist yet: ``stand_in`` is the only provider and sends nothing. ---
+    billing_provider: Literal["stand_in"] = "stand_in"
+
     # --- Safety limits (section 6.5) ---
     managed_monthly_question_limit: int = Field(default=500, ge=0)
     agent_max_steps: int = Field(default=12, ge=1)

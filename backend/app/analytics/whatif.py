@@ -31,6 +31,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app import templates_industry as templates
 from app.analytics import forecast as forecast_module
 from app.analytics.common import (
     Analysis,
@@ -64,16 +65,15 @@ MAX_PRICE_CHANGE = 100.0  # percent
 MAX_SPEND_CHANGE = 300.0
 MIN_SPEND_POINTS = 12
 
-# Industry defaults, clearly labelled assumptions when used (the templates of M17 may refine them).
+# Industry defaults, clearly labelled assumptions when used. They live in the industry templates (M17, D114):
 # price: units per 1% of list price; discount: units per 1% of the net price paid; spend: revenue per 1% of spend.
 DEFAULTS: dict[str, dict[str, float]] = {
-    "d2c": {"price": -1.4, "discount": -1.8, "spend": 0.45},
-    "retail": {"price": -1.0, "discount": -1.3, "spend": 0.35},
-    "restaurant": {"price": -0.8, "discount": -1.0, "spend": 0.30},
-    "fuel_station": {"price": -0.3, "discount": -0.4, "spend": 0.10},
-    "services": {"price": -0.7, "discount": -0.9, "spend": 0.40},
-    "manufacturing": {"price": -0.6, "discount": -0.8, "spend": 0.30},
-    "other": {"price": -1.0, "discount": -1.3, "spend": 0.40},
+    t.key: {
+        "price": t.elasticities.price,
+        "discount": t.elasticities.discount,
+        "spend": t.elasticities.spend,
+    }
+    for t in templates.all_templates()
 }
 DEFAULT_SPREAD = (1.5, 0.5)  # an assumption is shown from 1.5x to 0.5x of its value
 SPEND_SPREAD = (0.5, 1.5)
@@ -125,6 +125,7 @@ class Elasticity:
     source: str  # history | default | you
     t_value: float | None = None
     reason: str | None = None  # why history was not used
+    basis: str | None = None  # for a default: where the number comes from (the industry template)
 
 
 # ----------------------------------------------------------------------------------- the effect itself
@@ -149,12 +150,13 @@ def effect_factor(
 
 
 def default_elasticity(industry: str | None, lever: str) -> Elasticity:
-    table = DEFAULTS.get(industry or "other", DEFAULTS["other"])
+    template = templates.get(industry)
+    table = DEFAULTS[template.key]
     key = "spend" if lever == "marketing_spend" else lever
     value = table[key]
     first, second = SPEND_SPREAD if lever == "marketing_spend" else DEFAULT_SPREAD
     low, high = sorted((value * first, value * second))
-    return Elasticity(value, low, high, "default")
+    return Elasticity(value, low, high, "default", basis=template.elasticities.basis)
 
 
 def check(scenario: Scenario) -> None:
@@ -337,7 +339,13 @@ def fit_history(
 
 def _with_reason(elasticity: Elasticity, reason: str) -> Elasticity:
     return Elasticity(
-        elasticity.value, elasticity.low, elasticity.high, elasticity.source, None, reason
+        elasticity.value,
+        elasticity.low,
+        elasticity.high,
+        elasticity.source,
+        None,
+        reason,
+        elasticity.basis,
     )
 
 
@@ -554,6 +562,7 @@ def _assumptions(
             "editable": True,
             "reason": elasticity.reason,
             "t_value": elasticity.t_value,
+            "basis": elasticity.basis if elasticity.source == "default" else None,
         }
     ]
     if scenario.lever == "discount":
@@ -754,6 +763,7 @@ def _marketing(analysis: Analysis, scenario: Scenario, industry: str | None) -> 
                 "editable": True,
                 "reason": elasticity.reason,
                 "t_value": elasticity.t_value,
+                "basis": elasticity.basis if elasticity.source == "default" else None,
             },
             {
                 "key": "baseline_method",

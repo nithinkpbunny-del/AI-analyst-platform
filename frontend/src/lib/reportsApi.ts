@@ -205,6 +205,14 @@ export interface Today {
   tasks: Task[]
   shared: SharedSummary[]
   goals: TodayGoal[]
+  /** Owners on the Managed plan at 80% or 100% of the month's questions (M18); null for everyone else. */
+  usage_warning: {
+    level: 'warning' | 'reached'
+    used: number
+    limit: number
+    percent: number
+    resets_on: string
+  } | null
 }
 
 export const reportsApi = {

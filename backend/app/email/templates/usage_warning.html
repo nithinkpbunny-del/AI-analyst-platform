@@ -1,0 +1,13 @@
+{% extends "_layout.html" %}
+{% block body %}
+{% if reached %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">{{ org_name }} has used all its questions this month</h1>
+<p style="margin:0 0 12px;">{{ used }} of {{ limit }} questions and long analyses are used. New questions are paused until {{ resets }}.</p>
+<p style="margin:0;">To keep going before then, an Owner can add the workspace's own AI key in Settings. Nothing is charged: billing is not switched on.</p>
+{% else %}
+<h1 style="margin:0 0 12px;font-size:24px;line-height:1.15;">{{ org_name }} has used 80% of this month's questions</h1>
+<p style="margin:0 0 12px;">{{ used }} of {{ limit }} questions and long analyses are used. The count starts again on {{ resets }}.</p>
+<p style="margin:0;">You can see usage in Settings, and add the workspace's own AI key there to remove the limit. Nothing is charged: billing is not switched on.</p>
+{% endif %}
+{% with url=link, label="Open Settings" %}{% include "_button.html" %}{% endwith %}
+{% endblock %}

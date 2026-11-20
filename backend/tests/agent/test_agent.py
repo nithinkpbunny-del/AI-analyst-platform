@@ -436,6 +436,35 @@ def test_the_system_prompt_has_the_lens_dictionary_rules_and_playbooks(ctx: Tool
     assert "$" not in text.replace("₹", "")  # every placeholder was filled
 
 
+def test_the_system_prompt_carries_the_industry_section(ctx: ToolContext) -> None:
+    """M17: what matters in this kind of business, and only the chosen playbooks' tweaks (no extra model call)."""
+    from dataclasses import replace
+    from datetime import date
+
+    def build_text(industry: str | None) -> str:
+        text, _ = prompts.system_prompt(
+            access=replace(ctx.access, industry=industry),
+            visible=ctx.visible,
+            lens="business",
+            question="Why did revenue fall?",
+            today=date(2026, 11, 12),
+            confirmed=True,
+            max_steps=12,
+        )
+        assert "$" not in text.replace("₹", "")
+        return text
+
+    retail = build_text("retail")
+    assert "a retail business in India" in retail
+    assert "## What matters in a retail business" in retail and "Bills" in retail
+    assert "Split by store or outlet" in retail  # the why-changed tweak
+    assert "Check margin by category" not in retail  # the profitability playbook was not chosen
+    assert "## What matters" not in build_text("other") and "## What matters" not in build_text(
+        None
+    )
+    assert "a small or medium business in India" in build_text(None)
+
+
 # ------------------------------------------------------------------------------------------------ what-if
 class TestWhatIfTool:
     def test_is_offered_to_the_model_and_the_old_note_is_gone(self) -> None:

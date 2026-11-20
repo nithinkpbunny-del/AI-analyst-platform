@@ -1,6 +1,8 @@
 import type { Page } from '@playwright/test'
 import { ROLE_PERMISSIONS } from '../src/lib/permissions'
 import { demoAiSettings, demoUsage } from '../src/testing/aiFixtures'
+import { demoBilling, demoSummary } from '../src/testing/billingFixtures'
+import { demoTemplates } from '../src/testing/templatesFixtures'
 import {
   demoAccess,
   demoConnectionList,
@@ -183,6 +185,10 @@ export async function mockApi(
   await page.route(`${API}/invitations/preview`, (route) => route.fulfill({ json: demoPreview }))
   await page.route(`${API}/org/ai`, (route) => route.fulfill({ json: demoAiSettings }))
   await page.route(`${API}/org/usage*`, (route) => route.fulfill({ json: demoUsage }))
+  // M17/M18: industry templates, plan and billing (hooks only; nothing is charged).
+  await page.route(`${API}/org/templates`, (route) => route.fulfill({ json: demoTemplates }))
+  await page.route(`${API}/org/billing`, (route) => route.fulfill({ json: demoBilling }))
+  await page.route(`${API}/org/billing/summary*`, (route) => route.fulfill({ json: demoSummary }))
   await page.route(`${API}/connections`, (route) => route.fulfill({ json: demoConnectionList }))
   await page.route(`${API}/connections/access`, (route) =>
     route.fulfill({ json: { people: demoAccess } }),

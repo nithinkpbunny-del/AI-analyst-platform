@@ -1,0 +1,28 @@
+key: d2c
+name: D2C e-commerce
+business: D2C e-commerce
+summary: Brands that sell online straight to customers. Watches orders, repeat rate, refunds, ad return and discounts.
+words: "orders, customers, repeat customers, channels (app, website, marketplace), campaigns, return on ad spend, refunds."
+kpis:
+  - {key: revenue, label: Revenue, meaning: "Order value after discounts and refunds.", unit: INR, good_direction: up}
+  - {key: orders, label: Orders, meaning: "Number of orders placed.", unit: count, good_direction: up}
+  - {key: aov, label: Average order value, meaning: "Revenue divided by orders.", unit: INR, good_direction: up}
+  - {key: repeat_rate, label: Repeat customer rate, meaning: "Share of customers who ordered more than once.", unit: percent, good_direction: up}
+  - {key: refund_rate, label: Refund rate, meaning: "Refunded value as a share of revenue.", unit: percent, good_direction: down}
+  - {key: roas, label: Return on ad spend, meaning: "Revenue from a channel divided by what was spent on it.", unit: ratio, good_direction: up}
+  - {key: discount_rate, label: Discount given, meaning: "Discounts as a share of the list value sold.", unit: percent, good_direction: down}
+starter_questions:
+  - Why did revenue change last month, and which region or category drove it?
+  - Which marketing channel gives the best return on ad spend?
+  - Are repeat customers ordering as often as before?
+  - Which category is losing the most margin to discounts?
+playbook_tweaks:
+  why_changed: Split by region, category and channel, then by new versus repeat customers; a price change usually shows first in repeat customers.
+  campaign_efficiency: Compare return on ad spend by channel against its target, and mention attribution limits before any budget move.
+  customer_retention: Look at repeat rate and order gaps by acquisition channel and by signup month.
+  profitability: Discounts and refunds are the usual leaks; show both next to margin by category.
+elasticities:
+  price: -1.4
+  discount: -1.8
+  spend: 0.45
+  basis: Online shoppers compare prices easily and respond strongly to discounts; paid channels show diminishing returns as spend grows.

@@ -32,6 +32,12 @@ for (const screen of screens) {
         await expect(page.getByText('Safari on iPhone')).toBeVisible()
         await expect(page.getByText('142 of 500 questions used')).toBeVisible()
         await expect(page.getByRole('radio', { name: /Managed AI/ })).toBeChecked()
+        // M18: Plan and billing (loads on demand) with the 80% notice.
+        await expect(page.getByText('410 of 500 questions used')).toBeVisible()
+        await expect(page.getByText(/Billing is not switched on yet/)).toBeVisible()
+        await expect(
+          page.getByText('Draft: this month is still running.', { exact: false }),
+        ).toBeVisible()
       }
       if (screen === 'team') {
         await expect(page.getByText('meera@urbancart.in')).toBeVisible()

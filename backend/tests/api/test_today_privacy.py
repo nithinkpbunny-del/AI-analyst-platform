@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session as DbSession
 
+from app import templates_industry
 from app.config import Settings
 from app.data.objects import MemoryObjectStore
 from app.email.sender import MemoryEmailSender
@@ -55,6 +56,27 @@ class TestToday:
             "Give me a health check"
         )
         assert body["suggestions"] == ["What can you tell me about my data?"]
+
+    def test_a_known_kind_of_business_gets_its_templates_questions(
+        self, client: TestClient, world: World
+    ) -> None:
+        """M17: with no data yet, the suggestions are the template's, not the generic one."""
+        headers = world.headers("owner_a")
+        assert (
+            client.patch("/org", json={"industry": "fuel_station"}, headers=headers).status_code
+            == 200
+        )
+        body = client.get("/today", headers=headers).json()
+        assert body["checklist"]["company"] is True
+        assert body["suggestions"][0] == "What can you tell me about my data?"
+        assert (
+            body["suggestions"][1:] == templates_industry.load("fuel_station").starter_questions[:2]
+        )
+        # The generic template adds nothing.
+        client.patch("/org", json={"industry": "other"}, headers=headers)
+        assert client.get("/today", headers=headers).json()["suggestions"] == [
+            "What can you tell me about my data?"
+        ]
 
     def test_steps_tick_as_they_are_done(
         self, client: TestClient, world: World, llm_factory: FakeLLMFactory

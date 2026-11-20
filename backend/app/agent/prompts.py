@@ -13,20 +13,12 @@ from functools import cache
 from pathlib import Path
 from string import Template
 
+from app import templates_industry
 from app.agent.access import AccessContext, VisibleDictionary
 from app.models.chat import LENSES
 
 HERE = Path(__file__).resolve().parent
 MAX_PLAYBOOKS = 2
-INDUSTRY_NAMES = {
-    "retail": "retail",
-    "d2c": "D2C e-commerce",
-    "restaurant": "restaurant",
-    "fuel_station": "fuel station",
-    "services": "services",
-    "manufacturing": "manufacturing",
-    "other": "small or medium",
-}
 
 # Playbook file -> words that call for it, most specific first (``choose_playbooks`` keeps the first few).
 # ``daily_briefing`` also guides the morning briefing writer (M10) and "health check" questions.
@@ -86,6 +78,10 @@ def choose_playbooks(question: str) -> list[str]:
 
 def playbook_text(name: str) -> str:
     return _read(HERE / "playbooks" / f"{name}.md")
+
+
+def _section(text: str) -> str:
+    return f"\n{text}\n" if text else ""
 
 
 def _amount(value: float) -> str:
@@ -157,7 +153,8 @@ def system_prompt(
     playbooks = "".join(f"\n\n{playbook_text(name)}" for name in chosen)
     text = Template(_read(HERE / "prompts" / "system.md")).substitute(
         org_name=access.org_name,
-        industry=INDUSTRY_NAMES.get(access.industry or "", "small or medium"),
+        industry=templates_industry.get(access.industry).business,
+        industry_notes=_section(templates_industry.prompt_notes(access.industry, chosen)),
         today=today.isoformat(),
         weekday=today.strftime("%A"),
         timezone=access.timezone,

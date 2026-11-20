@@ -1026,7 +1026,7 @@ const en = {
       intro: 'Four steps, about five minutes. Each one stays done.',
       progress: '{{done}} of 4 done',
       company: 'Company details',
-      companyHint: 'Your kind of business and time zone.',
+      companyHint: 'Your kind of business. It shapes the numbers and questions you see.',
       connect: 'Connect data',
       connectHint: 'Upload a sales file or connect Google Sheets.',
       dictionary: 'Confirm dictionary',

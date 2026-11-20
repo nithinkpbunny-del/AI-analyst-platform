@@ -18,6 +18,7 @@ from typing import Any
 
 from app.dictionary.draft import Built
 from app.dictionary.model import INDUSTRIES, Dictionary, Metric, Relationship
+from app.templates_industry import metric_hints
 
 _SYSTEM = """You help a small Indian business set up its data dictionary.
 You are given a profile of its tables: column names, types, counts, ranges and a few sample values (never full rows).
@@ -53,6 +54,8 @@ Reply with ONE JSON object and nothing else (no markdown), in this shape:
 Rules:
 - Use only the table keys and column names you were given. Describe every column you were given.
 - Money columns marked "rupees" are already converted to rupees for you; write metrics on them as they are.
+- "typical_metrics", when given, are the names owners of this kind of business watch: use those names for your metrics
+  where the columns exist (do not invent columns to fit them).
 - A metric may use other metrics by name (e.g. revenue / orders). Write 3 to 8 metrics an owner of this kind of business
   watches (revenue, orders, average order value, refunds, ...), only where the columns exist.
 - relationships: only joins you are sure about between key-like columns of different tables.
@@ -88,6 +91,7 @@ def build_payloads(
     *,
     tables_per_call: int,
     force_all: bool = False,
+    industry: str | None = None,
 ) -> list[dict[str, Any]]:
     """What to send, in batches. ``profiles`` are the datasets' profiles by dictionary key. Only tables and
     columns the dictionary has not described yet are included (everything on a first draft, or ``force_all``)."""
@@ -121,8 +125,9 @@ def build_payloads(
             }
         )
     others = sorted(dictionary.datasets)
+    hints = {"typical_metrics": metric_hints(industry)} if metric_hints(industry) else {}
     return [
-        {"tables": tables[i : i + tables_per_call], "all_table_keys": others}
+        {"tables": tables[i : i + tables_per_call], "all_table_keys": others, **hints}
         for i in range(0, len(tables), tables_per_call)
     ]
 

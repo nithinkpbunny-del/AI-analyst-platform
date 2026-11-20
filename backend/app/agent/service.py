@@ -30,6 +30,7 @@ from app.agent.access import NoAccess, VisibleDictionary, access_context, visibl
 from app.agent.provenance import ResultStore
 from app.agent.tools import ToolContext
 from app.audit import writer as audit
+from app.billing import limits as billing_limits
 from app.connectors.base import ConnectorError
 from app.connectors.registry import ConnectorRuntime, database_connector
 from app.data.cache import DatasetCache
@@ -41,6 +42,7 @@ from app.llm import keys, usage
 from app.llm.base import LLMFactory, LLMResponse, close_client
 from app.llm.usage import UsageLimitReached
 from app.models import Connection, Conversation, Message, Organization
+from app.models.ai import LIMITED_KINDS
 
 logger = logging.getLogger(__name__)
 
@@ -379,6 +381,10 @@ def run_agent(
     finally:
         close_client(resolved.client)
         workspace.close()
+        # M18: a finished question or long task may take the workspace to 80% or 100% of its monthly limit. This
+        # records the warning once and emails the Owners; it never raises (billing must not break an answer).
+        if resolved.key_source == "managed" and spec.kind in LIMITED_KINDS:
+            billing_limits.after_limited_run(rt, spec.org_id)
 
     token_usage = {
         "input_tokens": outcome.usage.input_tokens,

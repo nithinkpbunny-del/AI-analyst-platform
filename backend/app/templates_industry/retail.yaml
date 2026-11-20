@@ -1,0 +1,27 @@
+key: retail
+name: Retail
+business: retail
+summary: Shops and stores that sell to walk-in customers. Watches bills, average bill, margin, discounts and stock.
+words: "bills (not orders), stores or outlets, shoppers, footfall, stock, categories, average bill."
+kpis:
+  - {key: revenue, label: Sales, meaning: "Sales value after discounts and returns.", unit: INR, good_direction: up}
+  - {key: orders, label: Bills, meaning: "Number of bills raised.", unit: count, good_direction: up}
+  - {key: aov, label: Average bill, meaning: "Sales divided by bills.", unit: INR, good_direction: up}
+  - {key: gross_margin_pct, label: Gross margin, meaning: "Share of sales left after the cost of goods.", unit: percent, good_direction: up}
+  - {key: discount_rate, label: Discount given, meaning: "Discounts as a share of the list value sold.", unit: percent, good_direction: down}
+  - {key: repeat_rate, label: Repeat shoppers, meaning: "Share of shoppers who bought more than once.", unit: percent, good_direction: up}
+starter_questions:
+  - Which store or category drove the change in sales last month?
+  - How much margin are we giving away in discounts, and on which categories?
+  - Which items are selling slowly and tying up stock?
+  - What were the busiest and quietest days last month?
+playbook_tweaks:
+  why_changed: Split by store or outlet and by category before channel, and compare the number of bills with the average bill, since footfall and basket size move differently.
+  profitability: Check margin by category and the share of sales sold at a discount; slow stock sold off cheaply often explains a margin drop.
+  forecasting: Shops are strongly seasonal around festivals and month-end; say which festival periods the history covers.
+  anomaly_review: A quiet day in one store is often a local cause (power cut, holiday, road work); name the store before guessing.
+elasticities:
+  price: -1.0
+  discount: -1.3
+  spend: 0.35
+  basis: A typical neighbourhood shop where shoppers can compare prices nearby; discounts pull in a few more bills than a price rise loses.

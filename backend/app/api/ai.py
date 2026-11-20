@@ -19,6 +19,8 @@ from app.api.errors import ApiError
 from app.audit import writer as audit
 from app.auth.permissions import Permission
 from app.auth.ratelimit import FixedWindowLimiter
+from app.billing import limits
+from app.billing import provider as billing_provider
 from app.config import Settings
 from app.llm import keys
 from app.llm.base import LLMError, LLMFactory, UserMessage, close_client
@@ -155,7 +157,17 @@ def _settings_out(tenant: Tenant, org: Organization, settings: Settings) -> AiSe
     )
 
 
-def _change_plan(tenant: Tenant, org: Organization, plan: str, reason: str | None = None) -> None:
+def change_plan(
+    tenant: Tenant,
+    org: Organization,
+    plan: str,
+    *,
+    settings: Settings,
+    reason: str | None = None,
+    via: str = "ai_settings",
+) -> None:
+    """The one place a workspace's plan changes (M5). Written to the activity log and, since M18, offered to the
+    billing provider as a ``plan_changed`` event (the stand-in sends nothing; nothing is charged)."""
     if org.plan == plan:
         return
     details: dict[str, Any] = {"from": org.plan, "to": plan}
@@ -171,6 +183,15 @@ def _change_plan(tenant: Tenant, org: Organization, plan: str, reason: str | Non
         target_type="organization",
         target_id=org.id,
         details=details,
+    )
+    limits.record_event(
+        tenant.db,
+        billing_provider.get_provider(settings),
+        org_id=org.id,
+        kind="plan_changed",
+        period=None,
+        details={**details, "via": via},
+        user_id=tenant.auth.user.id,
     )
     org.plan = plan
 
@@ -196,7 +217,7 @@ def set_plan(body: PlanRequest, request: Request, tenant: ManageOrg) -> AiSettin
     org = _org(tenant, lock=True)
     if body.plan == "byok" and keys.own_key(tenant.db, org.id) is None:
         raise ApiError(409, "ai_key_missing", "Add your own AI key first, then switch to it.")
-    _change_plan(tenant, org, body.plan)
+    change_plan(tenant, org, body.plan, settings=_settings(request))
     tenant.db.commit()
     return _settings_out(tenant, org, _settings(request))
 
@@ -288,7 +309,7 @@ def remove_key(request: Request, tenant: ManageOrg) -> Response:
             target_id=row.id,
             details={"provider": row.provider, "last4": row.last4},
         )
-        _change_plan(tenant, org, "managed", reason="key_removed")
+        change_plan(tenant, org, "managed", settings=_settings(request), reason="key_removed")
     tenant.db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

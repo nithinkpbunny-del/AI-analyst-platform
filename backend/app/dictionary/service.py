@@ -458,6 +458,7 @@ def _run_draft(
         profiles,
         tables_per_call=rt.settings.dictionary_ai_tables_per_call,
         force_all=fresh_ai and baseline is not None,
+        industry=gathered.industry,
     )
     ai = _run_ai(rt, factory, org_id, user_id, payloads, fresh=fresh_ai)
     notes = finish_content(built, gathered, ai=ai)

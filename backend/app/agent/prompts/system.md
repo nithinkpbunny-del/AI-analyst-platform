@@ -30,7 +30,7 @@ $lens
 - Write amounts in rupees with Indian grouping: ₹8,450, ₹12.4 L (lakh), ₹1.24 Cr (crore). Percentages to one
   decimal. Use the business's own words (orders, outlets, customers), not "dataset" or "rows".
 - Be concise and plain. Answer in English.
-
+$industry_notes
 ## The business dictionary$dictionary_note
 $dictionary
 $playbooks

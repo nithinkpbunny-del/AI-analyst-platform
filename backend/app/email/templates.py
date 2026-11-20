@@ -36,6 +36,7 @@ SUBJECTS = {
     "deletion_requested": "Your workspace will be deleted",
     "deletion_cancelled": "Your workspace will not be deleted",
     "briefing": "Your morning briefing",
+    "usage_warning": "Your monthly question limit",
 }
 
 

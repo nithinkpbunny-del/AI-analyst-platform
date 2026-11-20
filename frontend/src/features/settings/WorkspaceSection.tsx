@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormAlert } from '../../components/FormAlert'
 import { Button } from '../../components/ui/button'
@@ -9,6 +9,9 @@ import { ApiError } from '../../lib/api'
 import { useAuth, useSession } from '../../lib/authContext'
 import { useCan } from '../../lib/permissions'
 import { INDUSTRIES, teamApi, type Industry } from '../../lib/teamApi'
+
+// The template preview loads on demand (it is not needed to rename the workspace).
+const IndustryPreview = lazy(() => import('../templates/IndustryPreview'))
 
 const COMMON_ZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'UTC']
 
@@ -114,6 +117,11 @@ export function WorkspaceSection() {
             ))}
           </SelectField>
           <p className="-mt-2 mb-0 text-caption text-ink-muted">{t('workspace.industryHint')}</p>
+          {chosenIndustry ? (
+            <Suspense fallback={null}>
+              <IndustryPreview industry={chosenIndustry} />
+            </Suspense>
+          ) : null}
           <Button type="submit" className="w-fit" disabled={!changed || save.isPending}>
             {t('workspace.save')}
           </Button>

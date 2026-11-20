@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Mail, MessageSquareText } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { EmptyState } from '../../components/EmptyState'
@@ -16,7 +16,11 @@ import { formatValue } from '../../lib/goalFormat'
 import { reportsApi, type BriefingBody, type Checklist, type TodayGoal } from '../../lib/reportsApi'
 import { teamApi } from '../../lib/teamApi'
 import { BriefingView } from '../reports/views'
+import '../billing/strings'
 import { askLink, TODAY } from './links'
+
+// The kind-of-business picker loads when an Owner opens it (M17), so Today stays light.
+const IndustryDialog = lazy(() => import('../templates/IndustryDialog'))
 
 const STEPS: { key: keyof Omit<Checklist, 'done'>; to: (health: string) => string }[] = [
   { key: 'company', to: () => '/settings' },
@@ -26,7 +30,15 @@ const STEPS: { key: keyof Omit<Checklist, 'done'>; to: (health: string) => strin
 ]
 
 /** The onboarding checklist (BUILD_SPEC 11a.8): four resumable steps to the first insight. */
-function OnboardingChecklist({ checklist, health }: { checklist: Checklist; health: string }) {
+function OnboardingChecklist({
+  checklist,
+  health,
+  onChooseIndustry,
+}: {
+  checklist: Checklist
+  health: string
+  onChooseIndustry?: () => void
+}) {
   const { t } = useTranslation()
   const done = STEPS.filter((s) => checklist[s.key]).length
   const next = STEPS.find((s) => !checklist[s.key])
@@ -87,7 +99,16 @@ function OnboardingChecklist({ checklist, health }: { checklist: Checklist; heal
                   </p>
                 ) : null}
               </div>
-              {!complete ? (
+              {!complete && step.key === 'company' && onChooseIndustry ? (
+                <Button
+                  size="sm"
+                  variant={step === next ? 'primary' : 'secondary'}
+                  onClick={onChooseIndustry}
+                >
+                  {t('today.checklist.open')}
+                  <span className="sr-only">: {t(`today.checklist.${step.key}`)}</span>
+                </Button>
+              ) : !complete ? (
                 <Button asChild size="sm" variant={step === next ? 'primary' : 'secondary'}>
                   <Link to={step.to(health)}>
                     {step.key === 'ask' ? t('today.healthCheck') : t('today.checklist.open')}
@@ -200,6 +221,7 @@ export function TodayPage() {
   const today = useQuery({ queryKey: TODAY, queryFn: reportsApi.today })
   const org = useQuery({ queryKey: ['organization'], queryFn: teamApi.organization })
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const [pickIndustry, setPickIndustry] = useState(false)
   const sendNow = useMutation({
     mutationFn: reportsApi.sendBriefingNow,
     onSuccess: (run) => {
@@ -235,6 +257,23 @@ export function TodayPage() {
           ) : null}
         </QualityBanner>
       ) : null}
+      {data?.usage_warning ? (
+        <QualityBanner className="mb-4">
+          {data.usage_warning.level === 'reached'
+            ? t('billing.today.reached', {
+                limit: data.usage_warning.limit,
+                date: formatDate(data.usage_warning.resets_on, 'UTC'),
+              })
+            : t('billing.today.warning', {
+                percent: Math.floor(data.usage_warning.percent),
+                used: data.usage_warning.used,
+                limit: data.usage_warning.limit,
+              })}{' '}
+          <Link to="/settings" className="text-neel">
+            {t('billing.today.open')}
+          </Link>
+        </QualityBanner>
+      ) : null}
       {today.isError ? <FormAlert tone="error">{t('today.error')}</FormAlert> : null}
       {today.isPending ? (
         <p className="m-0 text-small text-ink-muted">{t('today.loading')}</p>
@@ -242,7 +281,11 @@ export function TodayPage() {
       {data ? (
         <div className="flex flex-col gap-8">
           {isOwner && !data.checklist.done ? (
-            <OnboardingChecklist checklist={data.checklist} health={data.health_check} />
+            <OnboardingChecklist
+              checklist={data.checklist}
+              health={data.health_check}
+              onChooseIndustry={() => setPickIndustry(true)}
+            />
           ) : null}
 
           <section aria-labelledby="briefing-title" className="flex flex-col gap-3">
@@ -369,6 +412,16 @@ export function TodayPage() {
             </section>
           ) : null}
         </div>
+      ) : null}
+      {pickIndustry ? (
+        <Suspense fallback={null}>
+          <IndustryDialog
+            open
+            onOpenChange={setPickIndustry}
+            current={org.data?.industry ?? null}
+            onSaved={(text) => setNotice({ tone: 'success', text })}
+          />
+        </Suspense>
       ) : null}
     </div>
   )

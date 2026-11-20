@@ -1,0 +1,27 @@
+key: manufacturing
+name: Manufacturing
+business: manufacturing
+summary: Factories and workshops that make goods to order or for stock. Watches output, material cost, margin, delivery and dues.
+words: "production and dispatch (not orders only), raw material, finished goods, customers or dealers, work orders, scrap."
+kpis:
+  - {key: revenue, label: Sales, meaning: "Value of goods invoiced.", unit: INR, good_direction: up}
+  - {key: units_produced, label: Units produced, meaning: "Units made in the period.", unit: count, good_direction: up}
+  - {key: gross_margin_pct, label: Gross margin, meaning: "Share of sales left after material and direct cost.", unit: percent, good_direction: up}
+  - {key: material_cost_pct, label: Material cost, meaning: "Raw material cost as a share of sales.", unit: percent, good_direction: down}
+  - {key: scrap_rate, label: Scrap rate, meaning: "Share of output rejected or wasted.", unit: percent, good_direction: down}
+  - {key: receivable_days, label: Days to collect, meaning: "Average days from invoice to payment.", unit: days, good_direction: down}
+starter_questions:
+  - Which product or customer drove the change in sales last quarter?
+  - Is material cost rising faster than our selling price?
+  - How much is outstanding from customers, and for how long?
+  - Which products have the best and worst margin?
+playbook_tweaks:
+  why_changed: Split by product, customer or dealer and region, and separate volume from price; a raw-material price change shows in margin before it shows in sales.
+  profitability: Check material cost per unit and scrap by product; margin often falls because input prices moved and selling prices did not.
+  budget_variance: Separate material, labour and power; power and labour tend to be fixed, material moves with volume.
+  forecasting: Orders come in batches, so forecast by month and say how many large orders the history contains.
+elasticities:
+  price: -0.6
+  discount: -0.8
+  spend: 0.3
+  basis: Business buyers negotiate on price but switch suppliers slowly; most volume comes from repeat customers and dealers.

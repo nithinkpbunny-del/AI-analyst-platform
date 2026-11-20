@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import en from './en'
 import connections from './en/connections'
+import billing from './en/billing'
 import dashboard from './en/dashboard'
 import dictionary from './en/dictionary'
 import goals from './en/goals'
+import templates from './en/templates'
 
 type Tree = { [key: string]: string | Tree }
 
@@ -16,7 +18,7 @@ function merge(target: Tree, source: Tree): Tree {
   return target
 }
 
-const all = [en, connections, dictionary, goals, dashboard].reduce<Tree>(
+const all = [en, connections, dictionary, goals, dashboard, templates, billing].reduce<Tree>(
   (tree, bundle) => merge(tree, structuredClone(bundle) as Tree),
   {},
 )
