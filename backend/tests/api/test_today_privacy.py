@@ -55,7 +55,12 @@ class TestToday:
         assert body["briefing"] is None and body["health_check"].startswith(
             "Give me a health check"
         )
-        assert body["suggestions"] == ["What can you tell me about my data?"]
+        # Always three (M19): the data question first, then general ones.
+        assert body["suggestions"] == [
+            "What can you tell me about my data?",
+            "Were there any unusual days last month?",
+            "What is working well in the business right now?",
+        ]
 
     def test_a_known_kind_of_business_gets_its_templates_questions(
         self, client: TestClient, world: World
@@ -75,7 +80,9 @@ class TestToday:
         # The generic template adds nothing.
         client.patch("/org", json={"industry": "other"}, headers=headers)
         assert client.get("/today", headers=headers).json()["suggestions"] == [
-            "What can you tell me about my data?"
+            "What can you tell me about my data?",
+            "Were there any unusual days last month?",
+            "What is working well in the business right now?",
         ]
 
     def test_steps_tick_as_they_are_done(
@@ -90,6 +97,13 @@ class TestToday:
         body = client.get("/today", headers=headers).json()
         assert body["checklist"]["done"] is True
         assert any("change last month" in s for s in body["suggestions"])
+        # In words, never keys (M19): "sum_total_price" and "sales_channel" are read as names.
+        assert len(body["suggestions"]) == 3
+        assert body["suggestions"][0] == "How did total price change last month, and why?"
+        assert (
+            body["suggestions"][1] == "Which sales channel grew total price the most last quarter?"
+        )
+        assert not any("_" in s for s in body["suggestions"])
         # Another person's checklist counts their own first question.
         assert (
             client.get("/today", headers=world.headers("analyst_a")).json()["checklist"]["ask"]
@@ -250,6 +264,20 @@ class TestDeletion:
         entry = db.scalars(select(AuditLog).where(AuditLog.action == "org.deleted")).one()
         assert entry.user_id is None and "UrbanCart" not in json.dumps(entry.details)
         assert entry.details["connections"] == 1
+        # The workspace's earlier activity is kept, anonymised (D124): what and when, never who, where or on what.
+        earlier = list(
+            db.scalars(
+                select(AuditLog).where(AuditLog.org_id == org_a, AuditLog.action != "org.deleted")
+            )
+        )
+        assert earlier and {e.action for e in earlier} >= {"question.asked", "connection.added"}
+        for kept in earlier:
+            assert kept.user_id is None and kept.ip is None and kept.user_agent is None
+            assert kept.target_id is None and kept.details == {"anonymised": True}
+        assert entry.details["activity_entries_anonymised"] == len(earlier)
+        # The other workspace's entries are untouched.
+        others = list(db.scalars(select(AuditLog).where(AuditLog.org_id == org_b)))
+        assert all(e.details != {"anonymised": True} for e in others)
         # The activity log still refuses changes (append-only).
         with pytest.raises(Exception):  # noqa: B017
             db.execute(text("DELETE FROM audit_log"))

@@ -22,6 +22,7 @@ from app.api.errors import ApiError
 from app.audit import writer as audit
 from app.auth.permissions import Permission
 from app.connectors.registry import ConnectorRuntime
+from app.dictionary import labels
 from app.dictionary import service as dictionary_service
 from app.goals import service as goal_service
 from app.models import Goal, User
@@ -94,7 +95,9 @@ def _goal_out(goal: Goal, seen: VisibleDictionary | None, names: dict[uuid.UUID,
         id=goal.id,
         name=goal.name,
         metric=goal.metric_key,
-        metric_label=goal_service.metric_label(goal.metric_key),
+        metric_label=goal_service.metric_label(
+            goal.metric_key, seen.dictionary if seen is not None else None
+        ),
         unit=unit,
         target=goal.target_value,
         direction=goal.direction,
@@ -195,7 +198,8 @@ def options(tenant: Edit) -> GoalOptions:
     if seen is None:
         return GoalOptions(metrics=[], today=today)
     metrics = []
-    for key in seen.dictionary.metrics:
+    # Metrics that repeat another one ("sum_total_price" next to "revenue") are left out (M19, D127).
+    for key in labels.distinct_metrics(seen.dictionary):
         try:
             info = metric_info(seen.dictionary, key)
         except AnalyticsError:
@@ -204,14 +208,14 @@ def options(tenant: Edit) -> GoalOptions:
             continue
         entry = seen.dictionary.datasets[info.table]
         dimensions = [
-            {"key": name, "label": column.label}
+            {"key": name, "label": labels.column_label(entry, name)}
             for name, column in entry.columns.items()
             if column.role == "dimension"
         ]
         metrics.append(
             MetricOption(
                 key=key,
-                label=goal_service.metric_label(key),
+                label=labels.metric_label(seen.dictionary, key),
                 unit=info.unit,
                 good_direction=info.good_direction,
                 direction=goal_analytics.default_direction(info),

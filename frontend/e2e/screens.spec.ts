@@ -36,7 +36,7 @@ for (const screen of screens) {
         await expect(page.getByText('410 of 500 questions used')).toBeVisible()
         await expect(page.getByText(/Billing is not switched on yet/)).toBeVisible()
         await expect(
-          page.getByText('Draft: this month is still running.', { exact: false }),
+          page.getByText('Draft: the month is not over yet', { exact: false }),
         ).toBeVisible()
       }
       if (screen === 'team') {

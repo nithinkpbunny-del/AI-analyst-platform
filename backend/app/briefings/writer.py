@@ -23,6 +23,7 @@ from app import templates_industry
 from app.agent import provenance
 from app.agent.prompts import playbook_text
 from app.briefings.facts import Facts
+from app.dictionary import labels
 from app.exports.charts import format_value
 from app.llm.base import LLMClient, LLMError, LLMResponse, ToolSpec, UserMessage
 
@@ -184,9 +185,13 @@ def _pct(value: Any) -> str:
 
 
 def _label(metric: Any) -> str:
-    return {"aov": "Average order value", "revenue": "Revenue", "orders": "Orders"}.get(
-        str(metric), str(metric).replace("_", " ").capitalize()
-    )
+    return labels.metric_label(None, str(metric))
+
+
+def _label_of(item: dict[str, Any]) -> str:
+    """The metric's name in words, as the facts worked it out from the dictionary ("Total fee", not "sum_fee")."""
+    label = item.get("label")
+    return str(label) if isinstance(label, str) and label else _label(item.get("metric"))
 
 
 def _when(day: str) -> str:
@@ -197,6 +202,50 @@ def _when(day: str) -> str:
     except ValueError:
         return day
     return f"{d.day} {d:%b}"
+
+
+def _plain(text: str) -> str:
+    """An item's words without citations, case, spacing or the final full stop (to spot repeats)."""
+    return " ".join(provenance.CITATION.sub("", text).lower().split()).rstrip(".")
+
+
+def without_repeats(sections: dict[str, list[str]], facts: Facts) -> dict[str, list[str]]:
+    """Each point once (M19). The same sentence in two sections stays only in the first (alerts come first); a
+    "no data after <day>" alert is not said again under "Upcoming risks" in other words (the data-quality check
+    and the AI both tend to repeat it)."""
+    stale_days = [str(a["last_day"]) for a in facts.alerts if a.get("kind") == "stale"]
+    stale_words = {
+        word
+        for day in stale_days
+        for word in (_when(day).lower(), day[:10], _long_day(day).lower())
+        if word
+    }
+    seen: set[str] = set()
+    out: dict[str, list[str]] = {}
+    for key in SECTIONS:
+        kept: list[str] = []
+        for item in sections.get(key) or []:
+            plain = _plain(item)
+            if not plain or plain in seen:
+                continue
+            if key == "risks" and stale_words and any(w in plain for w in stale_words):
+                continue
+            seen.add(plain)
+            kept.append(item)
+        out[key] = kept
+    for key, items in sections.items():  # keep any section this list does not know, untouched
+        out.setdefault(key, items)
+    return out
+
+
+def _long_day(day: str) -> str:
+    from datetime import date
+
+    try:
+        d = date.fromisoformat(day[:10])
+    except ValueError:
+        return ""
+    return f"{d.day} {d:%b %Y}"
 
 
 def write_with_code(facts: Facts) -> Written:
@@ -219,7 +268,7 @@ def write_with_code(facts: Facts) -> Written:
     for item in facts.growth:
         rid = item["result_id"]
         text = (
-            f"{item['segment']}: {_label(item['metric']).lower()} rose {item['periods']} months in a row, "
+            f"{item['segment']}: {_label_of(item).lower()} rose {item['periods']} months in a row, "
             f"from {format_value(item['start_value'], item.get('unit'))} [{rid}] to "
             f"{format_value(item['end_value'], item.get('unit'))} [{rid}]"
         )
@@ -240,7 +289,7 @@ def write_with_code(facts: Facts) -> Written:
         sections["tasks"].append(f"Your analysis is ready: {task['title']}")
     week = [k for k in facts.kpis if k["span"] == "week"]
     health = [
-        f"{_label(k['metric'])} in the last 7 days: {format_value(k['current'], k['unit'])} [{k['result_id']}], "
+        f"{_label_of(k)} in the last 7 days: {format_value(k['current'], k['unit'])} [{k['result_id']}], "
         f"{_pct(k['change_pct'])} [{k['result_id']}] on the week before."
         for k in week[:2]
         if k.get("current") is not None
@@ -265,7 +314,7 @@ def _unusual_sentence(item: dict[str, Any]) -> str:
         "" if item.get("series") in (None, "", "all", "Total", "total") else f" ({item['series']})"
     )
     return (
-        f"{_label(item['metric'])}{where} on {_when(item['bucket'])}: "
+        f"{_label_of(item)}{where} on {_when(item['bucket'])}: "
         f"{format_value(item.get('value'), unit)} [{rid}], {_pct(item.get('change_pct'))} [{rid}] against a usual "
         f"{format_value(item.get('expected'), unit)} [{rid}]."
     )
@@ -324,7 +373,7 @@ def goal_label(goal: dict[str, Any]) -> str:
     name = goal.get("name")
     if isinstance(name, str) and name.strip():
         return name.strip()
-    return f"{_label(goal.get('metric'))} goal"
+    return f"{_label_of(goal)} goal"
 
 
 def goal_sentences(goals: list[dict[str, Any]]) -> list[str]:

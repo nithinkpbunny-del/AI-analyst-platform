@@ -172,6 +172,12 @@ const dictionary = {
       needsCheck:
         'This metric waits for your check. Make sure its formula means what you want, then mark it as checked.',
       remove: 'Remove {{name}}',
+      key: 'Name in formulas: {{key}}',
+      repeatsTitle_one: '{{count}} metric repeats another one',
+      repeatsTitle_other: '{{count}} metrics repeat other ones',
+      repeatsIntro:
+        'These were drafted from your columns and give the same number as another metric. They are left out of suggestions, goals and what-if, and stay only for anything that already uses them.',
+      repeatOf: '{{name}} ({{key}}) is the same as {{other}}',
       addTitle: 'Add a metric',
       addName: 'Metric name',
       addFormula: 'Formula (SQL total, e.g. SUM(total_price))',

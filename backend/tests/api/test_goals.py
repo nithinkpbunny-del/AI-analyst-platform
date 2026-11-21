@@ -60,7 +60,7 @@ class TestSettingGoals:
         response = create(client, world, name="January sales")
         assert response.status_code == 201, response.text
         goal = response.json()
-        assert goal["metric_label"] == "Sum total price"
+        assert goal["metric_label"] == "Total price"  # in words, not "sum_total_price" (M19)
         assert goal["unit"] == "INR" and goal["direction"] == "at_least"
         assert goal["created_by"] == "Asha Rao"
         listed = client.get("/goals", headers=world.headers("owner_a")).json()

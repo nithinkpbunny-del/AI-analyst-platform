@@ -24,12 +24,14 @@ _NOT_FOUND_CODES = {"404", "NoSuchBucket", "NotFound"}
 
 
 def make_s3_client(settings: Settings, *, timeout_seconds: float = 5.0) -> Any:
-    """A boto3 S3 client. Path-style addressing is required by local S3-compatible servers."""
+    """A boto3 S3 client. Path-style addressing is required by local S3-compatible servers. With no access key
+    configured, boto3's own credential chain is used (the ECS task role on AWS, docs/DEPLOY_AWS.md; M19)."""
+    secret = settings.s3_secret_key.get_secret_value()
     return boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint,
-        aws_access_key_id=settings.s3_access_key,
-        aws_secret_access_key=settings.s3_secret_key.get_secret_value(),
+        aws_access_key_id=settings.s3_access_key or None,
+        aws_secret_access_key=secret or None,
         region_name=settings.s3_region,
         config=BotoConfig(
             connect_timeout=timeout_seconds,

@@ -54,17 +54,40 @@ from app.connectors.sql_database import default_setup as database_default_setup
 from app.connectors.zoho_books import ZohoSetup
 from app.connectors.zoho_books import default_setup as zoho_default_setup
 from app.data.objects import ObjectStore, S3ObjectStore
-from app.db.session import make_engine, make_session_factory
+from app.db.session import engine_from_settings, make_session_factory
 from app.email.sender import EmailSender, SmtpEmailSender
 from app.llm.base import LLMFactory
 from app.llm.keys import default_factory
 from app.logging_config import configure_logging, request_id_var
+from app.security.body_limit import BodyLimit
 from app.security.secrets import SecretStore, key_wrapper
 from app.tasks.queue import CeleryJobQueue, InlineJobQueue, JobQueue
 
 logger = logging.getLogger("app.request")
 
 _MAX_REQUEST_ID_LENGTH = 64
+# Swagger UI loads its script and styles from a CDN, so it cannot run under the API's CSP; it is off in production.
+_DOCS_PATHS = ("/docs", "/docs/oauth2-redirect", "/openapi.json")
+
+
+def security_headers(settings: Settings) -> dict[str, str]:
+    """Headers on every API response (M19, docs/SECURITY.md). The API serves JSON, files and a few small
+    development stand-in pages (inline styles, forms that post back here and are redirected to the app)."""
+    form_targets = " ".join(dict.fromkeys(["'self'", settings.api_base_url, settings.app_base_url]))
+    headers = {
+        "Content-Security-Policy": (
+            "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
+            f"form-action {form_targets}; frame-ancestors 'none'; base-uri 'none'"
+        ),
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    }
+    if settings.cookies_secure:  # served over HTTPS: browsers keep to HTTPS for a year
+        headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return headers
 
 
 def _utc_now() -> datetime:
@@ -121,7 +144,9 @@ def create_app(
     app = FastAPI(
         title="AI Business Analyst Platform",
         version=__version__,
-        docs_url="/docs",
+        # The interactive API docs are for development; production does not publish them (M19).
+        docs_url=None if settings.app_env == "production" else "/docs",
+        openapi_url=None if settings.app_env == "production" else "/openapi.json",
         redoc_url=None,
     )
     app.state.settings = settings
@@ -129,7 +154,7 @@ def create_app(
         readiness_checks if readiness_checks is not None else health.default_checks(settings)
     )
     app.state.session_factory = session_factory or make_session_factory(
-        make_engine(settings.database_url)
+        engine_from_settings(settings)
     )
     app.state.redis = redis_client or redis.Redis.from_url(
         settings.redis_url, socket_connect_timeout=2, socket_timeout=2
@@ -162,6 +187,12 @@ def create_app(
     )
     install_error_handlers(app)
 
+    # Request bodies are capped as they arrive (M19); inside CORS so a refusal still reaches the web app.
+    app.add_middleware(
+        BodyLimit,
+        upload_max_mb=settings.upload_max_mb,
+        bridge_max_bytes=settings.tally_max_batch_bytes,
+    )
     # The SPA runs on another origin in development; credentials are needed for the refresh cookie.
     app.add_middleware(
         CORSMiddleware,
@@ -171,6 +202,8 @@ def create_app(
         allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-CSRF-Token"],
         expose_headers=["X-Request-ID", "Content-Disposition", "X-Rows-Truncated"],
     )
+
+    headers = security_headers(settings)
 
     @app.middleware("http")
     async def request_context(
@@ -195,6 +228,11 @@ def create_app(
             logger.info("%s %s (%.1f ms)", request.method, request.url.path, elapsed_ms)
             request_id_var.reset(token)
         response.headers["X-Request-ID"] = request_id
+        if not request.url.path.startswith(_DOCS_PATHS):
+            for name, value in headers.items():
+                response.headers.setdefault(name, value)
+        # Answers, files and settings are private: no shared or browser cache keeps them unless a route says so.
+        response.headers.setdefault("Cache-Control", "no-store")
         return response
 
     app.include_router(health.router)

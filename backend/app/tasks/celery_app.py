@@ -13,6 +13,9 @@ from app.logging_config import configure_logging
 
 _settings = get_settings()
 
+DEFAULT_QUEUE = "celery"
+QUESTIONS_QUEUE = "questions"
+
 celery_app = Celery(
     "analyst",
     broker=_settings.redis_url,
@@ -30,6 +33,11 @@ celery_app.conf.update(
     worker_hijack_root_logger=False,
     broker_connection_retry_on_startup=True,
     result_expires=3600,
+    # Questions get their own queue (M19 load test, DECISIONS D122): an hour-long task, the 06:00 briefings or a big
+    # file sync on the default queue never make a person's question wait behind them. Every worker reads both
+    # queues (docker-compose.yml); production can add workers that read only "questions" (docs/DEPLOY_AWS.md).
+    task_default_queue=DEFAULT_QUEUE,
+    task_routes={"app.tasks.jobs.answer_question": {"queue": QUESTIONS_QUEUE}},
     beat_schedule={
         "heartbeat": {"task": "app.tasks.jobs.ping", "schedule": 300.0},
         # Cached copies of customer data never outlive SNAPSHOT_MAX_AGE_HOURS (BUILD_SPEC 6.6).
@@ -38,10 +46,11 @@ celery_app.conf.update(
         "schedule-briefings": {"task": "app.tasks.jobs.schedule_briefings", "schedule": 300.0},
         # Workspaces past their 7-day deletion grace period (BUILD_SPEC 6.6).
         "purge-deleted-orgs": {"task": "app.tasks.jobs.purge_deleted_orgs", "schedule": 3600.0},
-        # Last month's invoice-ready usage summary, frozen once per workspace (M18; nothing is charged).
+        # Last month's invoice-ready usage summary, frozen once per workspace (M18; nothing is charged). Every 15
+        # minutes, so a month is final soon after it ends in each workspace's time zone (M19, D127).
         "close-billing-months": {
             "task": "app.tasks.jobs.close_billing_months",
-            "schedule": 21600.0,
+            "schedule": 900.0,
         },
     },
 )

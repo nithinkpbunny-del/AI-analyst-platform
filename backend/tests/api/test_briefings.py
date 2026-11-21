@@ -180,6 +180,30 @@ class TestSendNow:
         assert len(runs) == 1 and runs[0]["headline"]
         assert client.get("/briefings", headers=world.headers("owner_b")).json()["runs"] == []
 
+    def test_one_at_a_time_while_a_briefing_is_still_being_made(
+        self, client: TestClient, world: World, db: DbSession, clock: FakeClock
+    ) -> None:
+        """M19: the button stays disabled on screen; the API refuses a second one too, but a run stuck for longer
+        than the worker's limit never blocks it for ever."""
+        stuck = BriefingRun(
+            org_id=world.org_a.id,
+            user_id=world.owner_a.id,
+            scheduled_for=clock.now - timedelta(minutes=2),
+            kind="test",
+            status="running",
+            findings=[],
+        )
+        db.add(stuck)
+        db.commit()
+        refused = send_now(client, world)
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "briefing_in_progress"
+        # Someone else in the workspace is not blocked by my briefing.
+        assert send_now(client, world, "analyst_a").status_code == 202
+        stuck.scheduled_for = clock.now - timedelta(minutes=11)
+        db.commit()
+        assert send_now(client, world).status_code == 202
+
     def test_not_while_the_workspace_is_being_deleted(
         self, client: TestClient, world: World, db: DbSession, clock: FakeClock
     ) -> None:

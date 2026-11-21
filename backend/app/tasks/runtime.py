@@ -15,7 +15,7 @@ from app.connectors.shopify import default_setup as shopify_setup
 from app.connectors.sql_database import default_setup as database_setup
 from app.connectors.zoho_books import default_setup as zoho_setup
 from app.data.objects import S3ObjectStore
-from app.db.session import make_engine, make_session_factory
+from app.db.session import engine_from_settings, make_session_factory
 from app.email.sender import SmtpEmailSender
 from app.security.secrets import SecretStore, key_wrapper
 
@@ -29,7 +29,7 @@ def worker_runtime() -> ConnectorRuntime:  # pragma: no cover - exercised by the
     settings = get_settings()
     return ConnectorRuntime(
         settings=settings,
-        session_factory=make_session_factory(make_engine(settings.database_url)),
+        session_factory=make_session_factory(engine_from_settings(settings)),
         objects=S3ObjectStore(settings),
         redis=redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=10),
         secrets=SecretStore(key_wrapper(settings)),

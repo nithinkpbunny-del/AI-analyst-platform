@@ -404,6 +404,33 @@ describe('Replacing a connection (R2)', () => {
   })
 })
 
+describe('Dictionary: metrics that repeat another one (M19)', () => {
+  it('folds a drafted metric with the same formula under the one it repeats, and names metrics in words', async () => {
+    const content = checkedDictionaryContent()
+    content.metrics.sum_net = {
+      ...content.metrics.revenue!,
+      expr: 'SUM(total_price) - SUM(total_refunds)',
+      source: 'code',
+      meaning: '',
+    }
+    fakeApi({
+      'GET /dictionary': {
+        status: 200,
+        body: {
+          ...firstDraftState,
+          draft: { ...firstDraftState.draft!, content, review_items: 0 },
+        },
+      },
+    })
+    renderApp('/dictionary')
+    const summary = await screen.findByText('1 metric repeats another one')
+    expect(summary).toBeInTheDocument()
+    expect(screen.getByText('Sum net (sum_net) is the same as Revenue')).toBeInTheDocument()
+    expect(screen.getAllByText('Name in formulas: revenue')).toHaveLength(1)
+    expect(screen.queryByText('Name in formulas: sum_net')).not.toBeInTheDocument()
+  })
+})
+
 describe('Dictionary: metrics that wait for a check', () => {
   function stateWithFlaggedMetrics() {
     const content = checkedDictionaryContent()

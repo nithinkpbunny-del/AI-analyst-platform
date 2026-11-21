@@ -93,6 +93,7 @@ export const demoSummary: UsageSummary = {
   status: 'draft_no_payment',
   notes: ['Billing is not switched on: this is a usage summary, not an invoice.'],
   frozen_at: null,
+  in_progress: true,
 }
 
 export const previewAllowed: PlanChangePreview = {

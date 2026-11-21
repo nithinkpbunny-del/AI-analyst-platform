@@ -38,6 +38,8 @@ export interface KpiFact {
   result_id: string
   span: 'day' | 'week'
   metric: string
+  /** The metric in words ("Total fee" for sum_fee), worked out by the API from the dictionary (M19). */
+  label?: string
   unit: 'INR' | 'count' | null
   current: number | null
   previous: number | null

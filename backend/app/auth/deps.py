@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Iterator
 from datetime import timedelta
 from typing import Annotated
@@ -42,9 +43,30 @@ def get_db(request: Request) -> Iterator[DbSession]:
         db.close()
 
 
+def client_ip(request: Request, trusted_hops: int) -> str | None:
+    """The caller's address (M19). With ``trusted_hops`` proxies in front (``TRUSTED_PROXY_HOPS``), each appends
+    the address it saw to ``X-Forwarded-For``, so the caller is the ``trusted_hops``-th entry from the right.
+    Anything to its left was written by the caller and is ignored; a missing or malformed entry falls back to
+    the connecting address."""
+    direct = request.client.host if request.client else None
+    if trusted_hops <= 0:
+        return direct
+    forwarded = [
+        part.strip() for h in request.headers.getlist("x-forwarded-for") for part in h.split(",")
+    ]
+    forwarded = [part for part in forwarded if part]
+    if len(forwarded) < trusted_hops:
+        return direct
+    candidate = forwarded[-trusted_hops]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return direct
+
+
 def request_meta(request: Request) -> RequestMeta:
-    # Behind a proxy this is the proxy's address; trusted forwarding headers are configured at deploy (M19).
-    ip = request.client.host if request.client else None
+    settings: Settings = request.app.state.settings
+    ip = client_ip(request, settings.trusted_proxy_hops)
     return RequestMeta(ip=ip, user_agent=request.headers.get("user-agent"))
 
 

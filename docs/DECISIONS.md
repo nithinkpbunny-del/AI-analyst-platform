@@ -1774,3 +1774,112 @@ a missing one.
   never change or delete them (like `usage_events`); deleted with the workspace.
 - Not built, on purpose: a trial, proration, a downgrade date, a "contact us" form for more questions (there is no
   platform admin or sales channel in scope, BUILD_SPEC 2 "out of scope").
+
+## M19: Hardening
+
+### D122. The load test, and questions on their own queue (M19, BUILD_SPEC 14 "50 concurrent questions", 6.5)
+- `make loadtest` (`backend/loadtest/run.py`): the real API under uvicorn, PostgreSQL 16 with migrations and RLS, Redis
+  (rate limits, dataset locks, reuse cache), the upload, snapshot and dictionary path and the whole agent pipeline, in
+  throwaway containers. **Only the fake model**: the settings are built in code (`.env` is never read) with a fake
+  key, and the AI factory builds `PacedFakeLLM` clients only and refuses any other key (tested). The fake waits 0.8 s
+  per call (+/- 50%) like a real model and answers with a real tool call, so the number check and provenance run.
+  Uploaded files stay in memory and email is not sent (no S3, no SMTP).
+- Laptop-safe: people start one by one over `--ramp` (10 s), 4 worker threads, DuckDB at 2 threads per question,
+  a hard stop at `--max-seconds` (300), Ctrl+C stops the server, workers and containers; limits refuse sizes over 200
+  people, 16 workers or 5 rounds.
+- Result (MacBook, fanless): 50 people, no errors; ask p95 61 ms, poll p95 38 ms; every answer done; at most 4
+  database connections in the API pool and 2 in the worker pool. Pushed to 150 people with 16 workers: still no
+  errors, poll p95 18 ms. Our own work per question is under a second (with a 0 s fake model). No lock or pool
+  problem was found: the API holds no connection while a source or the model works (M5), dataset fetches take a
+  Redis lock per table, and the default pools (5 + 10) are ample.
+- **What it did find:** answers wait only for free workers (4 workers, 50 questions: p50 7 s at a 0.8 s model). Every
+  job shared one Celery queue, so an hour-long task, the 06:00 briefings or a big file sync would have made people's
+  questions wait behind them. **Fixed:** `answer_question` goes to its own `questions` queue (`task_routes`); the local
+  worker reads both (`-Q questions,celery`), and production runs a separate questions worker (docs/DEPLOY_AWS.md).
+- New settings `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT_SECONDS` (defaults unchanged: 5, 10, 30) so each
+  process type can be sized (workers smaller); the connection budget for AWS is in the deploy guide.
+
+### D123. Security review fixes (M19, docs/SECURITY.md)
+- **Security headers** on every API response (CSP without scripts and with `frame-ancestors 'none'`, nosniff, frame
+  denial, no-referrer, COOP, Permissions-Policy, `Cache-Control: no-store` unless a route sets its own, HSTS over
+  HTTPS). The CSP allows inline styles and forms to the API and the app because the development stand-in pages
+  (Google, Shopify, Zoho) use both. The web app's own headers are set by CloudFront (deploy guide section 6).
+- **`/docs` and `/openapi.json` off in production.** Swagger needs a CDN script, so in development those two paths
+  get no CSP.
+- **Client address behind a load balancer:** `TRUSTED_PROXY_HOPS` (0 locally, 1 behind the ALB) takes the caller from
+  the right of `X-Forwarded-For`, ignoring anything the caller wrote; malformed values fall back to the connecting
+  address. Without it every per-IP limit would have become one limit shared by all callers.
+- **Request body cap** for every route (`app/security/body_limit.py`): 4 MB for JSON, the upload limit for `/files`,
+  the batch limit for the bridge; bytes are counted as they arrive, the 413 is sent at once (FastAPI would otherwise
+  turn the read error into a 400).
+- **Log redaction** now covers Zoho tokens (`Zoho-oauthtoken ...`, `1000.<hex>.<hex>`).
+- With no S3 key configured, boto3's own credentials are used (the ECS task role) instead of empty strings.
+- Dependencies: pip-audit clean. npm: ECharts < 6.1 has an XSS in the `lines` series tooltip; the app registers only
+  bar and line charts and never writes tooltip HTML (a test keeps it so). The upgrade to ECharts 6 is left open
+  because it is a major version and needs a visual review of every chart snapshot. The other npm advisories are in
+  dev tools only.
+
+### D124. The final D85: accounts kept, earlier activity kept anonymised (M19, BUILD_SPEC 6.6; replaces D85's open part)
+- **Accounts are kept** when a workspace is deleted (as approved on 2026-11-13): an account is global and may belong
+  to other workspaces. Correction to D85: a person whose only workspace was deleted **cannot** sign in to make a new
+  one (sign-in says "not a member of any workspace", and sign-up with the same email only sends the "you already
+  have an account" email); they can be invited again. Self-service account deletion and a way back are not built
+  (SECURITY.md 11.7); the runbook says how the operator erases an account on request.
+- **The workspace's earlier activity-log entries are kept, anonymised.** At the purge, after the workspace row is
+  deleted, every entry with its id loses `user_id`, `ip`, `user_agent` and `target_id`, and `details` becomes
+  `{"anonymised": true}`; the action, its time and the target type stay, so "what happened when" survives without who,
+  from where or on what. The `org.deleted` entry records how many entries were anonymised.
+- The log stays append-only: migration 0018 lets the trigger accept exactly that UPDATE, only when the transaction
+  sets `app.audit_anonymise = 'on'`, only for a workspace that no longer exists, and only when every personal column
+  is cleared and nothing else changes. DELETE, TRUNCATE and any other UPDATE are still refused; `app_tenant` still has
+  no UPDATE grant. Reversible (the downgrade restores the strict function).
+- **Retention:** no automatic limit yet. Entries are kept at least 180 days (CERT-In's 2022 directions ask service
+  providers in India to keep logs 180 days); an upper limit needs a legal decision (open, SECURITY.md 11.8).
+  Global entries (a sign-in that belongs to no workspace) stay with the account.
+
+### D125. Backup and restore (M19, docs/RUNBOOK_BACKUP_RESTORE.md)
+- Production relies on RDS automated backups (14 days, point in time) plus monthly snapshots copied to `ap-south-2`, and
+  S3 versioning plus a backup copy in another account. Redis is not backed up (nothing lasting).
+- `ops/backup.py` makes portable backups (`pg_dump` custom format, every object, a manifest with row counts, policies,
+  triggers, object checksums and the migration revision), restores only into an **empty** database (it never
+  overwrites one) after creating the `app_tenant` role a fresh server lacks, and verifies a restore: rows, policies,
+  triggers, objects, and tenant isolation as `app_tenant` (no other workspace's rows visible or changeable, the log
+  refuses changes).
+- PostgreSQL 16 tools: a local client 16 if present, else the `postgres:16-alpine` image; the password goes in the
+  environment, never on the command line. Object keys cannot write outside the backup folder.
+- `make backup-drill` proves it end to end in throwaway containers (PostgreSQL 16 and RustFS) in about 5 s.
+- A backup never holds the encryption key; the runbook keeps the key's own backup apart.
+
+### D126. Production on AWS `ap-south-1` (M19, docs/DEPLOY_AWS.md; a guide only, no AWS call was made)
+- ECS Fargate (api, worker-questions, worker, exactly one beat), ALB with WAF, CloudFront + S3 for the web app, RDS
+  PostgreSQL 16 Multi-AZ, ElastiCache Redis with TLS, S3 with SSE-KMS and versioning, KMS for the secrets envelope
+  (the existing `KeyWrapper` interface, `KMS_KEY_ID`), SES over SMTP 587, Secrets Manager.
+- Migrations run as a one-off task before the rolling deploy (the API does not migrate at start in production);
+  migrations stay additive first so the previous release runs on the new schema; rollback = previous task definition,
+  with `alembic downgrade` or the pre-release snapshot when a migration must go.
+- Start production on KMS (moving later needs a re-wrap, open in SECURITY.md 5.5).
+
+### D127. Small fixes from the M18 review (M19)
+- **Billing summary line:** one sentence for the state ("Draft: the month is not over yet, so these numbers can still
+  change." / "This month has ended. Its final summary is saved within a few minutes." / "Final summary, saved on ...")
+  and a separate "Plan: Managed AI."; the API says `in_progress` so a finished month that is not frozen yet no longer
+  reads "still running".
+- **Freezing:** the beat job runs every 15 minutes (was 6 hours) and freezes a month 5 minutes after it ends in the
+  workspace's time zone (the 5 minutes let a question answered on the stroke of midnight be counted).
+- **"Send me a briefing now"** stays disabled until the queued briefing has finished (sent, skipped or failed), on
+  Briefings and on Today, and after a reload while one is being made; the API refuses a second one with 409
+  `briefing_in_progress` while one of the person's own is queued or running (runs older than the worker's 10-minute
+  limit no longer block). The finished state is no longer shown as an error while it waits.
+- **"No data after 30 Sep" said twice:** the data-quality check's stale warning is no longer added as a risk when the
+  same day is already an alert, identical warnings are listed once, and the written briefing (code or AI) keeps each
+  point once: an alert is not repeated under "Upcoming risks".
+- **Names in words:** `sum_fee` reads "Total fee", `orders_count` "Number of orders", `product_type` "Product type"
+  (`app/dictionary/labels.py`, the same rules on the dictionary screen). Used on Today's tiles (the briefing facts carry
+  a `label`), Today's suggested questions, briefings, goals and the what-if picker. Today always shows **three**
+  questions (money metrics first, then the template's starters, then general ones).
+- **Repeated metrics:** a code-drafted metric with the same table and formula as an AI or Owner metric (`sum_total_price`
+  beside `revenue = SUM(total_price)`) is a duplicate. It stays in the dictionary (goals, tiles and old answers may use
+  its key) but goals and what-if pickers, Today's suggestions and the briefing's main metrics leave it out, and the
+  dictionary screen folds it under "1 metric repeats another one" with a remove button.
+- D115 stays: the industry templates' texts and default elasticities need review by someone who knows each trade
+  before launch (in the deploy guide's launch checklist).

@@ -66,8 +66,10 @@ const billing = {
       intro:
         'What the workspace used in a month, in the lines an invoice would carry. It is a summary, not an invoice.',
       month: 'Month',
-      draft: 'Draft: this month is still running.',
-      frozen: 'Final: saved on {{date}}.',
+      draft: 'Draft: the month is not over yet, so these numbers can still change.',
+      closing: 'This month has ended. Its final summary is saved within a few minutes.',
+      frozen: 'Final summary, saved on {{date}}.',
+      plan: 'Plan: {{plan}}.',
       amountDue: 'Amount due',
       amountNone: '₹0 (no price is set yet)',
       download: 'Download CSV',

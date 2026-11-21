@@ -22,6 +22,7 @@ from app.api.reports import _report_out, list_shared
 from app.api.tasks import task_out
 from app.auth.permissions import Permission
 from app.billing import limits as billing_limits
+from app.dictionary import labels
 from app.dictionary import service as dictionary_service
 from app.goals import service as goal_service
 from app.models import Connection, DictionaryVersion, Message, Report, Task
@@ -52,53 +53,78 @@ _ERRORS: dict[int | str, dict[str, Any]] = {
 }
 
 
-def _label(name: str) -> str:
-    return {"aov": "average order value"}.get(name, name.replace("_", " "))
+# Fill Today's three places when the person's own data and the template suggest fewer (M19: always three).
+GENERAL_QUESTIONS = (
+    "Were there any unusual days last month?",
+    "What is working well in the business right now?",
+    "What can you tell me about my data?",
+)
+SUGGESTIONS = 3
 
 
 def suggestions(tenant: Tenant, briefing: Report | None) -> list[str]:
-    """Three questions from the person's own data: the latest briefing's findings first, then the dictionary."""
+    """Three questions from the person's own data: the latest briefing's findings first, then the dictionary, then
+    the industry template's starters, then general ones. Metrics and columns are named in words ("total fee",
+    "product type"), never by their keys, and a metric that repeats another is not suggested (M19, D127)."""
     out: list[str] = []
     body = dict(briefing.body) if briefing else {}
+    dictionary = None
+    with contextlib.suppress(NoAccess):
+        access = access_context(tenant.db, tenant.org_id, tenant.auth.user.id)
+        active = dictionary_service.active(tenant.db, tenant.org_id)
+        if active.dictionary is not None:
+            dictionary = visible_dictionary(active.dictionary, access).dictionary
+
+    def name(item: dict[str, Any]) -> str:
+        label = item.get("label")
+        text = (
+            label
+            if isinstance(label, str) and label
+            else labels.metric_label(dictionary, str(item.get("metric")))
+        )
+        return _lower_first(text)
+
     for item in body.get("growth") or []:
         out.append(f"Why is {item.get('segment')} growing, and can we repeat it elsewhere?")
         break
     for item in body.get("unusual") or []:
         where = "" if item.get("series") in (None, "", "all", "Total") else f" in {item['series']}"
-        out.append(
-            f"What happened to {_label(str(item.get('metric')))}{where} on {item.get('bucket')}?"
-        )
+        out.append(f"What happened to {name(item)}{where} on {item.get('bucket')}?")
         break
     metrics: list[str] = []
     dimensions: list[str] = []
-    with contextlib.suppress(NoAccess):
-        access = access_context(tenant.db, tenant.org_id, tenant.auth.user.id)
-        active = dictionary_service.active(tenant.db, tenant.org_id)
-        if active.dictionary is not None:
-            visible = visible_dictionary(active.dictionary, access).dictionary
-            metrics = [m for m in ("revenue", "orders") if m in visible.metrics] or list(
-                visible.metrics
-            )[:2]
-            for entry in visible.datasets.values():
-                for name, column in entry.columns.items():
-                    if column.role == "dimension" and any(
-                        w in name.lower() for w in _DIMENSION_WORDS
-                    ):
-                        dimensions.append(column.label or name)
+    if dictionary is not None:
+        distinct = labels.distinct_metrics(dictionary)
+        # Money first: "How did total sales change" says more than "How did the number of rows change".
+        ranked = sorted(distinct, key=lambda m: dictionary.metrics[m].unit != "INR")
+        metrics = [m for m in ("revenue", "orders") if m in distinct] or ranked[:2]
+        for entry in dictionary.datasets.values():
+            for column_name, column in entry.columns.items():
+                if column.role == "dimension" and any(
+                    w in column_name.lower() for w in _DIMENSION_WORDS
+                ):
+                    dimensions.append(labels.column_label(entry, column_name))
     if metrics:
-        first = _label(metrics[0])
+        first = _lower_first(labels.metric_label(dictionary, metrics[0]))
         out.append(f"How did {first} change last month, and why?")
         if dimensions:
             out.append(f"Which {dimensions[0].lower()} grew {first} the most last quarter?")
         if metrics[0] == "revenue":
             out.append("What if we raise prices by 5%?")
     else:
-        out.append("What can you tell me about my data?")
+        # No data the person may see yet: start with the data itself.
+        out.append(GENERAL_QUESTIONS[-1])
     # M17: a business of a known kind gets its template's questions to fill what its own data did not suggest.
     template = templates_industry.get(tenant.auth.organization.industry_template)
     if not template.generic:
         out.extend(template.starter_questions)
-    return list(dict.fromkeys(out))[:3]
+    out.extend(GENERAL_QUESTIONS)
+    return list(dict.fromkeys(out))[:SUGGESTIONS]
+
+
+def _lower_first(text: str) -> str:
+    """ "Total fee" -> "total fee" inside a sentence; "GST collected" stays."""
+    return text[:1].lower() + text[1:] if text[1:2].islower() else text
 
 
 def checklist(tenant: Tenant) -> ChecklistOut:

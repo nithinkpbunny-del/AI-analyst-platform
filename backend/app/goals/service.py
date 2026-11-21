@@ -24,6 +24,7 @@ from app.agent.tools import ToolContext, execute
 from app.analytics.common import AnalyticsError, Period, metric_info
 from app.analytics.goals import GoalSpec
 from app.connectors.registry import ConnectorRuntime
+from app.dictionary import labels
 from app.dictionary.model import Dictionary
 from app.llm.base import ToolCall
 from app.models import Goal
@@ -37,11 +38,9 @@ PROGRESS = "goals:progress:{org}:{user}"
 BUSY = "goals:busy:{org}:{user}"
 
 
-LABELS = {"aov": "Average order value"}
-
-
-def metric_label(key: str) -> str:
-    return LABELS.get(key, key.replace("_", " ").capitalize())
+def metric_label(key: str, dictionary: Dictionary | None = None) -> str:
+    """The metric in words ("Total fee" for ``sum_fee``; M19), from the dictionary when it is at hand."""
+    return labels.metric_label(dictionary, key)
 
 
 # ------------------------------------------------------------------------------------------- visibility

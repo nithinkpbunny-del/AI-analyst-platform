@@ -7,6 +7,7 @@ import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import type { DictionaryContent, DictionaryMetric } from '../../lib/dictionaryApi'
 import { metricErrorText } from './text'
+import { duplicateMetrics, metricLabel } from './metricNames'
 
 const METRIC_NAME = /^[a-z][a-z0-9_]{0,59}$/i
 
@@ -42,7 +43,10 @@ export function MetricsSection({
 }) {
   const { t } = useTranslation()
   const editable = onChange !== undefined
-  const entries = Object.entries(content.metrics)
+  // Drafted metrics that repeat another one are folded away (M19): one name per number.
+  const repeated = duplicateMetrics(content)
+  const entries = Object.entries(content.metrics).filter(([key]) => !repeated[key])
+  const folded = Object.keys(content.metrics).filter((key) => repeated[key])
   const tables = Object.entries(content.datasets)
   const [name, setName] = useState('')
   const [formula, setFormula] = useState('')
@@ -118,10 +122,13 @@ export function MetricsSection({
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="m-0 text-small font-medium">
-                    <span className="font-mono">{key}</span>
+                    {metricLabel(content, key)}
                     {metric.meaning ? (
                       <span className="font-normal text-ink-muted"> · {metric.meaning}</span>
                     ) : null}
+                    <span className="block text-caption font-normal text-ink-muted">
+                      {t('dictionary.metrics.key', { key })}
+                    </span>
                   </p>
                   <div className="flex items-center gap-3">
                     <MetricStatus metric={metric} />
@@ -193,6 +200,46 @@ export function MetricsSection({
           })}
         </ul>
       )}
+      {folded.length > 0 ? (
+        <details className="mt-4 border-t border-line pt-2">
+          <summary className="flex min-h-11 cursor-pointer items-center text-small font-medium">
+            {t('dictionary.metrics.repeatsTitle', { count: folded.length })}
+          </summary>
+          <p className="m-0 max-w-prose text-small text-ink-muted">
+            {t('dictionary.metrics.repeatsIntro')}
+          </p>
+          <ul className="m-0 mt-2 list-none p-0">
+            {folded.map((key) => (
+              <li
+                key={key}
+                className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-line py-2 last:border-b-0"
+              >
+                <span className="text-small">
+                  {t('dictionary.metrics.repeatOf', {
+                    name: metricLabel(content, key),
+                    key,
+                    other: metricLabel(content, repeated[key]!),
+                  })}
+                </span>
+                {editable ? (
+                  <button
+                    type="button"
+                    aria-label={t('dictionary.metrics.remove', { name: key })}
+                    className="inline-flex size-11 items-center justify-center rounded-control hover:bg-loss-soft"
+                    onClick={() => {
+                      const rest = { ...content.metrics }
+                      delete rest[key]
+                      onChange({ ...content, metrics: rest })
+                    }}
+                  >
+                    <Trash2 className="size-4 text-loss" aria-hidden />
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
       {editable ? (
         <form
           onSubmit={add}

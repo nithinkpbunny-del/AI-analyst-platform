@@ -19,8 +19,13 @@ _MIN_EXACT_LENGTH = 6  # avoid scrubbing trivially short values such as "1" from
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # JSON web tokens: three base64url segments, the first two starting with "eyJ".
     (re.compile(r"eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}"), REDACTED),
-    # Authorization headers.
-    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"), r"\1 " + REDACTED),
+    # Authorization headers (Zoho's own scheme too: "Zoho-oauthtoken <token>", M19).
+    (
+        re.compile(r"(?i)\b(bearer|basic|zoho-oauthtoken)\s+[A-Za-z0-9._~+/=-]{8,}"),
+        r"\1 " + REDACTED,
+    ),
+    # Zoho access and refresh tokens: "1000." and two long hexadecimal parts.
+    (re.compile(r"\b1000\.[0-9a-f]{16,}\.[0-9a-f]{16,}\b"), REDACTED),
     # Vendor keys: Google (AIza...), Anthropic/OpenAI style (sk-...), Razorpay (rzp_live_/rzp_test_),
     # Shopify (shpat_/shpss_), AWS access key ids.
     (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"), REDACTED),

@@ -8,7 +8,7 @@ RUFF_ARGS := --config pyproject.toml . ../eval ../bridge/tally
 .DEFAULT_GOAL := help
 .PHONY: help dev up down logs ps env test test-backend test-frontend lint lint-backend lint-frontend \
         typecheck typecheck-backend typecheck-frontend format check migrate fixtures seed-demo eval \
-        tokens storybook storybook-build e2e e2e-update size llm-check tally-stand-in tally-fake-helper \
+        tokens storybook storybook-build e2e e2e-update size llm-check loadtest backup-drill tally-stand-in tally-fake-helper \
         tally-bridge
 
 help: ## Show this list
@@ -99,6 +99,16 @@ e2e: ## Visual snapshots + accessibility + layout checks (Playwright in Docker, 
 e2e-update: ## Re-record visual snapshots after an intended design change (then review the PNGs)
 	$(PLAYWRIGHT_RUN) "npm ci --no-audit --no-fund && npx playwright test --update-snapshots=all"
 
+
+# --- Hardening (M19) ---------------------------------------------------------------------------------------------
+LOADTEST_ARGS = $(if $(USERS),--users $(USERS),) $(if $(RAMP),--ramp $(RAMP),) $(if $(ROUNDS),--rounds $(ROUNDS),) \
+	$(if $(WORKERS),--workers $(WORKERS),) $(if $(DELAY),--llm-delay $(DELAY),) $(if $(MAX_SECONDS),--max-seconds $(MAX_SECONDS),)
+
+loadtest: ## 50 concurrent questions, FAKE model only, throwaway containers (USERS= RAMP= ROUNDS= WORKERS= DELAY=)
+	$(BACKEND) uv run python -m loadtest.run $(LOADTEST_ARGS)
+
+backup-drill: ## Back up, wipe and restore a scratch database and bucket, then verify (throwaway containers)
+	$(BACKEND) uv run python -m ops.backup drill
 
 # --- Tally bridge (M16; docs/SETUP_TALLY.md) ----------------------------------------------------------------------
 BRIDGE := cd backend && PYTHONPATH=../bridge/tally uv run python -m

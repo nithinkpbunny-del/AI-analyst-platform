@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Check, Mail, MessageSquareText } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -15,6 +15,7 @@ import { useCan } from '../../lib/permissions'
 import { formatValue } from '../../lib/goalFormat'
 import { reportsApi, type BriefingBody, type Checklist, type TodayGoal } from '../../lib/reportsApi'
 import { teamApi } from '../../lib/teamApi'
+import { useSendBriefingNow } from '../briefings/useSendBriefingNow'
 import { BriefingView } from '../reports/views'
 import '../billing/strings'
 import { askLink, TODAY } from './links'
@@ -212,7 +213,6 @@ function TodayGoals({ goals }: { goals: TodayGoal[] }) {
 export function TodayPage() {
   const { t } = useTranslation()
   const session = useSession()
-  const queryClient = useQueryClient()
   const canAsk = useCan('ask')
   const isOwner = session.role === 'owner'
   useEffect(() => {
@@ -222,17 +222,15 @@ export function TodayPage() {
   const org = useQuery({ queryKey: ['organization'], queryFn: teamApi.organization })
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [pickIndustry, setPickIndustry] = useState(false)
-  const sendNow = useMutation({
-    mutationFn: reportsApi.sendBriefingNow,
-    onSuccess: (run) => {
+  const sendNow = useSendBriefingNow({
+    onFinished: (run) =>
       setNotice(
         run.status === 'sent'
           ? { tone: 'success', text: t('today.briefing.sent') }
           : { tone: 'error', text: t('today.briefing.skipped') },
-      )
-      void queryClient.invalidateQueries({ queryKey: TODAY })
-    },
+      ),
     onError: (error) => setNotice({ tone: 'error', text: error.message }),
+    refresh: [TODAY],
   })
 
   const data = today.data
@@ -313,8 +311,8 @@ export function TodayPage() {
                 icon={Mail}
                 message={t('today.briefing.none')}
                 action={
-                  <Button disabled={sendNow.isPending} onClick={() => sendNow.mutate()}>
-                    {sendNow.isPending ? t('today.briefing.sending') : t('today.briefing.sendNow')}
+                  <Button disabled={sendNow.busy} onClick={sendNow.send}>
+                    {sendNow.busy ? t('today.briefing.sending') : t('today.briefing.sendNow')}
                   </Button>
                 }
               />

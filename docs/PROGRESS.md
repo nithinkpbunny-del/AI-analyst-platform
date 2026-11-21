@@ -1,13 +1,18 @@
-**Next: M19 (Hardening, then the Phase 3 review)** when the human says "continue". M17 (Industry templates) and M18
-(Billing hooks, no payments) were built together on branch `m17-industry-templates` and wait for the human's check and
-commit (suggested: "M17: Industry templates" and "M18: Billing hooks (no payments)", or one combined commit).
-M1 to M16 are committed and merged to main. **M10b (public website, then the Phase 1 review) is still not built**; the
-human chose to go on first, ask before skipping it for good.
+**Next: the Phase 3 review** (M19 Hardening is built on branch `m19-hardening` and waits for the human's check and
+commit, suggested "M19: Hardening"). After the review, the only milestone left is **M10b (public website, then the
+Phase 1 review)**, still not built by the human's choice; ask before skipping it for good.
+M1 to M18 are committed and merged to main.
+**Unfinished work for M19:** the AWS guide (docs/DEPLOY_AWS.md) was never run against AWS; do the first deploy on a
+staging account. Open security items are listed at the end of docs/SECURITY.md (KMS re-wrap for an installation that
+started on MASTER_KEY, the ECharts 6.1 upgrade, dev-tool npm advisories, account self-deletion and a way back for an
+account with no workspace, an activity-log retention limit, WAF at deploy, a penetration test). The load test used the
+fake model only: real-model latency and the provider's rate limits under load are untested.
 **Unfinished work for M17/M18:** no real AI call was made (the Ask prompt with the industry section, the dictionary
 draft's `typical_metrics` hint and the AI-written text around templates are tested with the fake model only).
 The template texts (KPIs, playbook tweaks, default elasticities) are written from general business knowledge, not from
-data: have someone who knows each trade read them before launch (D115). **Nothing in M18 can charge anyone**: when a
-payment provider is chosen, D118 lists everything that is a stand-in and must be replaced.
+data: **have someone who knows each trade read them before launch (D115)**; it is on the launch checklist in
+docs/DEPLOY_AWS.md. **Nothing in M18 can charge anyone**: when a payment provider is chosen, D118 lists everything
+that is a stand-in and must be replaced.
 **Unfinished work for M16:** real TallyPrime and the Windows build are untested (no Windows PC, no Tally here); see
 docs/SETUP_TALLY.md "What is least certain" and the M16 section below. Before launch: build `tally-bridge.exe` on
 Windows, sign it, pair one real company and compare a month's day book, a ledger and the trial balance with Tally.
@@ -26,9 +31,8 @@ Windows, sign it, pair one real company and compare a month's day book, a ledger
   `tests/api/test_route_matrix.py` (`CASES`, `PERSONAL`, `DATA_ROUTES` or `STATEFUL`, the last three tested in their
   own files).
 - Every LLM call goes through `keys.resolve(...)` and is metered (D42); no real LLM calls in builds or tests.
-- Open privacy questions for M19 (D85, approved by the Owner 2026-11-13: keep accounts and keep earlier activity-log
-  entries on workspace deletion for now): deleting accounts that belong to no workspace; a retention limit for the
-  activity log.
+- Privacy (D124, final D85): accounts are kept on workspace deletion; the workspace's earlier activity is kept
+  anonymised. Still open: account self-deletion, and an activity-log retention limit (kept at least 180 days).
 - Dictionary metric label confirmed: it stays "Checked" (D88); no code change.
 - Real Razorpay is untested (no key used): the connector is tested against a fake Razorpay in Razorpay's format. When you
   have a key, try a **test-mode** key first (Connections > Add data > Connect Razorpay).
@@ -79,7 +83,7 @@ Windows, sign it, pair one real company and compare a month's day book, a ledger
 - [x] M16: Tally bridge
 - [x] M17: Industry templates
 - [x] M18: Billing hooks (no payments)
-- [ ] M19: Hardening (then Phase 3 review, stop)
+- [x] M19: Hardening (then Phase 3 review, stop)
 
 ---
 
@@ -1340,5 +1344,69 @@ certificate not checked").
 - Warnings are recorded when a run finishes, so the email may arrive just after the question that crossed the line.
 - A month is frozen by the beat job up to 6 hours after it ends; until then the summary is a live draft.
 - The 80% notice is not shown to Analysts and Viewers (they see M5's message when a question is refused).
-- The summary line under the month picker reads "Draft: this month is still running. Managed AI" (plan name appended);
-  worth a wording pass in the M19 review.
+- The summary line under the month picker read "Draft: this month is still running. Managed AI": reworded in M19
+  (D127).
+
+---
+
+## M19: Hardening (done)
+
+**Built**
+- **Load test** (`make loadtest`, `backend/loadtest/run.py`, D122): 50 people ask at once (ramped over 10 s) against the
+  real API, PostgreSQL with RLS, Redis and the whole agent pipeline in throwaway containers, with the **fake model
+  only** (0.8 s per call). Reports ask/poll latency, time to the answer, errors and the most database connections in
+  use, and saves a report in `backend/loadtest/reports/` (git-ignored). Laptop-safe: gradual start, 4 worker threads,
+  a hard stop, Ctrl+C stops everything. Result: no errors; ask p95 about 60 ms, poll p95 about 40 ms; at most 4 API and
+  2 worker database connections; 150 people with 16 workers also clean. **Fix:** questions now have their own Celery
+  queue (`questions`), so long tasks, briefings and syncs never make a question wait; the local worker reads both
+  queues. New optional settings `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT_SECONDS`.
+- **Security review** (`docs/SECURITY.md`, D123): a checklist of 13 areas, each item pass, fixed or open with the
+  test that proves it. Fixed: security headers on every API response (CSP, nosniff, frame denial, no-referrer,
+  no-store, HSTS over HTTPS); `/docs` off in production; the caller's address behind a load balancer
+  (`TRUSTED_PROXY_HOPS`); a request body cap on every route; Zoho tokens in log redaction; S3 through the task role when
+  no key is set. Ran: pip-audit (clean), npm audit (one ECharts advisory, not reachable, guarded by a test; the rest
+  dev tools only), the route matrix (154 routes), the read-only write attempts through every connector.
+- **Backup and restore** (`docs/RUNBOOK_BACKUP_RESTORE.md`, `backend/ops/backup.py`, D125): RDS point-in-time and S3
+  versioning for production; a portable backup/restore/verify tool; `make backup-drill` backs up two workspaces, wipes a
+  scratch database and the bucket, restores, refuses a second restore over data, and verifies row counts, policies,
+  triggers, object checksums and that one workspace still cannot see another's rows.
+- **Production guide** (`docs/DEPLOY_AWS.md`, D126): ECS Fargate, ALB + WAF, CloudFront, RDS PostgreSQL 16, ElastiCache,
+  S3 + KMS, SES, Secrets Manager, TLS, the connection budget, migrations as a one-off task, rollback, monitoring and
+  alarms, and a launch checklist (including D115: industry templates read by people who know each trade).
+- **D85 final** (D124, migration `0018`, reversible): accounts are kept when a workspace is deleted; the workspace's
+  earlier activity-log entries are kept **anonymised** (no person, IP, browser, target or details; the action and time
+  stay). The append-only trigger allows exactly that change and only for a deleted workspace.
+- **Small fixes** (D127): the billing summary line reads as sentences and knows a finished month from a running one;
+  months freeze within minutes of their end (every 15 min, 5 min grace) instead of up to 6 hours; "Send me a briefing
+  now" stays disabled until the briefing is finished (and the API refuses a second one meanwhile); "no data after
+  30 Sep" is said once, not again under Upcoming risks; metric and column names in words ("Total fee", "Product type")
+  on Today's tiles, suggestions, briefings, goals and what-if; Today always shows three questions; drafted metrics
+  that repeat another one are left out of pickers and suggestions and folded on the dictionary screen.
+- New env (optional, `.env.example`): `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT_SECONDS`,
+  `TRUSTED_PROXY_HOPS`. Nothing to add to your `.env` for local use. No new dependencies.
+
+**Test status**
+- Backend: **2970 passed** (2915 after M18); ruff, ruff format and mypy (strict, now also `loadtest/` and `ops/`)
+  clean. New: load-test pieces (fake-only factory, settings never from `.env`), questions queue routing, security
+  headers, docs off in production, client address behind proxies, body cap (declared and streamed), Zoho redaction,
+  S3 task-role credentials, anonymised activity on workspace deletion (purge + 7 trigger tests incl. the tenant role),
+  backup tool (password never on the command line, object keys kept inside the folder, damaged dump refused, never
+  restores over a database, isolation on a real database, verify reports what is missing), month freezing grace and
+  schedule, `in_progress`, one briefing at a time, risks said once, names in words, duplicates, three suggestions.
+- Frontend: vitest **417 passed** (409 after M18); eslint, prettier, tsc and tokens:check clean; first-load shell
+  **179.2 KB of 200 KB** (unchanged).
+- `make loadtest`: PASS (50 people, no errors; ask p95 52 ms, poll p95 36 ms, answers p50 7.2 s with 4 workers and a
+  0.8 s fake model; at most 4 API and 1-2 worker database connections). `make backup-drill`: passed.
+- Playwright (`make e2e`): the first run showed the 8 intended changes (Settings: the billing line; Dictionary: metric
+  names in words with "Name in formulas"); the e2e text check was updated, the Settings and Dictionary snapshots were
+  re-recorded for light/dark x desktop/phone and reviewed (no overflow at 375 px); the full run then: 317 passed,
+  31 skipped by design, axe clean.
+- **No AI calls were made.** `make eval` and `make llm-check` were not run; the load test used the fake model only.
+
+**Known gaps / notes**
+- The AWS guide is untested against AWS (a guide only, as asked).
+- The load test measures our own pipeline with a fake model; a real model's latency (seconds per call) and its rate
+  limits decide real throughput: with 0.8 s per call, 4 workers answered about 130 questions a minute.
+- Open security items are listed at the end of `docs/SECURITY.md`.
+- ECharts stays on 5.x until the 6.1 upgrade with a visual review (not reachable, D123).
+- A person whose only workspace was deleted cannot create a new one or delete their account themselves (D124).

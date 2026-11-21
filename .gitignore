@@ -33,6 +33,7 @@ test-results/
 eval/fixtures/*.csv
 eval/fixtures/*.xlsx
 eval/reports/
+backend/loadtest/reports/
 
 # --- OS / editor ---
 .DS_Store

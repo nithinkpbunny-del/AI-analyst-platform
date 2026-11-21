@@ -19,7 +19,7 @@ agent fetches the **latest** data, computes answers with exact code, and replies
 
 - **Backend:** Python 3.12 (uv), FastAPI + Pydantic v2, SQLAlchemy 2 + Alembic, PostgreSQL 16 (RLS).
 - **Analysis:** DuckDB in-process per question, over Parquet snapshots; statsmodels/scipy for forecast and anomalies.
-- **Background:** Celery workers + Celery beat; Redis is the broker, lock store, rate limiter and metadata cache.
+- **Background:** Celery workers + Celery beat; Redis is the broker, lock store, rate limiter and metadata cache. Questions run on their own `questions` queue, everything else on the default `celery` queue (M19, D122); production runs a worker for each (docs/DEPLOY_AWS.md).
 - **Storage:** S3-compatible (MinIO locally, S3 `ap-south-1` in production) for uploads, snapshots, report PDFs.
 - **LLM:** a provider interface (`LLMClient.generate`) with Gemini (default), Claude and a scripted Fake client.
   Managed AI uses the platform key with a monthly limit; BYOK uses the org's encrypted key.

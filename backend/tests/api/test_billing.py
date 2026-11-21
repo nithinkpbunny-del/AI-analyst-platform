@@ -634,6 +634,31 @@ class TestClosingTheMonth:
         assert {line["code"]: line["quantity"] for line in body["lines"]}["questions_used"] == 4
         assert "delivery_note" not in str(body)
 
+    def test_a_month_is_frozen_minutes_after_it_ends_in_the_workspaces_time_zone(
+        self, runtime: ConnectorRuntime, db: DbSession, world: World
+    ) -> None:
+        """D127: within minutes of the month's end (India: 18:30 UTC on the last day), not hours later."""
+        end_ist = datetime(2026, 11, 30, 18, 30, tzinfo=UTC)  # 1 December 00:00 in Asia/Kolkata
+        assert (
+            summary.close_months(runtime, end_ist + timedelta(minutes=2)) == 0
+        )  # grace: late usage
+        assert events(db, world.org_a, "usage_summary") == []
+        assert summary.close_months(runtime, end_ist + timedelta(minutes=6)) == 2
+        assert [e.period for e in events(db, world.org_a, "usage_summary")] == ["2026-11"]
+
+    def test_the_job_runs_every_15_minutes(self) -> None:
+        from app.tasks.celery_app import celery_app
+
+        assert celery_app.conf.beat_schedule["close-billing-months"]["schedule"] == 900.0
+
+    def test_the_screen_is_told_whether_the_month_is_still_running(
+        self, client: TestClient, world: World
+    ) -> None:
+        now = client.get("/org/billing/summary", headers=owner(world)).json()
+        assert now["in_progress"] is True and now["frozen_at"] is None
+        earlier = client.get("/org/billing/summary?month=2026-10", headers=owner(world)).json()
+        assert earlier["in_progress"] is False
+
     def test_a_workspace_created_after_the_month_has_no_summary(
         self, runtime: ConnectorRuntime, db: DbSession, world: World, clock: FakeClock
     ) -> None:

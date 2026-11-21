@@ -47,6 +47,7 @@ from app.connectors.registry import ConnectorRuntime
 from app.data.cache import DatasetCache
 from app.data.workspace import Workspace
 from app.db.tenant import scope_to_org
+from app.dictionary import labels
 from app.dictionary import service as dictionary_service
 from app.goals import service as goal_service
 from app.llm.base import ToolCall
@@ -262,8 +263,17 @@ def compute(
     _unusual(ctx, facts, metrics[0], as_of, reported)
     _growth(ctx, facts, metrics, as_of, reported)
     _goals(ctx, facts)
+    stale_days = {r["last_day"] for r in facts.risks if r.get("kind") == "stale"}
+    seen: set[tuple[str, str, str]] = set()
     for table, warnings in ctx.quality.items():
         for warning in warnings[:2]:
+            newest = str((warning.get("details") or {}).get("newest") or "")
+            if warning.get("kind") == "stale" and newest in stale_days:
+                continue  # already an alert: "<table> has no data after <day>" (M19: said once)
+            marker = (table, str(warning.get("kind")), str(warning.get("message")))
+            if marker in seen:
+                continue
+            seen.add(marker)
             facts.risks.append(
                 {
                     "kind": "quality",
@@ -280,7 +290,12 @@ def compute(
 def main_metrics(ctx: ToolContext) -> list[str]:
     """Revenue, orders and average order value when the dictionary has them; else the first metrics with a date."""
     names = [m for m in MAIN_METRICS if m in ctx.dictionary.metrics]
+    repeated = labels.duplicates(
+        ctx.dictionary
+    )  # "sum_total_price" when "revenue" says the same (M19)
     for name, metric in ctx.dictionary.metrics.items():
+        if name in repeated:
+            continue
         if len(names) >= MAX_METRICS:
             break
         if name in names or metric.valid is False:
@@ -335,6 +350,7 @@ def _kpis(ctx: ToolContext, facts: Facts, metrics: list[str], as_of: date) -> No
                     "result_id": found["result_id"],
                     "span": label,
                     "metric": item.get("metric"),
+                    "label": labels.metric_label(ctx.dictionary, str(item.get("metric"))),
                     "unit": item.get("unit"),
                     "current": item.get("current"),
                     "previous": item.get("previous"),
@@ -376,6 +392,7 @@ def _unusual(ctx: ToolContext, facts: Facts, metric: str, as_of: date, reported:
             {
                 "result_id": found["result_id"],
                 "metric": metric,
+                "label": labels.metric_label(ctx.dictionary, metric),
                 "series": series,
                 "dimension": args.get("dimension"),
                 "bucket": bucket,
@@ -412,6 +429,7 @@ def _growth(
             {
                 "result_id": found["result_id"],
                 "metric": metric,
+                "label": labels.metric_label(ctx.dictionary, metric),
                 "segment": item.get("segment"),
                 "periods": item.get("periods"),
                 "start_value": item.get("start_value"),
@@ -455,7 +473,11 @@ def _goals(ctx: ToolContext, facts: Facts) -> None:
     payload = goal_service.compute(ctx, chosen)
     order = {"behind": 0, "at_risk": 1, "missed": 2, "on_track": 3, "achieved": 4}
     rows = [
-        {"result_id": row["result_id"], **{k: row.get(k) for k in GOAL_FIELDS}}
+        {
+            "result_id": row["result_id"],
+            **{k: row.get(k) for k in GOAL_FIELDS},
+            "label": labels.metric_label(ctx.dictionary, str(row.get("metric"))),
+        }
         for row in payload["goals"].values()
         if row.get("status") in order
     ]

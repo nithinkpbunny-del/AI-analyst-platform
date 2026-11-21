@@ -71,6 +71,8 @@ export interface UsageSummary {
   notes: string[]
   /** When the finished month was frozen, or null while it is still a live draft. */
   frozen_at: string | null
+  /** The month has not ended yet in the workspace's time zone (M19). */
+  in_progress: boolean
 }
 
 const query = (month?: string) => (month ? `?month=${encodeURIComponent(month)}` : '')

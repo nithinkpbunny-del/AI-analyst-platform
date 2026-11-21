@@ -59,3 +59,16 @@ def test_memory_store() -> None:
     store.delete("orgs/a/x")
     with pytest.raises(ObjectNotFound):
         store.get("orgs/a/x")
+
+
+def test_without_an_access_key_boto3_uses_the_task_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M19 (docs/DEPLOY_AWS.md): on AWS the ECS task role gives S3 access; empty keys must not be sent."""
+    from app import storage
+    from app.config import Settings
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr("app.storage.boto3.client", lambda _name, **kwargs: seen.update(kwargs))
+    storage.make_s3_client(Settings(_env_file=None, s3_access_key="", s3_secret_key=""))
+    assert seen["aws_access_key_id"] is None and seen["aws_secret_access_key"] is None
+    storage.make_s3_client(Settings(_env_file=None, s3_access_key="AKIAX", s3_secret_key="s"))
+    assert seen["aws_access_key_id"] == "AKIAX"

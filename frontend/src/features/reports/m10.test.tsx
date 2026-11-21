@@ -159,6 +159,61 @@ describe('Briefings', () => {
     )
   })
 
+  it('keeps "Send me a briefing now" disabled until the queued briefing is finished', async () => {
+    const queued = {
+      id: 'run-now',
+      scheduled_for: '2026-11-21T06:00:00Z',
+      kind: 'test' as const,
+      status: 'queued' as const,
+      sent_at: null,
+      report_id: null,
+      headline: null,
+      error_code: null,
+    }
+    let state: 'none' | 'running' | 'sent' = 'none'
+    const api = routes({
+      'POST /briefings/send-now': () => {
+        state = 'running'
+        return { status: 202, body: queued }
+      },
+      'GET /briefings': () => ({
+        status: 200,
+        body: {
+          runs: [
+            ...(state === 'none'
+              ? []
+              : [
+                  state === 'sent'
+                    ? {
+                        ...queued,
+                        status: 'sent',
+                        sent_at: '2026-11-21T06:01:00Z',
+                        report_id: 'rep-briefing',
+                      }
+                    : { ...queued, status: 'running' },
+                ]),
+            ...demoRuns,
+          ],
+        },
+      }),
+    })
+    renderApp('/briefings')
+    await userEvent.click(await screen.findByRole('button', { name: 'Send me a briefing now' }))
+    const busy = await screen.findByRole('button', { name: 'Making your briefing…' })
+    expect(busy).toBeDisabled()
+    expect(screen.queryByText(/Waiting|Being made/, { selector: '[role="alert"] *' })).toBeNull()
+    state = 'sent'
+    expect(
+      await screen.findByText(
+        'Your briefing is ready. It is in your inbox and below.',
+        {},
+        { timeout: 5000 },
+      ),
+    ).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Send me a briefing now' })).toBeEnabled()
+    expect(api.count('POST /briefings/send-now')).toBe(1)
+  }, 10000)
+
   it('turns briefings off', async () => {
     const api = routes({
       'PUT /briefings/settings': {

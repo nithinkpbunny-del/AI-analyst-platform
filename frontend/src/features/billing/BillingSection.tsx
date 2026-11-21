@@ -192,8 +192,10 @@ function Summary({ current }: { current: string }) {
           <p className="m-0 mt-3 text-small text-ink-muted">
             {data.frozen_at
               ? t('billing.summary.frozen', { date: formatDate(data.frozen_at) })
-              : t('billing.summary.draft')}{' '}
-            {data.plan.name}
+              : data.in_progress
+                ? t('billing.summary.draft')
+                : t('billing.summary.closing')}{' '}
+            {t('billing.summary.plan', { plan: data.plan.name })}
           </p>
           <table className="mt-2 w-full border-collapse text-small">
             <caption className="sr-only">{t('billing.summary.title')}</caption>

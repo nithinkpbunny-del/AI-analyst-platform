@@ -45,7 +45,8 @@ services:
 
   worker:
     <<: *backend
-    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=INFO
+    # Reads both queues: questions first-class, everything else on the default queue (DECISIONS D122).
+    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=INFO -Q questions,celery
 
   beat:
     <<: *backend

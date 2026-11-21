@@ -178,10 +178,12 @@ def _month(org: Organization, tenant: Tenant, value: str | None) -> Any:
 )
 def get_summary(tenant: ManageOrg, month: MONTH = None) -> SummaryOut:
     org = _org(tenant)
-    body, frozen_at = summary.for_month(tenant.db, org, _month(org, tenant, month))
+    chosen = _month(org, tenant, month)
+    body, frozen_at = summary.for_month(tenant.db, org, chosen)
     return SummaryOut(
         **{**body, "lines": [SummaryLineOut(**line) for line in body["lines"]]},
         frozen_at=frozen_at,
+        in_progress=tenant.service.clock() < chosen.end,
     )
 
 

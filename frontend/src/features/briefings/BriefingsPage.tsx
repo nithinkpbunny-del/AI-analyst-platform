@@ -16,6 +16,7 @@ import {
   type Frequency,
 } from '../../lib/reportsApi'
 import { BRIEFING_SETTINGS, BRIEFINGS } from './keys'
+import { useSendBriefingNow } from './useSendBriefingNow'
 
 const ZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'UTC']
 
@@ -125,6 +126,12 @@ function SettingsForm({ settings }: { settings: BriefingSettings }) {
   )
 }
 
+const WORKING_POLL_MS = 3000
+
+function isWorkingTest(run: BriefingRun): boolean {
+  return run.kind === 'test' && (run.status === 'queued' || run.status === 'running')
+}
+
 function runText(t: ReturnType<typeof useTranslation>['t'], run: BriefingRun): string {
   if (run.status === 'skipped' || run.status === 'failed') {
     const reason = t(`briefings.reasons.${run.error_code ?? 'internal'}`, {
@@ -140,25 +147,28 @@ function runText(t: ReturnType<typeof useTranslation>['t'], run: BriefingRun): s
 /** ``/briefings``: my briefing settings, "send me one now" and past briefings (BUILD_SPEC 11, R10). */
 export function BriefingsPage() {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
   useEffect(() => {
     document.title = `${t('pages.briefings.title')} · ${t('app.name')}`
   }, [t])
   const settings = useQuery({ queryKey: BRIEFING_SETTINGS, queryFn: reportsApi.briefingSettings })
-  const runs = useQuery({ queryKey: BRIEFINGS, queryFn: reportsApi.briefings })
+  const runs = useQuery({
+    queryKey: BRIEFINGS,
+    queryFn: reportsApi.briefings,
+    // A briefing asked for earlier (another tab, before a reload) is still being made: watch it finish.
+    refetchInterval: (query) =>
+      query.state.data?.runs.some(isWorkingTest) ? WORKING_POLL_MS : false,
+  })
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
-  const sendNow = useMutation({
-    mutationFn: reportsApi.sendBriefingNow,
-    onSuccess: (run) => {
+  const sendNow = useSendBriefingNow({
+    onFinished: (run) =>
       setNotice(
         run.status === 'sent'
           ? { tone: 'success', text: t('briefings.sentNow') }
           : { tone: 'error', text: runText(t, run) },
-      )
-      void queryClient.invalidateQueries({ queryKey: BRIEFINGS })
-    },
+      ),
     onError: (error) => setNotice({ tone: 'error', text: error.message }),
   })
+  const busy = sendNow.busy || Boolean(runs.data?.runs.some(isWorkingTest))
   const data = settings.data
   return (
     <div className="max-w-conversation">
@@ -188,8 +198,15 @@ export function BriefingsPage() {
       <section className="mt-6 flex flex-col gap-2">
         {notice ? <FormAlert tone={notice.tone}>{notice.text}</FormAlert> : null}
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="secondary" disabled={sendNow.isPending} onClick={() => sendNow.mutate()}>
-            {sendNow.isPending ? t('today.briefing.sending') : t('briefings.sendNow')}
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              setNotice(null)
+              sendNow.send()
+            }}
+          >
+            {busy ? t('today.briefing.sending') : t('briefings.sendNow')}
           </Button>
           <span className="text-caption text-ink-muted">{t('briefings.sendNowHint')}</span>
         </div>

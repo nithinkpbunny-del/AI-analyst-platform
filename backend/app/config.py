@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # --- Services ---
     database_url: str = "postgresql+psycopg://app:app@localhost:5432/analyst"
     redis_url: str = "redis://localhost:6379/0"
+    # Database connections kept open per process (API, each worker process), extra ones allowed under load, and
+    # how long a request waits for a free one before it fails (M19 load test; docs/DEPLOY_AWS.md sizes them).
+    db_pool_size: int = Field(default=5, ge=1, le=100)
+    db_max_overflow: int = Field(default=10, ge=0, le=200)
+    db_pool_timeout_seconds: int = Field(default=30, ge=1, le=120)
 
     # --- Object storage (S3-compatible) ---
     s3_endpoint: str = "http://localhost:9000"
@@ -59,6 +64,10 @@ class Settings(BaseSettings):
     password_reset_minutes: int = Field(default=60, ge=5)
     # Refresh/CSRF cookies get the "Secure" flag. "auto": on unless API_BASE_URL is plain http://localhost.
     cookie_secure: Literal["auto", "true", "false"] = "auto"
+    # Proxies in front of the API that append the caller's address to X-Forwarded-For (AWS: 1 for the load
+    # balancer). 0 = trust no forwarding header and use the connecting address (local development). Wrong values
+    # let callers choose their own IP for rate limits and the activity log, so set it to exactly the hops you run.
+    trusted_proxy_hops: int = Field(default=0, ge=0, le=5)
     # Version of the privacy policy + terms a new user accepts at sign-up (stored in ``consents``).
     policy_version: str = "2026-11-09"
 

@@ -26,6 +26,11 @@ JWT = (
         ),
         ("key sk-ant-api03-abcdefghijklmnopqrstuv end", "sk-ant-api03-abcdefghijklmnopqrstuv"),
         ("razorpay rzp_live_AbCdEfGh12345678", "rzp_live_AbCdEfGh12345678"),
+        (
+            "{'authorization': 'Zoho-oauthtoken 1000.0123456789abcdef0123.fedcba9876543210ff'}",
+            "0123456789abcdef0123",
+        ),
+        ("refresh 1000.aaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbb", "aaaaaaaaaaaaaaaaaaaa"),
         ("connect postgresql://app:hunter2hunter2@db:5432/x failed", "hunter2hunter2"),
         ("password=correct-horse-battery", "correct-horse-battery"),
         ('{"api_key": "abc123def456"}', "abc123def456"),

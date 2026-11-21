@@ -28,6 +28,10 @@ from app.models import BillingEvent, Organization
 
 logger = logging.getLogger(__name__)
 
+# A month is frozen this long after it ends (in the workspace's time zone), so a question answered on the stroke
+# of midnight is already counted (D127). The beat job runs every 15 minutes.
+FREEZE_GRACE = timedelta(minutes=5)
+
 NOTE = "Billing is not switched on: this is a usage summary, not an invoice. No payment is taken and no price is set yet."
 
 
@@ -227,7 +231,11 @@ def close_months(rt: ConnectorRuntime, now: datetime) -> int:
                     db.commit()
                     continue
                 month = previous_month(org, now)
-                if org.created_at >= month.end or frozen(db, org_id, month) is not None:
+                if (
+                    now < month.end + FREEZE_GRACE
+                    or org.created_at >= month.end
+                    or frozen(db, org_id, month) is not None
+                ):
                     db.commit()
                     continue
                 body = build(db, org, month)

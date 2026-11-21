@@ -9,7 +9,8 @@
   ``org.deleted`` stays in the activity log: no names, only counts and dates.
 
 People's accounts are not deleted with a workspace: an account is global and may belong to other workspaces
-(DECISIONS D85). The activity log is append-only by design, so earlier entries of the workspace stay (D85).
+(D85, final in D124). The workspace's earlier activity-log entries are kept, anonymised (``anonymise_activity``):
+what happened and when stays; who, from where and on what goes.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session as DbSession
 
 from app.audit import writer as audit
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 GRACE = timedelta(days=7)
 NO_META = audit.RequestMeta(None, None)
+ANONYMISED_DETAILS = '{"anonymised": true}'
 
 
 def due_at(org: Organization) -> datetime | None:
@@ -86,6 +88,8 @@ def purge(rt: ConnectorRuntime, org_id: uuid.UUID, now: datetime) -> None:
         org = unscoped.get(Organization, org_id)
         if org is not None:
             unscoped.delete(org)
+            unscoped.flush()
+        anonymised = anonymise_activity(unscoped, org_id)
         audit.write(
             unscoped,
             action="org.deleted",
@@ -94,10 +98,31 @@ def purge(rt: ConnectorRuntime, org_id: uuid.UUID, now: datetime) -> None:
             org_id=org_id,
             target_type="organization",
             target_id=org_id,
-            details={"requested_at": requested.isoformat(), **counts},
+            details={
+                "requested_at": requested.isoformat(),
+                **counts,
+                "activity_entries_anonymised": anonymised,
+            },
         )
         unscoped.commit()
     logger.info("deleted a workspace after its grace period")
+
+
+def anonymise_activity(db: DbSession, org_id: uuid.UUID) -> int:
+    """Keep a deleted workspace's earlier activity-log entries, without who, where or what (D124, the final D85):
+    the action and its time stay, so the record of what happened survives; the person, IP, browser, target and
+    details go. Only possible once the workspace row is gone (the database trigger checks, migration 0018)."""
+    db.execute(text("SET LOCAL app.audit_anonymise = 'on'"))
+    result = db.execute(
+        text(
+            "UPDATE audit_log SET user_id = NULL, ip = NULL, user_agent = NULL, target_id = NULL, "
+            "details = CAST(:anonymised AS jsonb) "
+            "WHERE org_id = :org_id AND details <> CAST(:anonymised AS jsonb)"
+        ),
+        {"org_id": org_id, "anonymised": ANONYMISED_DETAILS},
+    )
+    db.execute(text("SET LOCAL app.audit_anonymise = 'off'"))
+    return int(getattr(result, "rowcount", 0) or 0)
 
 
 def _count(db: DbSession, model: Any, org_id: uuid.UUID) -> int:

@@ -270,6 +270,8 @@ def _write(
     # The goals' early warning is never lost: when the AI left them out, code writes them (X7).
     if facts.goals and not written.sections.get("goals"):
         written.sections["goals"] = writer.goal_sentences(facts.goals)
+    # Each point once: an alert is not repeated under "Upcoming risks", nor any item twice (M19).
+    written.sections = writer.without_repeats(written.sections, facts)
     return written
 
 

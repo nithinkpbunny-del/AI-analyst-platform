@@ -33,12 +33,14 @@ router = APIRouter(prefix="/briefings", tags=["briefings"])
 
 Mine = Annotated[Tenant, requires(Permission.SHARED_VIEW)]
 SEND_NOW_PER_HOUR = 3
+# A requested briefing counts as "still being made" for this long (the worker's limit for one briefing).
+IN_PROGRESS_WINDOW = timedelta(minutes=10)
 LIST_LIMIT = 60
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
     401: {"description": "Not signed in"},
     403: {"description": "Owners must turn on two-step verification first"},
-    409: {"description": "The workspace is being deleted"},
+    409: {"description": "The workspace is being deleted, or your briefing is still being made"},
     422: {"description": "Validation error"},
     429: {"description": "Too many briefings asked for this hour"},
 }
@@ -160,6 +162,25 @@ def send_now(request: Request, tenant: Mine) -> BriefingRunOut:
     if tenant.auth.organization.deletion_requested_at is not None:
         raise ApiError(409, "workspace_deleting", "This workspace is being deleted.")
     now = tenant.service.clock()
+    # One at a time (M19): a briefing asked for in the last few minutes that is still queued or being made blocks
+    # another. Older ones do not (a worker that died must not block the button for ever).
+    in_progress = tenant.db.scalar(
+        select(BriefingRun.id)
+        .where(
+            BriefingRun.org_id == tenant.org_id,
+            BriefingRun.user_id == tenant.auth.user.id,
+            BriefingRun.kind == "test",
+            BriefingRun.status.in_(("queued", "running")),
+            BriefingRun.scheduled_for > now - IN_PROGRESS_WINDOW,
+        )
+        .limit(1)
+    )
+    if in_progress is not None:
+        raise ApiError(
+            409,
+            "briefing_in_progress",
+            "Your briefing is still being made. It will be in your inbox in a moment.",
+        )
     limiter = FixedWindowLimiter(
         request.app.state.redis,
         prefix="briefing-now",

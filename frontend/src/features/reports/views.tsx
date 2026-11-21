@@ -50,8 +50,12 @@ function useBriefingSources(
   return useSources(pseudo)
 }
 
-function metricLabel(metric: string): string {
-  return { revenue: 'Revenue', orders: 'Orders', aov: 'Average order value' }[metric] ?? metric
+function metricLabel(kpi: KpiFact): string {
+  if (kpi.label) return kpi.label
+  // Briefings made before M19 have no label: the key in words, never "sum_fee".
+  const known = { revenue: 'Revenue', orders: 'Orders', aov: 'Average order value' }[kpi.metric]
+  const text = kpi.metric.replace(/_+/g, ' ').trim()
+  return known ?? (text ? text[0]!.toUpperCase() + text.slice(1) : kpi.metric)
 }
 
 export function KpiRow({ kpis, span = 'week' }: { kpis: KpiFact[]; span?: 'day' | 'week' }) {
@@ -64,7 +68,7 @@ export function KpiRow({ kpis, span = 'week' }: { kpis: KpiFact[]; span?: 'day' 
         <KpiTile
           key={`${kpi.span}-${kpi.metric}`}
           label={t(span === 'week' ? 'today.kpi.week' : 'today.kpi.day', {
-            metric: metricLabel(kpi.metric),
+            metric: metricLabel(kpi),
           })}
           value={kpi.current ?? 0}
           format={kpi.unit === 'INR' ? 'inr' : 'number'}

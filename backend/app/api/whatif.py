@@ -27,6 +27,7 @@ from app.auth.ratelimit import FixedWindowLimiter
 from app.connectors.registry import ConnectorRuntime
 from app.data.cache import DatasetCache
 from app.data.workspace import Workspace
+from app.dictionary import labels
 from app.dictionary import service as dictionary_service
 from app.schemas.whatif import (
     ChannelSourceOut,
@@ -137,7 +138,8 @@ def options(request: Request, tenant: Ask) -> OptionsOut:
 def _metric_options(visible: VisibleDictionary) -> list[MetricOptionOut]:
     dictionary = visible.dictionary
     out: list[MetricOptionOut] = []
-    for key in dictionary.metrics:
+    # Metrics that repeat another one ("sum_total_price" next to "revenue") are left out (M19, D127).
+    for key in labels.distinct_metrics(dictionary):
         try:
             info = metric_info(dictionary, key)
         except AnalyticsError:
@@ -154,14 +156,14 @@ def _metric_options(visible: VisibleDictionary) -> list[MetricOptionOut]:
         if not levers:
             continue
         dimensions = [
-            DimensionOut(table=info.table, column=name, label=column.label)
+            DimensionOut(table=info.table, column=name, label=labels.column_label(entry, name))
             for name, column in entry.columns.items()
             if column.role == "dimension"
         ]
         out.append(
             MetricOptionOut(
                 key=key,
-                label=key.replace("_", " "),
+                label=labels.metric_label(dictionary, key),
                 unit=info.unit,
                 levers=levers,
                 dimensions=dimensions,

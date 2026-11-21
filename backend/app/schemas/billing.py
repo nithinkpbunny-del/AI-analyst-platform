@@ -85,3 +85,5 @@ class SummaryOut(BaseModel):
     status: str
     notes: list[str]
     frozen_at: datetime | None
+    # The month has not ended yet in the workspace's time zone (its numbers can still change).
+    in_progress: bool = False

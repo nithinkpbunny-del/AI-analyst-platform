@@ -221,3 +221,54 @@ class TestSchedule:
         assert schedule.slot_on(datetime(2026, 11, 13, 12, tzinfo=UTC), effective) == datetime(
             2026, 11, 13, 7, 30, tzinfo=UTC
         )
+
+
+class TestEachPointOnce:
+    """M19: "no data after 30 Sep" was said again under "Upcoming risks"."""
+
+    def test_the_stale_quality_warning_does_not_repeat_the_alert(self) -> None:
+        ctx: ToolContext = demo.agent_context()
+        ctx.today = date(2026, 11, 13)
+        key = next(iter(ctx.dictionary.datasets))
+        stale = {
+            "kind": "stale",
+            "severity": "warning",
+            "message": "The newest row is from 30 Sep 2026, 44 days ago. Recent activity may be missing.",
+            "details": {"newest": "2026-09-30", "age_days": 44},
+        }
+        nulls = {"kind": "nulls", "severity": "warning", "message": "12% of city is empty."}
+        ctx.quality = {key: [stale, nulls], "other_table": [nulls, nulls]}
+        facts = briefing_facts.compute(ctx, ctx.access, ctx.visible, reported=set())
+        assert [r["kind"] for r in facts.alerts if r.get("kind") == "stale"] == ["stale"]
+        quality = [r for r in facts.risks if r["kind"] == "quality"]
+        assert [r["issue"] for r in quality] == [
+            "nulls",
+            "nulls",
+        ]  # once per table, no stale repeat
+        written = writer.write_with_code(facts)
+        assert written.sections["alerts"] == [
+            f"{facts.alerts[0]['table']} has no data after 30 Sep."
+        ]
+        assert not any("30 Sep" in item for item in written.sections["risks"])
+
+    def test_repeats_from_the_ai_are_removed(self, end_of_data: briefing_facts.Facts) -> None:
+        sections = {
+            "alerts": ["shopify_orders has no data after 30 Sep [r1]."],
+            "unusual": ["Shopify_orders has no data after 30 Sep."],
+            "risks": [
+                "Orders stopped on 30 Sep 2026; recent sales may be missing.",
+                "Payments: 3% of rows have no amount.",
+                "Payments: 3% of rows have no amount.",
+            ],
+            "health": [],
+        }
+        out = writer.without_repeats(sections, end_of_data)
+        assert out["alerts"] == sections["alerts"]
+        assert out["unusual"] == []
+        assert out["risks"] == ["Payments: 3% of rows have no amount."]
+
+    def test_without_a_stale_alert_risks_about_dates_stay(
+        self, outage: briefing_facts.Facts
+    ) -> None:
+        sections = {"risks": ["Stock of Beauty runs out by 30 Sep."]}
+        assert writer.without_repeats(sections, outage)["risks"] == sections["risks"]

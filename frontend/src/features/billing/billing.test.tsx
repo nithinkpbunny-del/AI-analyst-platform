@@ -106,7 +106,11 @@ describe('Plan and billing in Settings (Owner)', () => {
     expect(within(table).getByText('410')).toBeVisible()
     expect(within(table).getByText('$1.35')).toBeVisible()
     expect(within(table).getByText('₹0 (no price is set yet)')).toBeVisible()
-    expect(billing.getByText(/Draft: this month is still running\./)).toBeVisible()
+    expect(
+      billing.getByText(
+        'Draft: the month is not over yet, so these numbers can still change. Plan: Managed AI.',
+      ),
+    ).toBeVisible()
     expect(billing.getByText('Your own AI key to Managed AI on 2 Nov 2026')).toBeVisible()
     await userEvent.selectOptions(billing.getByLabelText('Month'), '2026-10')
     await waitFor(() =>
@@ -122,6 +126,22 @@ describe('Plan and billing in Settings (Owner)', () => {
         true,
       ),
     )
+  })
+
+  it.each([
+    [
+      { in_progress: false, frozen_at: null },
+      'This month has ended. Its final summary is saved within a few minutes. Plan: Managed AI.',
+    ],
+    [
+      { in_progress: false, frozen_at: '2026-12-01T00:10:00+05:30' },
+      'Final summary, saved on 1 Dec 2026. Plan: Managed AI.',
+    ],
+  ])('says whether a month is final (%o)', async (state, words) => {
+    routes({ 'GET /org/billing/summary': { status: 200, body: { ...demoSummary, ...state } } })
+    renderApp('/settings')
+    const billing = await section()
+    expect(await billing.findByText(words)).toBeVisible()
   })
 
   it('lists what billing recorded in plain words and says nothing was sent', async () => {
